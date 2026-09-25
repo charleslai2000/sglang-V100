@@ -145,6 +145,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 PYTHONPATH="$PWD/python" PORT=30000 \
 
 #### Serve Qwen3.8 Flash Next NVFP4 from Docker
 
+The command below keeps MTP and image input enabled. It supports two requests
+near the 262,144-token context limit, or up to four shorter requests at once.
+
 On a Linux host with four V100 32 GB GPUs, a CUDA 12.8-compatible NVIDIA
 driver, and
 [Docker configured with the NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker),
@@ -197,11 +200,14 @@ docker run --rm -it --name qwen38-flash-next-mtp-v4 \
   --tensor-parallel-size 4 \
   --host 127.0.0.1 \
   --port 8082 \
-  --mem-fraction-static 0.80 \
+  --mem-fraction-static 0.84 \
   --context-length 262144 \
-  --max-running-requests 1 \
-  --chunked-prefill-size 8192 \
-  --cuda-graph-bs 1 \
+  --max-total-tokens 540672 \
+  --max-running-requests 4 \
+  --max-mamba-cache-size 24 \
+  --chunked-prefill-size 2048 \
+  --cuda-graph-max-bs 4 \
+  --cuda-graph-bs 1 2 4 \
   --mamba-scheduler-strategy extra_buffer \
   --mamba-full-memory-ratio 0.2 \
   --speculative-algorithm EAGLE \
@@ -235,6 +241,37 @@ For target-only mode, choose another container name and omit the five
 speculative arguments. The API is at `http://127.0.0.1:8082/v1`; the host
 commands use port 30000.
 The v4 image includes FFmpeg for video decoding.
+
+#### Two full-context requests and up to four shorter requests
+
+The Docker command above uses the tested concurrent MTP configuration on four
+V100 32 GB GPUs. It retains the full per-request context and image input.
+
+`--max-total-tokens` is a shared KV pool, so the four requests cannot each
+reach 262,144 tokens at once. The extra-buffer Mamba scheduler needs five cache
+slots per live request; 24 slots allow four live requests with a small margin.
+`--max-running-requests` sets the server-side concurrency cap; a harness-side
+`max-num-seq` setting alone does not change the server capacity.
+The CUDA graphs cover batch sizes 1, 2 and 4; capturing only batch size 1
+leaves multi-request decode on the slower eager path.
+Image tokens and generated tokens count toward each request's 262,144-token
+limit and the shared KV pool; leave room for the answer when sending a long
+text-and-image prompt.
+
+On September 25, 2026, this MTP configuration completed two concurrent
+261,120-input/512-output requests (261,632 tokens each) without OOM. Four
+1,024-input/512-output requests all decoded together at 199.7 aggregate
+output tok/s over the run. Four 8,192-input/1,024-output requests completed
+at 120.0 aggregate output tok/s; the fourth briefly queued during prefill.
+Four 65,536-input/512-output requests also completed. Each of four concurrent
+image requests correctly identified the content of three input images.
+Two simultaneous image requests with 259,644 prompt tokens each also passed;
+GPU 0 had 1,017 MiB free at its measured peak. See the
+[MTP concurrency and image measurements](benchmark/qwen38_nvfp4_v100_full_context_mtp_concurrency_20260925/README.md).
+GPU 0 can use more memory when processing images, so monitor its free memory
+for your image sizes and request mix. The test container's main server process
+used about 810 MiB on GPU 0 in addition to the TP0 scheduler, accounting for
+most of its observed imbalance.
 
 See [Docker/host validation](benchmark/qwen38_nvfp4_v100_docker_v4_20260908/README.md),
 [image/video validation](benchmark/qwen38_nvfp4_v100_multimodal_20260909/README.md),
