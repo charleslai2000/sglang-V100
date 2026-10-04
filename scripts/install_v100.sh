@@ -230,16 +230,130 @@ for root in site.getsitepackages():
     for artifact in (Path(root) / "sgl_kernel").glob("*/common_ops*.so"):
         artifact.unlink()
 PY
-export CMAKE_ARGS="-DSGL_KERNEL_V100_ONLY=ON -DSGL_KERNEL_COMPILE_THREADS=$NVCC_THREADS"
-python -m pip install --no-deps --no-build-isolation "$REPO_ROOT/sgl-kernel"
+# The kernel build fetches several pinned upstream repositories. A failed
+# `git clone` of any of them aborts the whole wheel. The helper below verifies
+# the exact CMake pin before reusing a local checkout or preparing an isolated
+# pinned source when that checkout contains unrelated modifications.
+kernel_dep_pairs() {
+  python3 - "$REPO_ROOT/sgl-kernel/CMakeLists.txt" <<'PY'
+import re, sys
+
+text = open(sys.argv[1]).read()
+for name, body in re.findall(
+    r"FetchContent_Declare\(\s*([\w-]+)(.*?)\)\s*\n", text, re.S
+):
+    repo = re.search(r"GIT_REPOSITORY\s+\"?([^\s\"]+)", body)
+    tag = re.search(r"GIT_TAG\s+([^\s]+)", body)
+    if repo and tag:
+        print(f"{name.upper()}|{repo.group(1)}|{tag.group(1)}")
+PY
+}
+
+prepare_kernel_dep() {
+  local name=$1 url=$2 rev=$3 destination=$4 attempt checked_out seed
+  # Reuse previously prepared pinned checkouts by their explicit name. Never
+  # reset or otherwise mutate those shared dependency repositories.
+  case "$name" in
+    REPO-CUTLASS) seed="$DEPS_ROOT/cutlass-turbomind" ;;
+    REPO-FMT) seed="$DEPS_ROOT/sgl-kernel-repo-fmt" ;;
+    REPO-TRITON) seed="$DEPS_ROOT/sgl-kernel-repo-triton" ;;
+    REPO-FLASHINFER) seed="$DEPS_ROOT/flashinfer-sm70" ;;
+    REPO-FLASH-ATTENTION) seed="$DEPS_ROOT/sgl-kernel-repo-flash-attention" ;;
+    REPO-MSCCLPP) seed="$DEPS_ROOT/sgl-kernel-repo-mscclpp" ;;
+    *) seed="" ;;
+  esac
+  if [[ -n "$seed" ]] && [[ -d "$seed/.git" ]]; then
+    checked_out="$(git -C "$seed" rev-parse "${rev}^{commit}" 2>/dev/null || true)"
+    if [[ -n "$checked_out" ]] &&
+      git -C "$seed" cat-file -e "${checked_out}^{tree}" 2>/dev/null; then
+      destination="$seed"
+    fi
+  fi
+  if [[ -d "$destination/.git" ]]; then
+    checked_out="$(git -C "$destination" rev-parse "${rev}^{commit}" 2>/dev/null || true)"
+    if [[ -n "$checked_out" ]] &&
+      git -C "$destination" cat-file -e "${checked_out}^{tree}" 2>/dev/null; then
+      if [[ "$(git -C "$destination" rev-parse HEAD 2>/dev/null || true)" != "$checked_out" ]]; then
+        if [[ -n "$(git -C "$destination" status --porcelain 2>/dev/null || true)" ]]; then
+          log "Preserving $name worktree changes; preparing an isolated pinned source copy"
+          destination="${destination}-sglang-v100-${rev:0:12}"
+          local isolated_head
+          isolated_head="$(git -C "$destination" rev-parse HEAD 2>/dev/null || true)"
+          if [[ -n "$isolated_head" ]]; then
+            if [[ -n "$(git -C "$destination" status --porcelain 2>/dev/null || true)" ]]; then
+              warn "$name isolated source copy is dirty; refusing to overwrite it"
+              return 1
+            fi
+            checked_out="$(git -C "$destination" rev-parse "${rev}^{commit}" 2>/dev/null || true)"
+            if [[ -z "$checked_out" ]] || [[ "$isolated_head" != "$checked_out" ]]; then
+              warn "$name isolated checkout is not at required pin $rev"
+              return 1
+            fi
+          else
+            git -C "$seed" worktree add --detach --no-checkout "$destination" "$rev" || return 1
+            git -C "$destination" checkout --detach "$rev" || return 1
+            checked_out="$(git -C "$destination" rev-parse HEAD 2>/dev/null || true)"
+          fi
+          log "Using isolated pinned $name source at $destination"
+        else
+          git -C "$destination" checkout --detach "$checked_out" || return 1
+        fi
+      fi
+      log "Reusing $name checkout at $rev from $destination"
+      PREPARED_KERNEL_DEP_DIR="$destination"
+      return 0
+    fi
+  fi
+  for attempt in 1 2 3 4 5; do
+    log "Preparing $name at $rev (attempt $attempt)"
+    rm -rf "$destination"
+    if git clone --filter=blob:none --no-checkout "$url" "$destination" &&
+      git -C "$destination" fetch --depth 1 origin "$rev" &&
+      git -C "$destination" checkout --detach FETCH_HEAD; then
+      git -C "$destination" submodule update --init --recursive ||
+        warn "$name submodule update did not complete; continuing"
+      PREPARED_KERNEL_DEP_DIR="$destination"
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
 
 log "Restoring the CUDA 12 NCCL required by torch 2.9.1"
 python -m pip uninstall -y nvidia-nccl-cu13 || true
 python -m pip install --force-reinstall --no-deps nvidia-nccl-cu12==2.27.5
 
+if [[ "${SGLANG_V100_SKIP_KERNEL_BUILD:-0}" != "1" ]]; then
+  log "Building lean SM70-only sglang-kernel wheel"
+  python -m pip uninstall -y sglang-kernel || true
+  CMAKE_ARGS="-DSGL_KERNEL_V100_ONLY=ON -DSGL_KERNEL_COMPILE_THREADS=$NVCC_THREADS"
+  while IFS='|' read -r kernel_dep_name kernel_dep_url kernel_dep_rev; do
+    [[ -n "$kernel_dep_name" ]] || continue
+    [[ "$kernel_dep_name" == REPO-MSCCLPP ]] && continue
+    kernel_dep_dir="$DEPS_ROOT/sgl-kernel-$(printf '%s' "$kernel_dep_name" | tr '[:upper:]' '[:lower:]')"
+    if prepare_kernel_dep "$kernel_dep_name" "$kernel_dep_url" "$kernel_dep_rev" "$kernel_dep_dir"; then
+      kernel_cmake_name="$(printf '%s' "$kernel_dep_name" | tr '[:lower:]-' '[:upper:]_')"
+      CMAKE_ARGS="${CMAKE_ARGS} -DFETCHCONTENT_SOURCE_DIR_${kernel_cmake_name}=$PREPARED_KERNEL_DEP_DIR"
+    else
+      die "could not prepare $kernel_dep_name at $kernel_dep_rev"
+    fi
+  done < <(kernel_dep_pairs)
+  export CMAKE_ARGS CUDA_HOME CUDACXX=/usr/local/cuda-12.8/bin/nvcc
+  export TORCH_CUDA_ARCH_LIST=7.0
+  python -m pip install --no-deps --no-build-isolation \\
+    -C "cmake.args=$(printf '%s' "$CMAKE_ARGS" | sed 's/ /;/g')" \\
+    "$REPO_ROOT/sgl-kernel"
+else
+  log "Reusing the previously built SM70-only sglang-kernel wheel"
+fi
+
 log "Building V100 Marlin GPTQ/AWQ kernels"
 export MARLIN_V100_REPO="${MARLIN_V100_REPO:-$DEPS_ROOT/marlin-v100}"
 export MARLIN_V100_REF="${MARLIN_V100_REF:-6d72a49939701d26b15b617a4cd2423174adb2d1}"
+# CUDA 12.8 now declares the BF16 vector helpers used by the V100 shim; do not
+# apply the older duplicate-declaration compatibility patch on this toolchain.
+export MARLIN_V100_SKIP_BF16_COMPAT=1
 bash "$REPO_ROOT/scripts/setup_v100_marlin.sh"
 
 log "Running SM70 smoke checks and precompiling first-chat sampling"
