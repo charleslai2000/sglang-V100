@@ -61,7 +61,14 @@ class GPTQLinearScheme(GPTQLinearSchemeBase):
             if self.quant_config.group_size != -1
             else input_size
         )
-        self.kernel.use_shuffle = True
+        # The SM70 shuffle GEMM accumulates each K-split partial in FP16.
+        # Activation-ordered Falcon-H1 can exceed that partial-sum range; use
+        # the existing g_idx-aware non-shuffle path, which accumulates safely.
+        self.kernel.use_shuffle = not (
+            self.quant_config.desc_act
+            and torch.cuda.is_available()
+            and torch.cuda.get_device_capability()[0] < 8
+        )
         scale_and_zero_size = input_size // group_size
         scale_and_zero_input_dim = None
         if (

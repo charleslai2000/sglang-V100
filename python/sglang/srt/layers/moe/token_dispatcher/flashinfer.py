@@ -25,6 +25,8 @@ from sglang.srt.speculative.spec_info import SpeculativeAlgorithm
 from sglang.srt.utils import get_int_env_var
 
 try:
+    if torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] < 8:
+        raise ImportError("FlashInfer MoE all-to-all is not supported on SM70")
     from flashinfer import nvfp4_block_scale_interleave
     from flashinfer.comm import MoeAlltoAll, moe_a2a_get_workspace_size_per_rank
     from flashinfer.comm.mapping import Mapping

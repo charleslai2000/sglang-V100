@@ -246,14 +246,9 @@ __global__ void gemm_half_q_half_gptq_4bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream before this kernel. Do not clear from
+  // z==0 here: that races with other K-split CTAs' atomicAdd partial sums.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -377,14 +372,9 @@ __global__ void gemm_half_q_half_gptq_2bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream by the dispatcher; no CTA may clear it
+  // here because the K-split partial sums are accumulated with atomicAdd.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -497,14 +487,9 @@ __global__ void gemm_half_q_half_gptq_3bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream by the dispatcher; no CTA may clear it
+  // here because the K-split partial sums are accumulated with atomicAdd.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -620,14 +605,9 @@ __global__ void gemm_half_q_half_gptq_8bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream by the dispatcher; no CTA may clear it
+  // here because the K-split partial sums are accumulated with atomicAdd.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -752,7 +732,10 @@ void gemm_half_q_half_cuda_part(
 
   fp_gemm_half_q_half_gptq_kernel kernel = pick_gemm_half_q_half_gptq_kernel(true, m_count, bit);
 
+  // Initialize the output slice on the launch stream. The kernel accumulates
+  // its K-split partial sums with atomicAdd, so no CTA may clear C.
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaMemsetAsync(c, 0, size_m * size_n * sizeof(half), stream);
   kernel<<<gridDim, blockDim, 0, stream>>>(
       a, b_q_weight, b_gptq_qzeros, b_gptq_scales, c, size_m, size_n, size_k, groups, b_q_perm);
 }
@@ -1275,10 +1258,8 @@ __global__ void gemm_half_q_half_alt_4bit_kernel(
     deq2[val][off] = __halves2half2(__int2half_rn(val & 0xF), __int2half_rn(val >> 4));
   }
 
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < b_end; m++)
-      mul[(b + m) * width + w] = __int2half_rn(0);
-  }
+  // Output is zeroed on the launch stream by the dispatcher; the K-split
+  // partial sums are accumulated with atomicAdd, so no CTA may clear it.
   __syncthreads();
 
   int i = width * h + w;
@@ -1357,10 +1338,8 @@ __global__ void gemm_half_q_half_alt_8bit_kernel(
     }
   }
 
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < b_end; m++)
-      mul[(b + m) * width + w] = __int2half_rn(0);
-  }
+  // Output is zeroed on the launch stream by the dispatcher; the K-split
+  // partial sums are accumulated with atomicAdd, so no CTA may clear it.
   __syncthreads();
 
   int i = width * h + w;
@@ -1438,6 +1417,8 @@ void gemm_half_q_half_alt(
   }
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  // Initialize the whole output before the K-split kernel accumulates into it.
+  cudaMemsetAsync(c, 0, (size_t)size_m * size_n * sizeof(half), stream);
   kernel<<<gridDim, blockDim, 0, stream>>>(
       (const half2*)a, b_q_weight, c, b_gptq_scales, b_gptq_qzeros, b_g_idx, size_m, size_k / 32 * bit, size_n);
 }

@@ -157,7 +157,9 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=False,
-            quant_config=quant_config,
+            # Falcon-H1 GPTQ checkpoints keep attention projections in BF16;
+            # only the feed-forward projections use the global GPTQ config.
+            quant_config=None,
             tp_rank=self.attn_tp_rank,
             tp_size=self.attn_tp_size,
         )
@@ -166,7 +168,7 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
             self.total_num_heads * self.head_dim,
             config.hidden_size,
             bias=False,
-            quant_config=quant_config,
+            quant_config=None,
             reduce_results=False,
             tp_rank=self.attn_tp_rank,
             tp_size=self.attn_tp_size,
@@ -538,24 +540,27 @@ class FalconH1ForCausalLM(nn.Module):
             if "A_log" in name:
                 name = name.replace("A_log", "A")
 
+            original_name = name
             for param_name, weight_name, shard_id in stacked_params_mapping:
-                if weight_name not in name:
+                if weight_name not in original_name:
                     continue
 
-                name = name.replace(weight_name, param_name)
-                # Skip loading extra bias for GPTQ models.
-                if name.endswith(".bias") and name not in params_dict:
+                # Keep the checkpoint name immutable while probing Q/K/V.
+                # Quantized attention candidates may be absent for this mixed
+                # BF16-attention/GPTQ-FFN checkpoint; later probes must not
+                # rewrite an earlier candidate into a bogus parameter name.
+                candidate_name = original_name.replace(weight_name, param_name)
+                if candidate_name.endswith(".bias") and candidate_name not in params_dict:
                     continue
-                # Skip layers on other devices.
-                # if is_pp_missing_parameter(name, self):
-                #     continue
-                if name not in params_dict:
+                if candidate_name not in params_dict:
                     continue
-                param = params_dict[name]
+                param = params_dict[candidate_name]
                 weight_loader = getattr(param, "weight_loader")
                 weight_loader(param, loaded_weight, shard_id)
+                name = candidate_name
                 break
             else:
+                name = original_name
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue

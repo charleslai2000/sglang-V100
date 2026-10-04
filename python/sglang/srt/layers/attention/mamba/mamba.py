@@ -424,6 +424,19 @@ class MambaMixer2(torch.nn.Module):
         ssm_state = layer_cache.temporal
         intermediate_states = None
 
+        # Pre-Ampere devices have no BF16 execution, so this model runs in FP16
+        # there. This checkpoint's SSD output exceeds what FP16 can represent
+        # (verified against a FP32 reference on real weights: |y| up to 1.1e5),
+        # so the scan and the gated norm are computed in FP32 and cast back
+        # before the output projection. The recurrent state is already FP32
+        # (see mamba2_state_dtype).
+        fp32_ssm = (
+            hidden_states.dtype == torch.float16
+            and torch.cuda.is_available()
+            and torch.cuda.get_device_capability()[0] < 8
+        )
+        ssm_dtype = torch.float32 if fp32_ssm else hidden_states.dtype
+
         query_start_loc = metadata.query_start_loc
 
         # 1. Gated MLP's linear projection
@@ -498,7 +511,7 @@ class MambaMixer2(torch.nn.Module):
                 projected_states.shape[0],
                 (self.num_heads * self.head_dim) // self.tp_size,
             ],
-            dtype=hidden_states.dtype,
+            dtype=ssm_dtype,
             device=hidden_states.device,
         )
         preallocated_ssm_out_p, preallocated_ssm_out_d = torch.split(
@@ -560,11 +573,15 @@ class MambaMixer2(torch.nn.Module):
             intermediate_states, varlen_state = mamba_chunk_scan_combined(
                 hidden_states_p.view(
                     1, num_prefill_tokens, self.num_heads // self.tp_size, self.head_dim
-                ),
-                dt_p.unsqueeze(0),
+                ).to(ssm_dtype),
+                dt_p.unsqueeze(0).to(ssm_dtype),
                 self.A,
-                B_p.view(1, num_prefill_tokens, self.n_groups // self.tp_size, -1),
-                C_p.view(1, num_prefill_tokens, self.n_groups // self.tp_size, -1),
+                B_p.view(1, num_prefill_tokens, self.n_groups // self.tp_size, -1).to(
+                    ssm_dtype
+                ),
+                C_p.view(1, num_prefill_tokens, self.n_groups // self.tp_size, -1).to(
+                    ssm_dtype
+                ),
                 chunk_size=mixed_metadata.chunk_size,
                 D=self.D,
                 z=None,
@@ -651,14 +668,14 @@ class MambaMixer2(torch.nn.Module):
                 .expand(-1, self.head_dim, self.ssm_state_size)
                 .to(dtype=torch.float32)
             )
-            dt_d = dt_d[:, :, None].expand(-1, -1, self.head_dim)
+            dt_d = dt_d[:, :, None].expand(-1, -1, self.head_dim).to(ssm_dtype)
             dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
             D_d = self.D[:, None, ...].expand(-1, self.head_dim)
-            B_d = B_d.view(-1, n_groups, B_d.shape[1] // n_groups)
-            C_d = C_d.view(-1, n_groups, C_d.shape[1] // n_groups)
+            B_d = B_d.view(-1, n_groups, B_d.shape[1] // n_groups).to(ssm_dtype)
+            C_d = C_d.view(-1, n_groups, C_d.shape[1] // n_groups).to(ssm_dtype)
             hidden_states_d = hidden_states_d.view(
                 -1, self.num_heads // self.tp_size, self.head_dim
-            )
+            ).to(ssm_dtype)
 
             if is_target_verify:
                 selective_state_update(
@@ -716,6 +733,10 @@ class MambaMixer2(torch.nn.Module):
         # SiLU is applied internally before normalization, unlike standard
         # norm usage
         hidden_states = self.norm(preallocated_ssm_out, gate[:num_actual_tokens])
+        if fp32_ssm:
+            # The output projection follows the model dtype; FP32 above is only
+            # needed for range, and the normed value is well within FP16.
+            hidden_states = hidden_states.to(output.dtype)
 
         # 5. Final linear projection
         output[:num_actual_tokens], _ = self.out_proj(hidden_states)
