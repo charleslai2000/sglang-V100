@@ -668,7 +668,9 @@ class MambaMixer2(torch.nn.Module):
                 .expand(-1, self.head_dim, self.ssm_state_size)
                 .to(dtype=torch.float32)
             )
-            dt_d = dt_d[:, :, None].expand(-1, -1, self.head_dim).to(ssm_dtype)
+            # Cast the per-head base before expansion so FP32 SSU preserves the
+            # tied-head zero-stride representation instead of materializing it.
+            dt_d = dt_d.to(ssm_dtype)[:, :, None].expand(-1, -1, self.head_dim)
             dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
             D_d = self.D[:, None, ...].expand(-1, self.head_dim)
             B_d = B_d.view(-1, n_groups, B_d.shape[1] // n_groups).to(ssm_dtype)

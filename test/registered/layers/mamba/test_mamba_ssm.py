@@ -297,6 +297,44 @@ def test_selective_state_update_with_heads_with_batch_indices(
     assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
 
 
+@pytest.mark.parametrize("itype", [torch.float32, torch.float16])
+@pytest.mark.parametrize("dim,dstate,ngroups", [(128, 256, 1), (256, 128, 2)])
+def test_selective_state_update_tie_hdim_zero_stride(dim, dstate, ngroups, itype):
+    """Exercise the existing TIE_HDIM branch with exact broadcast views."""
+    device = get_device()
+    if device not in ["cuda", "xpu"]:
+        pytest.skip("Test only supports CUDA and XPU devices")
+    torch.manual_seed(20261006)
+    batch, heads = 4, 4
+    state = torch.randn(8, heads, dim, dstate, device=device, dtype=torch.float32)
+    initial = state.clone()
+    state_indices = torch.tensor([1, 3, 4, 6], device=device, dtype=torch.int32)
+    x = torch.randn(batch, heads, dim, device=device, dtype=itype)
+    dt_head = torch.randn(batch, heads, device=device, dtype=itype)
+    A_head = -torch.rand(heads, device=device, dtype=torch.float32) - 0.5
+    bias_head = torch.randn(heads, device=device, dtype=itype)
+    D_head = torch.randn(heads, device=device, dtype=itype)
+    dt = dt_head[..., None].expand(-1, -1, dim)
+    A = A_head[:, None, None].expand(-1, dim, dstate)
+    dt_bias = bias_head[:, None].expand(-1, dim)
+    D = D_head[:, None].expand(-1, dim)
+    B = torch.randn(batch, ngroups, dstate, device=device, dtype=itype)
+    C = torch.randn_like(B)
+    out = torch.empty_like(x)
+    assert A.stride(-1) == A.stride(-2) == dt.stride(-1) == dt_bias.stride(-1) == 0
+
+    selective_state_update(
+        state, x, dt, A, B, C, D=D, dt_bias=dt_bias, dt_softplus=True,
+        state_batch_indices=state_indices, out=out
+    )
+    state_ref = initial[state_indices.long()].clone()
+    out_ref = selective_state_update_ref(
+        state_ref, x, dt, A, B, C, D=D, dt_bias=dt_bias, dt_softplus=True
+    )
+    assert torch.allclose(state[state_indices.long()], state_ref, rtol=5e-3, atol=3e-2)
+    assert torch.allclose(out, out_ref, rtol=5e-3, atol=3e-2)
+
+
 if __name__ == "__main__":
     import sys
 
