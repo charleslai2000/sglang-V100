@@ -158,15 +158,7 @@ if [[ -n "${MARLIN_V100_INSTALL_DIR:-}" ]]; then
   PKG_DIR="$MARLIN_V100_INSTALL_DIR"
   mkdir -p "$PKG_DIR"
 else
-  PKG_DIR="$("$PYTHON" - <<'PY' || die "could not locate sglang.jit_kernel package dir."
-import os
-try:
-    import sglang.jit_kernel as jk
-except Exception as e:
-    raise SystemExit(f"cannot import sglang.jit_kernel: {e}")
-print(os.path.dirname(os.path.abspath(jk.__file__)))
-PY
-)"
+  PKG_DIR="${MARLIN_V100_SOURCE_PACKAGE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../python/sglang/jit_kernel" && pwd)}"
 fi
 DEST="$PKG_DIR/_sm70_marlin_v100_moe.abi3.so"
 cp -f "$SO_MOE" "$DEST"

@@ -167,11 +167,12 @@ prepare_sparse_repo() {
     log "Fetching the attributed $name source subset at $rev"
     mkdir -p "$(dirname "$destination")"
     git clone --filter=blob:none --sparse --no-checkout "$url" "$destination"
-  elif [[ -n "$(git -C "$destination" status --porcelain)" ]]; then
-    die "$destination has local changes; move it aside or set SGLANG_V100_DEPS_DIR."
+  elif [[ -n "$(git -C "$destination" ls-files --others --exclude-standard)" ]]; then
+    die "$destination has untracked files; move them aside or set SGLANG_V100_DEPS_DIR."
   fi
 
-  git -C "$destination" sparse-checkout set "$@"
+  # Sparse path arguments can name either files or directories.
+  git -C "$destination" sparse-checkout set --skip-checks "$@"
   if [[ "$(git -C "$destination" rev-parse HEAD 2>/dev/null || true)" != "$rev" ]]; then
     git -C "$destination" fetch origin "$rev"
     git -C "$destination" checkout --detach "$rev"
@@ -269,7 +270,7 @@ prepare_kernel_dep() {
       destination="$seed"
     fi
   fi
-  if [[ -d "$destination/.git" ]]; then
+  if [[ -d "$destination/.git" ]] || [[ -f "$destination/CMakeLists.txt" ]]; then
     checked_out="$(git -C "$destination" rev-parse "${rev}^{commit}" 2>/dev/null || true)"
     if [[ -n "$checked_out" ]] &&
       git -C "$destination" cat-file -e "${checked_out}^{tree}" 2>/dev/null; then
@@ -341,11 +342,12 @@ if [[ "${SGLANG_V100_SKIP_KERNEL_BUILD:-0}" != "1" ]]; then
   done < <(kernel_dep_pairs)
   export CMAKE_ARGS CUDA_HOME CUDACXX=/usr/local/cuda-12.8/bin/nvcc
   export TORCH_CUDA_ARCH_LIST=7.0
-  python -m pip install --no-deps --no-build-isolation \\
-    -C "cmake.args=$(printf '%s' "$CMAKE_ARGS" | sed 's/ /;/g')" \\
+  python -m pip install --no-deps --no-build-isolation \
+    -C "cmake.args=$(printf '%s' "$CMAKE_ARGS" | sed 's/ /;/g')" \
     "$REPO_ROOT/sgl-kernel"
 else
   log "Reusing the previously built SM70-only sglang-kernel wheel"
+  python -c 'import sgl_kernel' || die "SGLANG_V100_SKIP_KERNEL_BUILD=1 but sgl_kernel is not installed; rerun without the skip flag."
 fi
 
 log "Building V100 Marlin GPTQ/AWQ kernels"
