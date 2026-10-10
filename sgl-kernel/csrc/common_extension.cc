@@ -18,6 +18,12 @@ limitations under the License.
 
 #include "sgl_kernel_ops.h"
 
+#ifdef SGL_KERNEL_V100_ONLY
+at::Tensor packed_q4_fp32_candidate(
+    at::Tensor x, at::Tensor qw, at::Tensor qz,
+    at::Tensor scales, at::Tensor gidx, bool return_fp32);
+#endif
+
 TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   /*
    * From csrc/allreduce
@@ -158,6 +164,10 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "gptq_gemm(Tensor a, Tensor b_q_weight, Tensor b_gptq_qzeros, Tensor b_gptq_scales, Tensor b_g_idx, bool "
       "use_shuffle, int bit) -> Tensor");
   m.impl("gptq_gemm", torch::kCUDA, &gptq_gemm);
+#ifdef SGL_KERNEL_V100_ONLY
+  m.def("gptq_q4_fp32_m4_candidate(Tensor a, Tensor b_q_weight, Tensor b_gptq_qzeros, Tensor b_gptq_scales, Tensor b_g_idx, bool return_fp32=False) -> Tensor");
+  m.impl("gptq_q4_fp32_m4_candidate", torch::kCUDA, &packed_q4_fp32_candidate);
+#endif
 
   m.def("gptq_shuffle(Tensor! q_weight, Tensor q_perm, int bit) -> ()");
   m.impl("gptq_shuffle", torch::kCUDA, &gptq_shuffle);

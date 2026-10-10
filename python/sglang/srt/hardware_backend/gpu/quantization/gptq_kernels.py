@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import logging
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -42,6 +45,7 @@ def _unsupported_kernel(*args, **kwargs):
 
 gptq_gemm = _unsupported_kernel
 gptq_marlin_repack = _unsupported_kernel
+_g017_dispatch_logged = False
 gptq_shuffle = _unsupported_kernel
 
 try:
@@ -128,15 +132,77 @@ class GPTQLinearKernel:
         out_shape = x.shape[:-1] + (layer.qweight.shape[-1],)
         reshaped_x = x.reshape(-1, x.shape[-1])
 
-        output = gptq_gemm(
-            reshaped_x,
-            layer.qweight,
-            layer.qzeros,
-            layer.scales,
-            layer.g_idx,
-            self.use_shuffle,
-            self.quant_config.weight_bits,
+        candidate_expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
+        candidate_extension_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
+        candidate_enabled = (
+            not self.use_shuffle
+            and 1 <= reshaped_x.shape[0] <= 4
+            and layer.quant_config.weight_bits == 4
+            and reshaped_x.dtype == torch.float16
+            and torch.cuda.is_available()
+            and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
+            and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
         )
+        if candidate_enabled:
+            # Validate the explicitly selected candidate extension, not only its opt-in flag.
+            if not candidate_extension_path:
+                raise RuntimeError(
+                    "G017 candidate is enabled but SGLANG_KERNEL_G017_CANDIDATE_PATH is unset"
+                )
+            loaded_common_ops = __import__("sgl_kernel").common_ops
+            loaded_path = os.path.realpath(loaded_common_ops.__file__)
+            expected_path = os.path.realpath(candidate_extension_path)
+            if loaded_path != expected_path:
+                raise RuntimeError(
+                    f"G017 candidate extension path mismatch: expected {expected_path}, got {loaded_path}"
+                )
+            with open(loaded_path, "rb") as module_file:
+                loaded_sha = hashlib.sha256(module_file.read()).hexdigest()
+            if not candidate_expected_sha:
+                raise RuntimeError(
+                    "G017 candidate is enabled but SGLANG_G017_CANDIDATE_SHA256 is unset"
+                )
+            if loaded_sha != candidate_expected_sha:
+                raise RuntimeError(
+                    f"G017 candidate extension SHA mismatch: expected {candidate_expected_sha}, got {loaded_sha} at {loaded_path}"
+                )
+            global _g017_dispatch_logged
+            if not _g017_dispatch_logged:
+                logging.getLogger(__name__).warning(
+                    "G017 candidate GPTQ dispatch active: path=%s sha256=%s M=%d K=%d N=%d",
+                    loaded_path,
+                    loaded_sha,
+                    reshaped_x.shape[0],
+                    reshaped_x.shape[1],
+                    layer.qweight.shape[-1],
+                )
+                _g017_dispatch_logged = True
+            torch.cuda.nvtx.range_push("G017_CANDIDATE_GPTQ")
+        if candidate_enabled:
+            # Call the registered candidate op directly: the generic sgl_kernel
+            # editable loader can otherwise bind gptq_gemm from another module.
+            output = torch.ops.sgl_kernel.gptq_q4_fp32_m4_candidate(
+                reshaped_x,
+                layer.qweight.to(torch.int32),
+                layer.qzeros.to(torch.int32),
+                layer.scales,
+                layer.g_idx,
+                False,
+            )
+        else:
+            output = gptq_gemm(
+                reshaped_x,
+                layer.qweight,
+                layer.qzeros,
+                layer.scales,
+                layer.g_idx,
+                self.use_shuffle,
+                self.quant_config.weight_bits,
+            )
+        if candidate_enabled:
+            torch.cuda.nvtx.range_pop()
+        if output.dtype != reshaped_x.dtype:
+            output = output.to(reshaped_x.dtype)
         if bias is not None:
             output.add_(bias)
         return output.reshape(out_shape)

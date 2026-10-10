@@ -400,6 +400,9 @@ endif()
 # =========================== Common SM100+ / SM70 Build ============================= #
 # Build SM100+ library with precise math (same namespace, different directory)
 # When SGL_KERNEL_V100_ONLY: only sm70, skip sm90/sm100 targets
+if (SGL_KERNEL_V100_ONLY)
+    list(APPEND SOURCES "csrc/gemm/gptq/gptq_candidate_v8.cu")
+endif()
 Python_add_library(common_ops_sm100_build MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI ${SOURCES})
 
 target_compile_options(common_ops_sm100_build PRIVATE

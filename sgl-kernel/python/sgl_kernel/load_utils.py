@@ -1,5 +1,6 @@
 import ctypes
 import glob
+import hashlib
 import importlib.util
 import logging
 import os
@@ -74,6 +75,41 @@ def _load_architecture_specific_ops():
         variant_name = "CPU/No GPU detected (using precise math)"
         fallback_subdirs = None
 
+    candidate_enabled = os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
+    candidate_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
+    if candidate_enabled:
+        if not candidate_path:
+            raise ImportError("G017 candidate enabled but SGLANG_KERNEL_G017_CANDIDATE_PATH is unset")
+        candidate_path = Path(candidate_path).resolve()
+        if not candidate_path.is_file():
+            raise ImportError(f"G017 candidate extension does not exist: {candidate_path}")
+        sha = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+        expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
+        if not expected_sha:
+            raise ImportError("G017 candidate enabled but SGLANG_G017_CANDIDATE_SHA256 is unset")
+        if sha != expected_sha:
+            raise ImportError(
+                f"G017 candidate extension SHA mismatch: expected {expected_sha}, got {sha}"
+            )
+        spec = importlib.util.spec_from_file_location("common_ops", str(candidate_path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load G017 candidate extension: {candidate_path}")
+        common_ops = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(common_ops)
+        logger.warning(
+            "G017 candidate extension loaded path=%s sha256=%s",
+            common_ops.__file__,
+            sha,
+        )
+        return common_ops
+
+    # A candidate-only path never selects a module when opt-in is disabled.
+    # Normal path is unchanged unless an explicit S1 fallback pin is provided.
+    # This lets a deployment verify the stock runtime module without overriding it.
+    fallback_sha = None
+    if not candidate_enabled and os.environ.get("SGLANG_KERNEL_G017_S1_SHA256"):
+        fallback_sha = os.environ["SGLANG_KERNEL_G017_S1_SHA256"].lower()
+
     # Look for the compiled module with any valid extension
 
     ops_pattern = str(sgl_kernel_dir / ops_subdir / "common_ops.*")
@@ -103,11 +139,19 @@ def _load_architecture_specific_ops():
 
             logger.debug(f"[sgl_kernel] Loading module from {ops_path}...")
             spec.loader.exec_module(common_ops)
+            if fallback_sha:
+                actual_sha = hashlib.sha256(ops_path.read_bytes()).hexdigest()
+                if actual_sha != fallback_sha:
+                    raise ImportError(
+                        f"Frozen S1 SHA mismatch: expected {fallback_sha}, got {actual_sha} at {ops_path}"
+                    )
             logger.debug(f"[sgl_kernel] ✓ Successfully loaded {variant_name}")
             logger.debug(f"[sgl_kernel] ✓ Module file: {common_ops.__file__}")
             return common_ops
 
         except Exception as e:
+            if fallback_sha and "Frozen S1 SHA mismatch" in str(e):
+                raise
             previous_import_errors.append(e)
             logger.debug(
                 f"[sgl_kernel] ✗ Failed to load from {ops_path}: {type(e).__name__}: {e}"
