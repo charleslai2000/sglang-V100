@@ -1,0 +1,37 @@
+{
+  "schema": "g018-hardware-evidence-v1",
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "target_index_at_check": 1,
+  "other_gpu_uuid_not_targeted": "GPU-04ad2dd9-245d-0e7b-c96a-12da83a92b99",
+  "tool": {"path": "/usr/local/cuda/bin/ncu", "version": "2025.1.1.0", "chip": "GV100"},
+  "prior_g016_authority": {
+    "report": "/tmp/g016-root-ncu.ncu-rep",
+    "sha256": "aed3156bdf2e237279711bc10bcb239ece64c5a1b980760398fd6f9233ada835",
+    "capture_time": "2026-10-08 00:14 local (file metadata)",
+    "kernel": "g016_probe(const float *, const float *, float *, int)",
+    "device": "Tesla V100-SXM2-16GB, CC 7.0",
+    "profiling_user": "root",
+    "permission": "root NCU demonstrated readable SM/Tensor/DRAM/L2/occupancy/warp-stall metric families; RmProfilingAdminOnly=1 unchanged"
+  },
+  "current_authority": {
+    "profile_user": "charles; sudo -n successful for narrowly scoped ncu",
+    "driver_parameter": "RmProfilingAdminOnly: 1",
+    "cuda_visible_devices": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+    "nvidia_smi_index_mapping": {"index_0": "GPU-04ad2dd9-245d-0e7b-c96a-12da83a92b99", "index_1": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189"},
+    "ncu_query_metrics": "success under sudo; GV100 metrics enumerated",
+    "real_gptq_op_without_ncu": "G018 fresh process invoked /mnt/data/pc01/sglang-v100-migration/logs/ncu-gptq-smoke.py successfully, target UUID visible only",
+    "service_process_pids": "stopped; target V100 idle at last check before current run",
+    "profiling_resource_ownership": "verified operational through G016 documented root NCU authority; current only G018 capture was isolated local GPTQ fixture. No service process running during NCU captures; no claim of active exclusive profiler reservation beyond each capture."
+  },
+  "ncu_real_decode_collection": {
+    "status": "COLLECTED_FIXTURE_ONLY",
+    "report_path_s1": "/tmp/g018-s1-gptq-full.ncu-rep",
+    "sha256_s1": "432675f3506e6c38d90cd1bece8721c27aa5e84ddb9cb87457bc6f070c9d047b",
+    "report_path_candidate": "/tmp/g018-c57-gptq-full.ncu-rep",
+    "sha256_candidate": "718e9562f17190c2cd2544ac548dce40031f5706fc6e7abe5b30328bb278a04e",
+    "kernel_match": "one launch of gemm_half_q_half_alt_4bit_kernel from synthetic Q4/G128 M=1,K=N=4096 sgl_kernel.gptq_gemm fixture per mode; exact kernel name and CC7.0 in reports",
+    "metrics": "explicit metrics in G018-final-audit.md; not Falcon serving or whole-model data",
+    "failure_evidence": "not a permission failure under root; full graph/service owner collection not attempted because this capture path is fixture-only and Nsys remains deferred"
+  },
+  "dcgm": {"dcgmi_present": false, "service_state": "inactive", "action": "not started; no global configuration changed"}
+}
