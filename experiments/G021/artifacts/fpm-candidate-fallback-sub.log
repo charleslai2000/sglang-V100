@@ -1,0 +1,2 @@
+G017 candidate extension loaded path=/mnt/data/pc01/sglang-v100-migration/experiments/E026/g017-close-final-sm70.so sha256=c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9
+{"endpoint": "ipc:///mnt/data/pc01/sglang-v100-migration/cache/tmp/tmpmtacjikv.0", "count": 6, "output": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/fpm-candidate-fallback.json"}
