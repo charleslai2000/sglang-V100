@@ -1,3 +1,8 @@
-# Active frontier
+# Current frontier
 
-No active work. G020 is finalized as PARTIAL; G016–G019 remain closed or deferred per their own control records.
+## G014-s4-m3-c4-gptq-residual
+- T001 Authoritative c4 GPTQ qualification — READY
+  - frontier: resume authorized S4-M3C small-M GPTQ kernel optimization using local V100 + validated root NCU; preserve rejection of shuffled donor. G016 local Falcon/NCU authority is READY; Falcon Nsys server trace DEFERRED / NOT QUALIFIED.
+  - task: `G014-s4-m3-c4-gptq-residual/tasks/T001-authoritative-c4-gptq-qualification.md`
+
+G020 is finalized as PARTIAL; G018/G019 are closed PARTIAL. No active task remains for those Goals.
