@@ -1,10 +1,10 @@
 # Current frontier
 
 ## G021-v100-hardware-utilization
-- T001 Hardware utilization — ACTIVE
-  - frontier: S1/Candidate dispatch-verified service matrices, target NVML windows and real Falcon GPTQ M4 NCU fixture measurements are captured; close remaining live Graph/owner attribution, FPM zero-record diagnosis and R17 queue/cache/E2E gaps with explicit unsupported dispositions where needed.
+- T001 R17 Inference Performance Metrics V1 — ACTIVE
+  - frontier: frozen contract expands G021. First forensic the FPM zero-record publisher/IPC/subscriber lifecycle; then obtain worker/request timeline provenance before broad service/hardware/cache/owner matrices. Existing S1/Candidate, NVML and fixture NCU evidence remains partial.
   - task: `control/G021-v100-hardware-utilization/tasks/T001-hardware-utilization.md`
-  - unblock/reopen: resource release verified; maintain host MemAvailable >=8GiB and target UUID ownership. Do not alter host policy, G017, or unrelated work.
+  - unblock/reopen: Prior resource gate/resume authorization remains; maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
 
 ## G018-local-v100-falcon-h1-gpu-audit
 - T001 Profile ledger and resource audit — ACTIVE
