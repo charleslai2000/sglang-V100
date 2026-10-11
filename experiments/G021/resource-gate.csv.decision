@@ -1,0 +1,1 @@
+{'checks': {'authorized_job_absent': True, 'memavailable_min_ge_20GiB': False, 'swapfree_min_ge_36GiB': True, 'disk_available_min_ge_25GiB': False, 'disk_used_max_lt_97pct': False, 'v100_used_max_le_64MiB': True, 'memory_psi_full_zero_final_10_60_300': True}, 'pass': False}
