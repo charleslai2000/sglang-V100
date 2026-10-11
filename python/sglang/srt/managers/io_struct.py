@@ -1691,7 +1691,7 @@ class ActiveRanksOutput(BaseReq):
 
 @dataclass
 class GetInternalStateReq(BaseReq):
-    pass
+    action: Optional[Literal["fpm_shutdown"]] = None
 
 
 @dataclass

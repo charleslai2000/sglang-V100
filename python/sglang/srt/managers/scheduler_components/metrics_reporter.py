@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
+import os
 import tempfile
 import time
 from collections import defaultdict
@@ -153,6 +155,8 @@ class SchedulerMetricsReporter:
         self.fwd_occupancy = float("nan")
 
         self.forward_pass_device_timer: Optional[DeviceTimer] = None
+        self._metrics_timer_owner = None
+        self._fpm_timer_owner = None
 
         if ENABLE_METRICS_DEVICE_TIMER:
             self._device_timer_window_batch_count = 0
@@ -167,6 +171,9 @@ class SchedulerMetricsReporter:
             self.forward_pass_device_timer = DeviceTimer(
                 reporter=_wrap_execution_reporter,
             )
+            self._metrics_timer_owner = object()
+            self.forward_pass_device_timer.register_owner(self._metrics_timer_owner)
+            self._install_device_timer_on_runners()
 
         self._init_fpm()
 
@@ -179,13 +186,25 @@ class SchedulerMetricsReporter:
             return
         timer = self.forward_pass_device_timer
         self.scheduler.tp_worker.model_runner.device_timer = timer
+        multi_layer_runners = getattr(self.scheduler.tp_worker, "model_runner_list", [])
+        for runner in multi_layer_runners:
+            runner.device_timer = timer
         if self.scheduler.draft_worker is not None:
             dw = getattr(self.scheduler.draft_worker, "draft_worker", None)
+            if dw is None and hasattr(self.scheduler.draft_worker, "draft_model_runner"):
+                self.scheduler.draft_worker.draft_model_runner.device_timer = timer
+            for attr in ("draft_runner", "draft_runner_list", "model_runner_list"):
+                for runner in getattr(self.scheduler.draft_worker, attr, []) if attr.endswith("list") else [getattr(self.scheduler.draft_worker, attr, None)]:
+                    if runner is not None:
+                        runner.device_timer = timer
             if dw is not None:
+                runners = []
                 if hasattr(dw, "draft_runner"):
-                    dw.draft_runner.device_timer = timer
-                for r in getattr(dw, "draft_runner_list", []):
-                    r.device_timer = timer
+                    runners.append(dw.draft_runner)
+                runners.extend(getattr(dw, "draft_runner_list", []))
+                runners.extend(getattr(dw, "model_runner_list", []))
+                for runner in {id(r): r for r in runners if r is not None}.values():
+                    runner.device_timer = timer
 
     def _init_fpm(self):
         """Initialize Forward Pass Metrics (FPM) publisher if configured."""
@@ -219,15 +238,105 @@ class SchedulerMetricsReporter:
                 dp_rank=self.scheduler._fpm_dp_rank,
             )
             self.scheduler._fpm_gpu_time_acc = 0.0
+            self.scheduler._fpm_completed_gpu_times = {}
+            self.scheduler._fpm_pending_batches = {}
+            self.scheduler._fpm_closed_batches = set()
+            self.scheduler._fpm_completed_status = {}
+            self.scheduler._fpm_completed_timer_keys = set()
+            self.scheduler._fpm_shutting_down = False
+            self.scheduler._fpm_audit_counters = {
+                "forward_completed": 0,
+                "scheduler_forward_completed": 0,
+                "timer_completed": 0,
+                "active_emit_attempted": 0,
+                "queue_accepted": 0,
+                "queue_dropped": 0,
+                "timer_duplicate": 0,
+                "unmatched_timer": 0,
+                "pending_timeout": 0,
+            }
 
             def _fpm_device_timer_reporter(t, **_kwargs):
-                self.scheduler._fpm_gpu_time_acc += t
+                forward_iter = _kwargs.get("forward_iter")
+                if forward_iter is None:
+                    # Synthetic runner calls (e.g. CUDA Graph capture) are not
+                    # scheduler iterations and must not leak into an FPM row.
+                    return
+                if self.scheduler._fpm_shutting_down:
+                    return
+                timer_key = _kwargs.get("timer_key")
+                self.scheduler._fpm_audit_counters["timer_completed"] += 1
+                if timer_key is None:
+                    logger.error(
+                        "FPM timer completion missing stable timer_key: %s",
+                        _kwargs,
+                    )
+                    return
+                if timer_key is not None:
+                    if timer_key in self.scheduler._fpm_completed_timer_keys:
+                        self.scheduler._fpm_audit_counters["timer_duplicate"] += 1
+                        logger.error("Duplicate FPM timer callback key=%s", timer_key)
+                        return
+                    self.scheduler._fpm_completed_timer_keys.add(timer_key)
+                pending = self.scheduler._fpm_pending_batches.get(forward_iter)
+                if pending is not None:
+                    interval = {"duration_s": t, "metadata": dict(_kwargs)}
+                    pending["gpu_intervals"].append(interval)
+                    pending["audit_events"].append(
+                        {
+                            "forward_iter": forward_iter,
+                            "batch_id": pending["batch_id"],
+                            "category": _kwargs.get("category", "unknown"),
+                            "graph_bs": _kwargs.get("graph_bs"),
+                            "graph_key": _kwargs.get("graph_key"),
+                            "timer_key": timer_key,
+                            "event_duration_s": t,
+                            "timer_start_host_ns": _kwargs.get("timer_start_host_ns"),
+                            "timer_end_host_ns": _kwargs.get("timer_end_host_ns"),
+                            "timer_id": id(self.forward_pass_device_timer),
+                        }
+                    )
+                else:
+                    self.scheduler._fpm_audit_counters["unmatched_timer"] += 1
+                    self.scheduler._fpm_completed_gpu_times.setdefault(
+                        forward_iter, []
+                    ).append(
+                        {
+                            "duration_s": t,
+                            "metadata": dict(_kwargs),
+                            "timer_key": timer_key,
+                        }
+                    )
+                if os.environ.get("SGLANG_G021_FPM_DIAG") == "1":
+                    logger.info(
+                        "G021_FPM_TIMER_COMPLETE forward_iter=%s category=%s "
+                        "graph_bs=%s graph_key=%s duration_s=%.9f "
+                        "timer_id=%x reporter_count=%d",
+                        forward_iter,
+                        _kwargs.get("category", "unknown"),
+                        _kwargs.get("graph_bs"),
+                        _kwargs.get("graph_key"),
+                        t,
+                        id(self.forward_pass_device_timer),
+                        len(self.forward_pass_device_timer._reporters),
+                    )
 
-            if self.forward_pass_device_timer is not None:
-                self.forward_pass_device_timer.add_reporter(_fpm_device_timer_reporter)
-            else:
+            # A single DeviceTimer has one event queue. Reuse it when metrics
+            # timing exists; otherwise create the FPM fallback before installing
+            # it. In either case the FPM callback is attached before the runner
+            # can enqueue execution events.
+            if self.forward_pass_device_timer is None:
                 self.forward_pass_device_timer = DeviceTimer(
                     reporter=_fpm_device_timer_reporter,
+                )
+            else:
+                self.forward_pass_device_timer.add_reporter(_fpm_device_timer_reporter)
+            self._install_device_timer_on_runners()
+            self._fpm_timer_owner = object()
+            self.forward_pass_device_timer.register_owner(self._fpm_timer_owner)
+            if not hasattr(self.forward_pass_device_timer, "_accepting"):
+                raise RuntimeError(
+                    "FPM requires DeviceTimer shutdown lifecycle support"
                 )
             self.scheduler._fpm_uses_device_timer = True
             self.scheduler.enable_fpm = True
@@ -822,6 +931,103 @@ class SchedulerMetricsReporter:
                 balancedness=m.eplb_balancedness.item(),
             )
 
+    def _snapshot_forward_pass_metrics(self, batch: ScheduleBatch):
+        """Freeze request and queue state before forward execution mutates it."""
+        if not self.scheduler.enable_fpm or not self.scheduler._fpm_uses_device_timer:
+            return
+        forward_iter = batch.forward_iter
+        if forward_iter is None:
+            raise RuntimeError("FPM requires a scheduler forward_iter identity")
+        existing = self.scheduler._fpm_pending_batches.get(forward_iter)
+        if existing is not None:
+            if existing["batch_id"] != id(batch):
+                raise RuntimeError(f"Duplicate FPM forward identity {forward_iter}")
+            return
+        self.scheduler._fpm_pending_batches[forward_iter] = {
+            "batch_id": id(batch),
+            "mode": batch.forward_mode.name,
+            "batch_size": batch.batch_size(),
+            "scheduled": self._build_scheduled_request_metrics(batch),
+            "queued": self._build_queued_request_metrics(),
+            "running": len(batch.reqs),
+            "prefill_tokens": (
+                self._build_scheduled_request_metrics(batch).sum_prefill_tokens
+            ),
+            "decode_tokens": batch.batch_size() if batch.forward_mode.is_decode() else 0,
+            "queued_prefill_reqs": self._build_queued_request_metrics().num_prefill_requests,
+            "queued_prefill_tokens": self._build_queued_request_metrics().sum_prefill_tokens,
+            "queued_decode_reqs": self._build_queued_request_metrics().num_decode_requests,
+            "queued_decode_tokens": self._build_queued_request_metrics().sum_decode_kv_tokens,
+            "start_time": batch.fpm_start_time,
+            "forward_start_time": time.monotonic(),
+            "scheduler_start_time": time.monotonic(),
+            "scheduler_end_time": None,
+            "gpu_intervals": [],
+            "audit_events": [],
+            "timer_keys": set(),
+            "published": False,
+            "request_owners": [
+                {
+                    "rid": getattr(req, "rid", None),
+                    "input_tokens": len(getattr(req, "origin_input_ids_unpadded", req.origin_input_ids)),
+                    "request_output_tokens_at_snapshot": len(req.output_ids),
+                    "output_tokens_before_forward": len(req.output_ids),
+                    "scheduled_prefill_tokens": (
+                        batch.prefill_stats.log_input_tokens
+                        if batch.prefill_stats is not None and batch.forward_mode.is_extend()
+                        else 0
+                    ),
+                }
+                for req in batch.reqs
+            ],
+        }
+
+    def _write_fpm_research_sidecar(
+        self,
+        forward_iter: int,
+        item: dict,
+        *,
+        status: str,
+        invalid_reason: Optional[str],
+        scheduler_wall_s: float,
+        gpu_elapsed_s: Optional[float],
+        queue_accepted: Optional[bool] = None,
+    ) -> None:
+        """Append bounded per-forward research evidence outside the v1 wire."""
+        path = os.environ.get("SGLANG_G021_FPM_SIDECAR")
+        if not path:
+            return
+        interval = item["gpu_intervals"][0] if item["gpu_intervals"] else None
+        metadata = interval["metadata"] if interval is not None else {}
+        row = {
+            "forward_iter": forward_iter,
+            "batch_id": item["batch_id"],
+            "mode": item["mode"],
+            "scheduled_batch_size": item["batch_size"],
+            "requests": item["request_owners"],
+            "scheduled_prefill_tokens": item["scheduled"].sum_prefill_tokens,
+            "decode_output_tokens": item["scheduled"].num_decode_requests,
+
+            "scheduled_decode_requests": item["scheduled"].num_decode_requests,
+            "scheduled_decode_kv_tokens": item["scheduled"].sum_decode_kv_tokens,
+            "decode_output_tokens_per_request": [
+                1 if item["mode"] == "DECODE" else 0 for _ in item["request_owners"]
+            ],
+            "graph_bs": metadata.get("graph_bs"),
+            "graph_key": metadata.get("graph_key"),
+            "timer_key": metadata.get("timer_key") if interval else None,
+            "gpu_event_duration_s": interval.get("duration_s") if interval else None,
+            "gpu_elapsed_s": gpu_elapsed_s,
+            "scheduler_wall_s": scheduler_wall_s,
+            "status": status,
+            "invalid_reason": invalid_reason,
+            "queue_accepted": queue_accepted,
+            "audit_counters_at_emit": dict(self.scheduler._fpm_audit_counters),
+            "publisher_counters_at_emit": self.scheduler._fpm_publisher.stats_snapshot(),
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, separators=(",", ":")) + "\n")
+
     def _emit_forward_pass_metrics(
         self,
         batch: ScheduleBatch,
@@ -841,27 +1047,306 @@ class SchedulerMetricsReporter:
         )
 
         if self.scheduler._fpm_uses_device_timer:
-            self.forward_pass_device_timer._report()
-            wall_time = self.scheduler._fpm_gpu_time_acc
-            self.scheduler._fpm_gpu_time_acc = 0.0
-            if wall_time == 0.0:
+            if not hasattr(self.scheduler, "_fpm_audit_counters"):
+                self.scheduler._fpm_audit_counters = defaultdict(int)
+            # Snapshot immediately on the scheduler thread. The ScheduleBatch
+            # is mutable/reused by scheduling logic; do not retain it by reference.
+            forward_iter = batch.forward_iter
+            if forward_iter is None:
+                raise RuntimeError("FPM requires a scheduler forward_iter identity")
+            pending = self.scheduler._fpm_pending_batches.get(forward_iter)
+            if forward_iter in self.scheduler._fpm_closed_batches:
+                logger.error("Late FPM timer completion for closed forward=%s", forward_iter)
                 return
+            if pending is None:
+                # Compatibility for direct reporter callers. Production scheduler
+                # execution snapshots before model forward begins.
+                self._snapshot_forward_pass_metrics(batch)
+                pending = self.scheduler._fpm_pending_batches[forward_iter]
+            pending["scheduler_end_time"] = time.monotonic()
+            for completed_iter in list(self.scheduler._fpm_completed_gpu_times):
+                item = self.scheduler._fpm_pending_batches.get(completed_iter)
+                if item is None:
+                    continue
+                intervals = self.scheduler._fpm_completed_gpu_times.pop(completed_iter)
+                for interval in intervals:
+                    if interval["timer_key"] in item["timer_keys"]:
+                        logger.error("Duplicate FPM timer key while joining: %s", interval["timer_key"])
+                        continue
+                    item["timer_keys"].add(interval["timer_key"])
+                    item["gpu_intervals"].append(interval)
+                    item["audit_events"].append(
+                        {
+                            "forward_iter": completed_iter,
+                            "batch_id": item["batch_id"],
+                            "category": interval["metadata"].get("category", "unknown"),
+                            "graph_bs": interval["metadata"].get("graph_bs"),
+                            "graph_key": interval["metadata"].get("graph_key"),
+                            "timer_key": interval["timer_key"],
+                            "event_duration_s": interval["duration_s"],
+                            "timer_start_host_ns": interval["metadata"].get("timer_start_host_ns"),
+                            "timer_end_host_ns": interval["metadata"].get("timer_end_host_ns"),
+                            "timer_id": id(self.forward_pass_device_timer),
+                        }
+                    )
+            if batch.forward_mode.is_prebuilt():
+                pending["timer_status"] = "UNSUPPORTED"
+                pending["scheduler_wall_s"] = max(
+                    0.0, pending["scheduler_end_time"] - pending["forward_start_time"]
+                )
+                self.scheduler._fpm_pending_batches.pop(forward_iter)
+                self.scheduler._fpm_closed_batches.add(forward_iter)
+                logger.info(
+                    "FPM_FORWARD_STATUS forward_iter=%s status=UNSUPPORTED reason=prebuilt_no_model_forward",
+                    forward_iter,
+                )
+                return
+            # Event.query remains nonblocking. Join completions to the immutable
+            # snapshot by forward identity, even if query succeeds immediately.
+            self.forward_pass_device_timer._report()
+            for completed_iter in list(self.scheduler._fpm_completed_gpu_times):
+                item = self.scheduler._fpm_pending_batches.get(completed_iter)
+                if item is not None:
+                    intervals = self.scheduler._fpm_completed_gpu_times.pop(
+                        completed_iter
+                    )
+                    for interval in intervals:
+                        if interval["timer_key"] in item["timer_keys"]:
+                            logger.error(
+                                "Duplicate FPM timer key while joining: %s",
+                                interval["timer_key"],
+                            )
+                            continue
+                        item["timer_keys"].add(interval["timer_key"])
+                        item["gpu_intervals"].append(interval)
+                        item["audit_events"].append(
+                            {
+                                "forward_iter": completed_iter,
+                                "batch_id": item["batch_id"],
+                                "category": interval["metadata"].get("category", "unknown"),
+                                "graph_bs": interval["metadata"].get("graph_bs"),
+                                "graph_key": interval["metadata"].get("graph_key"),
+                                "timer_key": interval["timer_key"],
+                                "event_duration_s": interval["duration_s"],
+                                "timer_start_host_ns": interval["metadata"].get("timer_start_host_ns"),
+                                "timer_end_host_ns": interval["metadata"].get("timer_end_host_ns"),
+                                "timer_id": id(self.forward_pass_device_timer),
+                            }
+                        )
+            if pending["scheduler_end_time"] is None:
+                if not pending.get("scheduler_completion_counted"):
+                    pending["scheduler_completion_counted"] = True
+                    self.scheduler._fpm_audit_counters["scheduler_forward_completed"] += 1
+                return
+            if not pending.get("scheduler_completion_counted"):
+                pending["scheduler_completion_counted"] = True
+                self.scheduler._fpm_audit_counters["scheduler_forward_completed"] += 1
+            for completed_iter in sorted(self.scheduler._fpm_pending_batches):
+                item = self.scheduler._fpm_pending_batches[completed_iter]
+                if not item["gpu_intervals"] or item["scheduler_end_time"] is None:
+                    continue
+                if len(item["gpu_intervals"]) != 1:
+                    item["timer_status"] = "INVALID"
+                    item["invalid_reason"] = "multiple_gpu_intervals_without_device_elapsed"
+                    logger.error(
+                        "FPM forward_iter=%s INVALID: %d GPU intervals but v1 needs "
+                        "one complete Forward elapsed; duration sum is diagnostic only",
+                        completed_iter,
+                        len(item["gpu_intervals"]),
+                    )
+                    self.scheduler._fpm_completed_status[completed_iter] = {
+                        "status": "INVALID",
+                        "reason": item["invalid_reason"],
+                        "gpu_interval_sum_s": sum(
+                            interval["duration_s"] for interval in item["gpu_intervals"]
+                        ),
+                    }
+                    self._write_fpm_research_sidecar(
+                        completed_iter,
+                        item,
+                        status="INVALID",
+                        invalid_reason=item["invalid_reason"],
+                        scheduler_wall_s=max(
+                            0.0, item["scheduler_end_time"] - item["start_time"]
+                        ),
+                        gpu_elapsed_s=None,
+                    )
+                    self.scheduler._fpm_pending_batches.pop(completed_iter)
+                    self.scheduler._fpm_closed_batches.add(completed_iter)
+                    continue
+                counters = getattr(self.scheduler, "_fpm_audit_counters", None)
+                if counters is None:
+                    self.scheduler._fpm_audit_counters = counters = defaultdict(int)
+                counters["forward_completed"] += 1
+                gpu_elapsed = sum(
+                    interval["duration_s"] for interval in item["gpu_intervals"]
+                )
+                scheduler_wall_duration = max(
+                    0.0,
+                    item["scheduler_end_time"] - item["start_time"],
+                )
+                if os.environ.get("SGLANG_G021_FPM_DIAG") == "1":
+                    logger.info(
+                        "G021_FPM_FORWARD_COMPLETE forward_iter=%s batch_id=%x "
+                        "mode=%s batch_size=%d scheduler_wall_s=%.9f "
+                        "gpu_event_count=%d gpu_interval_sum_s=%.9f "
+                        "graph_bs=%s graph_key=%s tokens=%d timer_id=%x",
+                        completed_iter,
+                        item["batch_id"],
+                        item["mode"],
+                        item["batch_size"],
+                        scheduler_wall_duration,
+                        len(item["gpu_intervals"]),
+                        gpu_elapsed,
+                        item["gpu_intervals"][0]["metadata"].get("graph_bs"),
+                        item["gpu_intervals"][0]["metadata"].get("graph_key"),
+                        item["scheduled"].sum_prefill_tokens
+                        + item["scheduled"].num_decode_requests,
+                        id(self.forward_pass_device_timer),
+                    )
+                # FPM v1 wall_time is scheduler wall duration. A single CUDA
+                # event interval is the complete ModelRunner forward boundary
+                # in this serving path; multiple intervals are not combined into
+                # elapsed without device-clock endpoints, and host record bounds
+                # are not GPU-active timestamps.
+                scheduler_wall_duration = max(
+                    0.0,
+                    item["scheduler_end_time"] - item["start_time"],
+                )
+                gpu_forward_elapsed = (
+                    gpu_elapsed if len(item["gpu_intervals"]) == 1 else None
+                )
+                if os.environ.get("SGLANG_G021_FPM_DIAG") == "1":
+                    logger.info(
+                        "G021_FPM_TIME_AUDIT forward_iter=%s scheduler_wall_s=%.9f "
+                        "gpu_interval_sum_s=%.9f gpu_forward_elapsed_s=%s "
+                        "gpu_active_union=UNSUPPORTED status=%s",
+                        completed_iter,
+                        scheduler_wall_duration,
+                        gpu_elapsed,
+                        "unsupported" if gpu_forward_elapsed is None else f"{gpu_forward_elapsed:.9f}",
+                        "MEASURED" if gpu_forward_elapsed is not None else "PARTIAL",
+                    )
+                item["gpu_interval_sum_s"] = gpu_elapsed
+                item["gpu_elapsed_s"] = gpu_forward_elapsed
+                item["gpu_union_s"] = None
+                fpm = ForwardPassMetrics(
+                    worker_id=self.scheduler._fpm_worker_id,
+                    dp_rank=self.scheduler._fpm_dp_rank,
+                    wall_time=scheduler_wall_duration,
+                    scheduled_requests=item["scheduled"],
+                    queued_requests=item["queued"],
+                )
+                self.scheduler._fpm_audit_counters["active_emit_attempted"] += 1
+                queue_accepted = self.scheduler._fpm_publisher.publish(fpm)
+                if queue_accepted:
+                    self.scheduler._fpm_audit_counters["queue_accepted"] += 1
+                else:
+                    self.scheduler._fpm_audit_counters["queue_dropped"] += 1
+                self._write_fpm_research_sidecar(
+                    completed_iter,
+                    item,
+                    status="MEASURED",
+                    invalid_reason=None,
+                    scheduler_wall_s=scheduler_wall_duration,
+                    gpu_elapsed_s=gpu_forward_elapsed,
+                    queue_accepted=queue_accepted,
+                )
+                if not queue_accepted:
+                    logger.error(
+                        "FPM publish enqueue dropped forward_iter=%s batch_id=%x",
+                        completed_iter,
+                        item["batch_id"],
+                    )
+                self.scheduler._fpm_pending_batches.pop(completed_iter)
+                self.scheduler._fpm_closed_batches.add(completed_iter)
+                if os.environ.get("SGLANG_G021_FPM_DIAG") == "1":
+                    logger.info(
+                        "G021_FPM_EMIT_ACTIVE batch_id=%x forward_iter=%s "
+                        "mode=%s batch_size=%d wall_time_s=%.9f timer_id=%x",
+                        item["batch_id"],
+                        completed_iter,
+                        item["mode"],
+                        item["batch_size"],
+                        scheduler_wall_duration,
+                        id(self.forward_pass_device_timer),
+                    )
         else:
             wall_time = max(0.0, time.monotonic() - batch.fpm_start_time)
-
-        fpm = ForwardPassMetrics(
-            worker_id=self.scheduler._fpm_worker_id,
-            dp_rank=self.scheduler._fpm_dp_rank,
-            wall_time=wall_time,
-            scheduled_requests=self._build_scheduled_request_metrics(batch),
-            queued_requests=self._build_queued_request_metrics(),
-        )
-        self.scheduler._fpm_publisher.publish(fpm)
+            fpm = ForwardPassMetrics(
+                worker_id=self.scheduler._fpm_worker_id,
+                dp_rank=self.scheduler._fpm_dp_rank,
+                wall_time=wall_time,
+                scheduled_requests=self._build_scheduled_request_metrics(batch),
+                queued_requests=self._build_queued_request_metrics(),
+            )
+            if not self.scheduler._fpm_publisher.publish(fpm):
+                logger.error(
+                    "FPM publish enqueue dropped scheduler-only batch_id=%x",
+                    id(batch),
+                )
 
     def _shutdown_fpm(self):
-        """Shut down the FPM publisher thread."""
+        """Shut down FPM publication and drop incomplete CPU-side snapshots."""
         if self.scheduler.enable_fpm:
+            self.scheduler._fpm_shutting_down = True
+            timer = self.forward_pass_device_timer
+            if timer is not None:
+                dropped = timer.release_owner(
+                    self._fpm_timer_owner, timeout=1.0
+                )
+                if dropped:
+                    for interval in list(timer._intervals):
+                        metadata = interval.metadata or {}
+                        forward_iter = metadata.get("forward_iter")
+                        snapshot = self.scheduler._fpm_pending_batches.get(forward_iter)
+                        if snapshot is not None:
+                            snapshot["timer_status"] = "INVALID"
+                            snapshot["invalid_reason"] = "shutdown_event_timeout"
+                    logger.warning(
+                        "FPM shutdown discarded %d incomplete CUDA event intervals; "
+                        "affected snapshots INVALID (shutdown_event_timeout)",
+                        dropped,
+                    )
+            pending_at_shutdown = len(self.scheduler._fpm_pending_batches)
+            completed_at_shutdown = len(self.scheduler._fpm_completed_gpu_times)
+            self.scheduler._fpm_audit_counters["pending_timeout"] = dropped if timer is not None and dropped else 0
+            self.scheduler._fpm_pending_batches.clear()
+            self.scheduler._fpm_completed_gpu_times.clear()
+            if timer is not None and self._metrics_timer_owner is not None:
+                dropped = timer.release_owner(
+                    self._metrics_timer_owner, timeout=1.0
+                )
+                if dropped:
+                    logger.warning(
+                        "Shared metrics timer shutdown discarded %d intervals",
+                        dropped,
+                    )
             self.scheduler._fpm_publisher.shutdown()
+            publisher_stats = getattr(
+                self.scheduler._fpm_publisher, "stats_snapshot", lambda: {}
+            )()
+            logger.info("FPM final publisher counters: %s", publisher_stats)
+            final_audit = {
+                "kind": "shutdown",
+                **self.scheduler._fpm_audit_counters,
+                "pending_batches": pending_at_shutdown,
+                "completed_gpu_iters": completed_at_shutdown,
+                "timer_pending": len(timer._intervals) if timer is not None else 0,
+                "publisher": publisher_stats,
+            }
+            path = os.environ.get("SGLANG_G021_FPM_SIDECAR")
+            if path:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(final_audit, separators=(",", ":")) + "\n")
+            logger.info("FPM shutdown final audit: %s", final_audit)
+            logger.info(
+                "FPM shutdown disposition pending_batches=%d completed_gpu_times=%d "
+                "timer_pending=%d",
+                pending_at_shutdown,
+                completed_at_shutdown,
+                len(timer._intervals) if timer is not None else 0,
+            )
 
     def _log_hicache_stats(self):
         """Populate HiCache host-tier stats on self.stats.
@@ -940,6 +1425,8 @@ class SchedulerMetricsReporter:
 
     def update_device_timer(self):
         if not ENABLE_METRICS_DEVICE_TIMER:
+            return
+        if self.forward_pass_device_timer is None:
             return
         self.forward_pass_device_timer._report()
         now = time.perf_counter()

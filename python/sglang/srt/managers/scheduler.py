@@ -510,6 +510,8 @@ class Scheduler(
             metrics_collector_context=self.metrics_collector_context,
             metrics_collector=self.metrics_collector,
         )
+        # Install the final timer after metrics/FPM reporters are attached.
+        self.metrics_reporter._install_device_timer_on_runners()
 
         # Init schedule policy and new token estimation
         self.init_schedule_policy()
@@ -1350,7 +1352,7 @@ class Scheduler(
                     lambda req: self.profiler_manager._profile(req),
                 ),
                 (FreezeGCReq, self.handle_freeze_gc),
-                (GetInternalStateReq, self.get_internal_state),
+                (GetInternalStateReq, self.handle_get_internal_state_req),
                 (SetInternalStateReq, self.set_internal_state),
                 (RpcReqInput, self.handle_rpc_request),
                 (ExpertDistributionReq, self.expert_distribution_handle),
@@ -2991,6 +2993,8 @@ class Scheduler(
         """Run a batch."""
         self.forward_ct += 1
         batch.forward_iter = self.forward_ct
+        if self.enable_fpm:
+            self.metrics_reporter._snapshot_forward_pass_metrics(batch)
 
         # Whether to run the profiler
         self.profiler_manager._profile_batch_predicate(batch)
@@ -3303,6 +3307,8 @@ class Scheduler(
 
         # metrics every 30s
         self.metrics_reporter._maybe_log_idle_metrics()
+        if getattr(self, "_fpm_shutdown_requested", False):
+            raise SystemExit(0)
 
         # kv event publishing
         self.kv_events_publisher.publish_kv_events()
@@ -3495,6 +3501,14 @@ class Scheduler(
             )
             success = False
         return success
+
+    def handle_get_internal_state_req(self, recv_req: GetInternalStateReq):
+        if recv_req.action == "fpm_shutdown" and self.enable_fpm:
+            self._fpm_shutdown_requested = True
+            return GetInternalStateReqOutput(
+                internal_state={"shutdown_requested": True}
+            )
+        return self.get_internal_state(recv_req)
 
     def get_internal_state(self, recv_req: GetInternalStateReq):
         ret = dict(vars(get_global_server_args()))  # vars returns a ref to obj.__dict__
