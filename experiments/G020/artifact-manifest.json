@@ -1,0 +1,57 @@
+{
+  "goal": "G020",
+  "status": "PARTIAL",
+  "scope": "Offline-only reanalysis of archived G018/G019 Falcon decode traces; no new GPU test or profiling",
+  "trace_root_external": "/mnt/data/pc01/sglang-v100-migration/experiments/G019",
+  "trace_files": [
+    {
+      "path": "c57-1k-c1/g019-c57-1k-c1-1791673067.1692245-TP-0-DECODE.trace.json.gz",
+      "sha256": "41efbe9374e963435f03a373e0dbde2daf249c1cd91967357c76e9c11c572014"
+    },
+    {
+      "path": "c57-1k-c4/g019-c57-1k-c4-1791673110.7648697-TP-0-DECODE.trace.json.gz",
+      "sha256": "6ff5a0b554feb8986cc3ca471e39cd4cbe0b324056316779e2e0196688eda7cf"
+    },
+    {
+      "path": "c57-4k-c1/g019-c57-4k-c1-1791673087.6097856-TP-0-DECODE.trace.json.gz",
+      "sha256": "9d0af38e52a95385ddb958707962fb4a7907dea5091c445dbf3d7ccfe304214c"
+    },
+    {
+      "path": "c57-4k-c4/g019-c57-4k-c4-1791673134.1937163-TP-0-DECODE.trace.json.gz",
+      "sha256": "a1cd6eaceb631f7035b08b674dcfd6f1ac9cc43324eef8aa3a7f0a6601eed897"
+    },
+    {
+      "path": "c57-4k-c4/g019-c57-4k-c4-repeat-1791673292.1403546-TP-0-DECODE.trace.json.gz",
+      "sha256": "7cce5ad0dae0113fde5a3e24e1919b0441f6a67e8af144817bb74aaf8816911e"
+    },
+    {
+      "path": "s1-1k-c1/g019-s1-1k-c1-1791672731.1504726-TP-0-DECODE.trace.json.gz",
+      "sha256": "e704bbd6f5094491575e5f20e34b6bc413a70bc63483f592ae17e0ad548a9327"
+    },
+    {
+      "path": "s1-1k-c4/g019-s1-1k-c4-1791672872.4512095-TP-0-DECODE.trace.json.gz",
+      "sha256": "e5346c3fa6dc98ab51fb935f1d6cb8ea29695a53066048a1d16d6c037af21c85"
+    },
+    {
+      "path": "s1-4k-c1/g019-s1-4k-c1-1791672849.755637-TP-0-DECODE.trace.json.gz",
+      "sha256": "cdba67c1f9c300936b650ec30edfcb413067e030f20a8ce3dd3ed9941d185013"
+    },
+    {
+      "path": "s1-4k-c4/g019-s1-4k-c4-1791672896.896087-TP-0-DECODE.trace.json.gz",
+      "sha256": "c6caff20495792dc7a3d155b26b9fbd3bf8312001799414deacf38e676a5d3f9"
+    }
+  ],
+  "analysis": "analysis.json",
+  "analyzer": "analyze_traces.py",
+  "report": "report.md",
+  "no_hardware_activity": true,
+  "limitations": [
+    "Kernel activities lack CUDA Graph node IDs; no per-node ownership ledger",
+    "Generic GEMM/GEMV call sites are not uniquely attributable and remain UNKNOWN",
+    "GPU annotation coverage is not whole-forward owner reconciliation",
+    "4K/c4 captures are actual batch 3, not batch 4"
+  ],
+  "analysis_sha256": "65c8ebfdf2a8874c3a18c7ff2832ba479e7e028fd8e91b5d9fbe5b8f7bb031e6",
+  "analyzer_sha256": "24264618e3af20dd34bb253a774fab4435274695f9be86d28d256f8016d62425",
+  "report_sha256": "99b2b1fe9693a121b6083a5652e46ad67c3d778f0dfee76209903064c5232f22"
+}
