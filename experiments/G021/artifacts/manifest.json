@@ -59,8 +59,8 @@
     },
     {
       "path": "experiments/G021/report.md",
-      "sha256": "6e9871bed1ef3f0d201e7ff61a88e11aa18c1e047095a0f8ad788a5b5723d7e0",
-      "bytes": 24773
+      "sha256": "1b07c4b28aa0c8eb65de250a88321c4b918b1b01b517630c982d31fae07911c7",
+      "bytes": 27168
     },
     {
       "path": "experiments/G021/metric-differential-notes.md",
@@ -131,6 +131,26 @@
       "path": "/mnt/data/pc01/sglang-v100-migration/profiles/r17-ncu-tmp/s1-hotspots-normalized.csv",
       "sha256": "48ed5cfddcaccd32e23da7cb28cae169b1339d729479b89cee87529a5c5c1b32",
       "bytes": 5589
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/r17-s1-lifecycle-client.jsonl",
+      "sha256": "f68a885aae400052afebd82e1b293272a96eacd682e5659a69f14a22835a9115",
+      "bytes": 4850
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-s1-server.log",
+      "sha256": "168bd605dee93cd9cbfe823f6672ac653527a0574faf1c710c2cfdbb24b9cd8d",
+      "bytes": 44446
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-reqtime.log",
+      "sha256": "5472b51b6b3cd9e13a7c79b5f38e88cb4ade4959a69ca3d153e0db894d80e078",
+      "bytes": 2966
+    },
+    {
+      "path": "experiments/G021/analyze_lifecycle_capture.py",
+      "sha256": "87e66cd023f438eed0a2aae37bfffa895abdf50b317aecaf16b9639ae5d6d2df",
+      "bytes": 1346
     }
   ],
   "status": "PARTIAL_G021_ACTIVE; FPM bounded accepted S1 capture PASS; no qualification claims beyond recorded boundaries"

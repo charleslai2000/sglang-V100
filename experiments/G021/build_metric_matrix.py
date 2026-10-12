@@ -224,9 +224,11 @@ matrix = {
     'L3_disk':'Optional storage backend exists; no backend/path enabled, no restore bytes/time. DISABLED/NOT_RUN.',
     'state_pair':'Source has HiMambaRadixCache and host Mamba conv/temporal state pools, but complete Falcon joint prefix-frontier restore not demonstrated; correctness/effect UNSUPPORTED for this evidence set.'},
   'scheduler_lifecycle': {'status':'PARTIAL', 'fpm_actual_batch_counts':{'decode_bs1':2024,'decode_bs3':288,'decode_graph_key1':2024,'decode_graph_key4':288},
-    'queue_wait':'NOT_MEASURED per request; server periodic queue logs are not ID-correlated.',
+    'queue_wait':'PARTIAL measured in one additional S1 service capture via existing --enable-request-time-stats-logging. Ten request IDs join client TTFT to scheduler queue_duration and forward_duration; captured log output is separate/instrumented, not an uninstrumented service quantile authority.',
+    'measured_service_speed_diagnostic':{'context':'4K/c4','client_wave_tps':29.6806,'requests':4,'boundary':'single 4-request same-wave 256-output client aggregate', 'status':'DIAGNOSTIC_NOT_QUANTILE'},
+    'lifecycle_capture':{'target_uuid':UUID,'route':'accepted S1','workload':'single 4K/c4, 4K/c1, 1K/c4, 1K/c1 wave, 256 greedy tokens/request, radix disabled','request_ids_joined':10,'client_artifact':'/mnt/data/pc01/sglang-v100-migration/experiments/E026/r17-s1-lifecycle-client.jsonl','client_sha256':'f68a885aae400052afebd82e1b293272a96eacd682e5659a69f14a22835a9115','server_log':'/mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-s1-server.log','server_log_sha256':'168bd605dee93cd9cbfe823f6672ac653527a0574faf1c710c2cfdbb24b9cd8d','request_time_log':'/mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-reqtime.log','request_time_log_sha256':'5472b51b6b3cd9e13a7c79b5f38e88cb4ade4959a69ca3d153e0db894d80e078','analysis_script':'experiments/G021/analyze_lifecycle_capture.py','boundary':'Scheduler wait_queue_entry_time to forward_entry_time and forward_entry_time to completion_time from ReqTimeStats. Not GPU duration. Client request-to-first-streamed output remains client TTFT. 4K/c4 queue values track the observed TTFT tail for this bounded wave.'},
     'periodic_log_observation':'The FPM capture service log is periodic and shows #queue-req 0 at sampled Prefill/Decode logs, but samples are not exhaustive or joined to HTTP request IDs; cannot rule out short queue waits.',
-    '4k_c4_tail':'Existing S1 service p95 TTFT 14021.0 ms (12 request samples across 3 waves); observed client TTFT includes queue. Root cause unresolved because request IDs are not joined to arrival/enqueue/admission/cache/first-token timestamps.',
+    '4k_c4_tail':{'baseline':'Existing S1 service p95 TTFT 14021.0 ms (12 request samples across 3 waves); observed TTFT includes queue.','follow_up_capture':'/mnt/data/pc01/sglang-v100-migration/experiments/E026/r17-s1-lifecycle-client.jsonl and /mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-reqtime.log; 10/10 request IDs joined to ReqTimeStats. In a new 4K/c4 wave, queue durations were 0.20, 8367.65, 16991.85, 25620.53 ms; corresponding client TTFT 1191, 9815, 18452, 27070 ms. 4K/c1 matched queue 0.24ms and TTFT 1198ms. Cache disabled/0 cached tokens. This directly shows first-token tail tracks SGLang wait-queue residence in this one capture; forward_duration is request lifecycle span, not isolated GPU active time.', 'limits':'one 4K/c4 and one comparison wave; not a new quantile authority and not enough to explain all historical waves.'},
     'saturation':'Only c1/c4 bounded 256-output S1/Candidate cells exist for common workload; c8+ scan NOT_RUN.'},
   'required_answers': [
     {'question':1,'status':'PARTIAL','answer':'Measured service output TPS is reported by workload; request-aligned Event ratios are diagnostics, not qualified GPU active TPS.'},
@@ -259,7 +261,10 @@ inputs = [ROOT/'experiments/G021/artifacts/service-s1-all-cells.json', ROOT/'exp
           STORE/'profiles/r17-ncu-tmp/s1-prefill-1k-c1-range.ncu-rep',
           STORE/'profiles/r17-ncu-tmp/s1-prefill-pipe-final.ncu-rep',
           STORE/'profiles/r17-ncu-tmp/s1-decode-pipe-final.ncu-rep',
-          STORE/'profiles/r17-ncu-tmp/s1-hotspots-normalized.csv']
+          STORE/'profiles/r17-ncu-tmp/s1-hotspots-normalized.csv',
+          STORE/'experiments/E026/r17-s1-lifecycle-client.jsonl',
+          STORE/'logs/r17-lifecycle-s1-server.log', STORE/'logs/r17-lifecycle-reqtime.log',
+          ROOT/'experiments/G021/analyze_lifecycle_capture.py']
 manifest = {'schema':'g021-r17-artifact-manifest-v1','g021_commit':'06f24c55acec088c1684013054c99299579a73a4',
  'fpm_commit':'631cfc89c2644d398a4555fcfbcb509919275bef','target_uuid':UUID,'model_revision':MODEL_REV,
  'matrix':'experiments/G021/artifacts/r17-evidence-matrix.json','generator':'experiments/G021/build_metric_matrix.py',

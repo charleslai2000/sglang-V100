@@ -114,7 +114,24 @@ The local source has GPU Radix cache and optional hierarchical host/disk paths. 
 
 ## Scheduler/request lifecycle and saturation
 
-Request-side service JSON yields client TTFT/ITL/E2E but not server arrival, enqueue, admission, cache, first-token-ready or queue-exit timestamps. Periodic scheduler logs show sampled running/queued counts; they are not joined to request IDs and cannot explain the 4K/c4 tail. FPM sidecar is Forward-level, not the complete request lifecycle. Queue/admission wait, GPU admission delays, scheduling gaps, preemption and per-request cache wait remain NOT_MEASURED. c1/c2/c4 service cells exist; c8/12/16/20/24 saturation and safe upper bound were not run. P99 is not supported by existing per-cell sample sizes.
+Existing client service JSON remains the uninstrumented throughput/latency authority and lacks server lifecycle fields. Separately, a new bounded S1 capture enabled the existing `--enable-request-time-stats-logging` flag (no source change) and used unique request IDs, single waves at 4K/c4, 4K/c1, 1K/c4 and 1K/c1, each request 256 greedy outputs. The client artifact and server `ReqTimeStats` log join **10/10** request IDs. The server reports `queue_duration = forward_entry_time - wait_queue_entry_time` and `forward_duration = completion_time - forward_entry_time`; client TTFT is request start to first streamed response and includes queue plus any first-token work/transport. This is an instrumented follow-up capture, not a replacement for the uninstrumented p95/service matrix.
+
+| Context/concurrency | Request | Scheduler queue duration | Scheduler forward-to-completion | Client TTFT |
+|---|---|---:|---:|---:|
+| 4K/c4 | a3b2d6c3 | 25,620.53 ms | 8,600.43 ms | 27,070.48 ms |
+| 4K/c4 | bf4a2aeb | 16,991.85 ms | 8,599.59 ms | 18,451.62 ms |
+| 4K/c4 | 56469486 | 8,367.65 ms | 8,595.13 ms | 9,814.96 ms |
+| 4K/c4 | bba5dc16 | 0.20 ms | 8,606.70 ms | 1,190.88 ms |
+| 4K/c1 | 08b6dd5b | 0.24 ms | 8,596.77 ms | 1,197.99 ms |
+| 1K/c4 | 145844d1 | 0.33 ms | 9,840.05 ms | 824.02 ms |
+| 1K/c4 | 561cdec6 | 0.38 ms | 9,839.91 ms | 823.99 ms |
+| 1K/c4 | 9637c805 | 251.32 ms | 9,589.23 ms | 1,125.13 ms |
+| 1K/c4 | 405f25e6 | 251.36 ms | 9,589.10 ms | 1,125.51 ms |
+| 1K/c1 | 2db04784 | 0.70 ms | 7,558.88 ms | 317.62 ms |
+
+The four-request 4K wave shows progressively queued requests with ~8.6s forward-to-completion each; their large TTFT tail is directly explained by scheduler wait-queue residence plus first request service before each later admission. Zero cached input was reported in the request timing log; radix cache was disabled. This is one wave, only n=4 at 4K/c4 and n=1 other cells, so it explains an observed mechanism but does not establish a new quantile or all historical tail events. `forward_duration` is a lifecycle wall span that contains repeated decode scheduling; it is not CUDA time. TokenizerManager response timestamp and scheduler monotonic-to-wallclock `entry_time` are present in existing metadata/logs; do not equate client transport TTFT with GPU execution.
+
+Artifacts: `/mnt/data/pc01/sglang-v100-migration/experiments/E026/r17-s1-lifecycle-client.jsonl` and `/mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-reqtime.log`, with full server log at `logs/r17-lifecycle-s1-server.log`; request-id join script `experiments/G021/analyze_lifecycle_capture.py`. Periodic running/queued samples remain non-ID-correlated and cannot be substituted for per-request times. FPM sidecar is Forward-level, not the complete lifecycle. Per-request cache wait, GPU admission delay, scheduling gaps and preemption remain NOT_MEASURED. c1/c2/c4 service cells exist; c8/12/16/20/24 saturation and safe upper bound were not run. P99 is not supported by service matrix sample sizes.
 
 ## Required research answers and status
 

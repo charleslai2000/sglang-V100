@@ -2,7 +2,7 @@
 
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
-  - frontier: FPM PASS; standalone speed diagnostic plus root NCU Prefill EXTEND/Decode Graph-replay KERNEL_SCOPE counters are in report/matrix/manifest. Full Graph aggregate is not measured; continue queue-tail/lifecycle/cache/saturation/P99 and owner/3090 dispositions.
+  - frontier: FPM PASS; Falcon NCU KERNEL_SCOPE counters are measured. One request-time-logging wave joined 10/10 RIDs and directly associated 4K/c4 TTFT tail with queue residence. Continue cache restore, safe saturation/P99, owner/3090 and full-Graph aggregate dispositions.
   - task: `control/G021-v100-hardware-utilization/tasks/T001-hardware-utilization.md`
   - unblock/reopen: Prior resource gate/resume authorization remains; maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
 
