@@ -1,134 +1,107 @@
-# G021 — Falcon-H1 V100 serving and GPTQ kernel measurements
+# G021 — Falcon-H1 V100 Inference Performance Metrics V1
 
-**Status: measured subset reported; G021 / R17 is not accepted.** This report consolidates the completed evidence currently available. It does not claim a full-forward CUDA Graph hardware profile, complete decode owner ledger, or Cache/E2E qualification.
+**Status: G021/R17 ACTIVE — partial metrics matrix.** **FPM production capture PASS for the bounded accepted Falcon S1 path.** This is a measurement report, not a warranty or full bottleneck acceptance. G017 remains ACCEPTED; S1 is default and Candidate remains exact-path/SHA opt-in. No compute math, CUDA/driver policy, or unrelated GPU was changed by this work.
 
-## Executive summary
+## Executive findings
 
-- Actual Falcon-H1 service was measured with frozen S1 and a G017 Candidate binary that had both exact path/SHA and runtime candidate-dispatch log evidence. The Candidate binary remains opt-in; S1 remains default.
-- In this 3-repeat, 256-output greedy service matrix, Candidate mean aggregate throughput exceeds S1 in each cell by approximately 5.3–8.4%. The strongest practical caveat is 4K prompt at concurrency 4: both modes show substantial queued/request latency tails. The small sample does not support p99 or robust production claims.
-- Whole-device target-only NVML windows showed GPU busy around 95% on average during both matrices, with roughly 38% memory-controller busy. These NVML percentages are device-window telemetry—not SM/Tensor utilization, per-process use, or per-Graph counters.
-- Root NCU collected actual Falcon-derived M4 GPTQ gate-up and down projection fixtures for each route. Candidate fixture kernel durations were 19.2% lower for gate-up and 32.7% lower for down under NCU kernel replay. These are isolated operator fixture measurements, not service or full-Graph speedups. NCU throughput metrics for SM/DRAM/L2 were `n/a`; Tensor pipe activity was zero for these kernels.
-- FPM now has real Falcon Prefill/Decode CUDA Event completion and v1 active IPC payload evidence, and a three-stage S1 FPM-off/on/off service comparison found negligible change in the tested cell means. Its production identity/loss audit, direct replay-key proof for every requested graph size, and full GPU hardware/owner matrix remain incomplete. Cache hit/recovery, request queue wait, p99 and full Attention KV + Mamba state restore remain unmeasured or unsupported. No G021 acceptance decision follows from this partial report.
+- Tested Falcon-H1-7B-Instruct-GPTQ-Int4 on Tesla V100-SXM2-16GB UUID `GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189`, model revision `52036ae497a2c0c253e17f98cc8652f2f7082ae3`. The accepted S1 extension SHA is `fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842`; G017 Candidate SHA `c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9` remains opt-in.
+- In the existing uninstrumented 256-output service matrix, S1 mean aggregate throughput was 33.70 tokens/s at 1K/c1, 103.78 at 1K/c4, 29.68 at 4K/c1, and 47.73 at 4K/c4. Candidate observed 36.55, 111.08, 31.88, 50.87 respectively. These are three wave repeats/cell, not a statistically robust production interval. At 4K/c4 the S1 request TTFT p95 was 14.02 s among 12 requests; existing client measurements do not identify the per-request queue/admission cause.
+- Target-only whole-device NVML in S1's six-cell matrix reported GPU busy mean 95.25% (median 99%, p95 100%) and memory-controller busy mean 38.43% (p95 43%). Those are sampled whole-device busy percentages, **not** SM compute throughput, Tensor utilization, HBM bandwidth, or per-process attribution. VRAM was 11,478 MiB; SM clock mean/p95 1,513/1,530 MHz, memory clock 877 MHz, power mean/p95/max 225.85/289.30/307.75 W, temperature max 72 C.
+- Targeted root NCU evidence is for actual Falcon-derived L43 M4 GPTQ operator fixtures, not live whole-model Graph: S1 gate-up duration 0.290496 ms, DRAM read+write 42.217 MB, effective boundary ratio 145.3 GB/s; S1 down 0.186112 ms, 21.502 MB, 115.5 GB/s. Tensor instruction counters were zero for those two GPTQ fixture kernels. These values do not answer whole-forward HBM/SM/Tensor utilization.
+- G020 offline G019 trace owner windows show for stable S1 1K/bs1 annotation: GPTQ gate_up/down 9.91/6.40 ms, Attention 2.46 ms, identified Mamba 0.69 ms, UNKNOWN 7.69 ms; interval-union kernel span 29.58 ms within 30.55 ms annotated step. At bs4 the corresponding owner sums are 11.41/7.30/2.91/1.79/7.20 ms (Other GEMM), UNKNOWN 2.19 ms, union 35.90 ms within 36.98 ms. These are intrusive profiled trace-window activity sums (some overlap), not normal service wall time or exclusive owner budgets. Graph node IDs and full hardware counters are absent.
+- The 96-output FPM capture provides request-owned scheduled GPU-work snapshots and CUDA Event timing. Across 43 EXTEND forwards, `sum(req.extend_input_len)=75,021`; summed `PrefillStats.log_input_tokens=75,376`, a 355-token discrepancy to retain, not reconcile by guess. Cached-token snapshots summed to zero with radix disabled. Dividing the per-request scheduled token sum by the sum of CUDA Event forward intervals (21.6828 s) gives a diagnostic 3,459.9 scheduled tokens/s, **not** complete request prompt TPS or GPU active union. Decode yielded 2,888 token steps over 68.0653 Event-seconds = 42.43 steps/s; again diagnostic interval-sum ratio, not qualified Decode GPU TPS. Step Event p50/p95 is 28.79/33.65 ms; scheduler wall interval sum was 140.00 s across decode Forwards, a different boundary.
+- Cache, request lifecycle wait, c8+ saturation, statistically useful p99, matched 3090 comparison, and complete model-Graph hardware counters remain not measured or incomplete. No single optimization-owner recommendation is supportable because unknown GEMV/GEMM and hardware-level throughput are unresolved.
 
-## Scope and method
+## Unified matrix and provenance
 
-Target GPU: Tesla V100-SXM2-16GB UUID `GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189`; RTX 2060 excluded. The captured service cells are 1K/4K prompt × concurrency 1/2/4, three repeats per cell, 256 greedy output tokens, using the Falcon model revision below. Service runs were uninstrumented for NCU; the subsequent NCU runs were separate. Service launch used CUDA Graph batch sizes 1/2/4, static memory fraction 0.76, tilelang FA V100 attention, radix cache disabled and piecewise CUDA Graph disabled. Candidate dispatch was separately confirmed via runtime log; mere extension loading is not the criterion.
+The row-level evidence matrix is `artifacts/r17-evidence-matrix.json`, regenerated offline by `build_metric_matrix.py`; hash/provenance manifest is `artifacts/manifest.json`. Each available S1/Candidate service condition (1K/4K × c1/c2/c4) records binary SHA, model revision, request counts, repeat counts, output TPS, TTFT/ITL/E2E sample summaries, explicit unavailable fields and boundaries. FPM and G020/NCU/NVML data remain distinct records by capture and boundary. The script does not initialize CUDA or load the model.
 
-| Route | Extension path | SHA-256 |
-|---|---|---|
-| S1 | `/mnt/data/pc01/sglang-v100-migration/experiments/E026/frozen-s1-runtime/sgl_kernel/sm70/common_ops.abi3.so` | `fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842` |
-| G017 Candidate (opt-in) | `/mnt/data/pc01/sglang-v100-migration/experiments/E026/g017-close-final-sm70.so` | `c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9` |
+Statuses are per-metric: `MEASURED`, `PARTIAL`, `NOT_MEASURED`, `NOT_RUN`, `UNSUPPORTED`, or `UNRESOLVED_COMPARABILITY`. No absent counter is zero-filled. For every small-n c1/c4 service sample, p99 is deliberately not reported as qualified.
 
-Model revision: `52036ae497a2c0c253e17f98cc8652f2f7082ae3`; decode: temperature 0, greedy, ignore EOS. Each cell has 3 wave repeats. Within-wave token ID identity was true for every recorded wave. Reported TTFT / E2E percentiles pool the 3×concurrency request samples, using nearest-rank selection; ITL p50 is the median of per-request stream ITL p50 values, and ITL p95 is the p95 of per-request stream ITL p95 values. These request quantiles have only 3 samples at c1 and 12 at c4; no p99 is reported. Mean aggregate tok/s is the arithmetic mean of three wave aggregate rates. These are harness-level measured outputs, not confidence-bounded estimates.
+## Service performance — uninstrumented; observed
 
-## Service performance — OBSERVED
+The archived S1 and Candidate service JSON each contain 18 waves covering 1K/4K × c1/c2/c4, three repeats per cell, 256 greedy output tokens/request, target V100, model revision above. Candidate dispatch/path identity is verified in its server evidence. The primary c1/c4 summary (mean of three wave aggregate rates; request quantiles pooled over 3 c1 or 12 c4 requests) is:
 
-| Route | Prompt | Concurrency | Mean aggregate output tok/s | TTFT p50 / p95 (ms) | Per-request ITL p50 / p95 (ms) | E2E p50 / p95 (ms) |
-|---|---:|---:|---:|---:|---:|---:|
-| S1 | 1K | 1 | 33.70 | 312.7 / 312.7 | 28.55 / 32.51 | 7,596 / 7,596 |
-| Candidate | 1K | 1 | 36.55 | 307.7 / 307.7 | 26.25 / 27.08 | 7,005 / 7,005 |
-| S1 | 1K | 4 | 103.78 | 815.7 / 1,104.6 | 34.25 / 36.71 | 9,863 / 9,867 |
-| Candidate | 1K | 4 | 111.08 | 804.7 / 1,099.7 | 31.74 / 35.27 | 9,213 / 9,220 |
-| S1 | 4K | 1 | 29.68 | 1,198.3 / 1,198.3 | 29.11 / 30.03 | 8,625 / 8,625 |
-| Candidate | 4K | 1 | 31.88 | 1,194.4 / 1,194.4 | 26.79 / 27.50 | 8,030 / 8,033 |
-| S1 | 4K | 4 | 47.73 | 2,623.7 / 14,021.0 | 36.31 / 38.15 | 12,820 / 21,452 |
-| Candidate | 4K | 4 | 50.87 | 2,622.6 / 13,294.3 | 33.48 / 34.60 | 12,093 / 20,131 |
+| Route | Prompt | c | Output tok/s | TTFT p50 / p95 ms | ITL p50 / p95 ms | E2E p50 / p95 ms | request n |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| S1 | 1K | 1 | 33.70 | 312.7 / 313.7 | 28.55 / 32.54 | 7,596 / 7,599 | 3 |
+| Candidate | 1K | 1 | 36.55 | 307.7 / 308.7 | 26.25 / 27.08 | 7,005 / 7,007 | 3 |
+| S1 | 1K | 4 | 103.78 | 815.7 / 1,104.6 | 34.25 / 36.71 | 9,863 / 9,867 | 12 |
+| Candidate | 1K | 4 | 111.08 | 804.7 / 1,099.7 | 31.74 / 35.27 | 9,213 / 9,220 | 12 |
+| S1 | 4K | 1 | 29.68 | 1,198.3 / 1,199.8 | 29.11 / 30.03 | 8,625 / 8,627 | 3 |
+| Candidate | 4K | 1 | 31.88 | 1,194.4 / 1,196.0 | 26.79 / 27.50 | 8,030 / 8,033 | 3 |
+| S1 | 4K | 4 | 47.73 | 2,623.7 / 14,021.2 | 36.31 / 38.15 | 12,821 / 21,452 | 12 |
+| Candidate | 4K | 4 | 50.87 | 2,622.6 / 13,295.2 | 33.48 / 34.60 | 12,093 / 20,132 | 12 |
 
-Relative mean aggregate tok/s change Candidate vs S1 in the four reported cells: 1K/c1 +8.4%, 1K/c4 +7.0%, 4K/c1 +7.4%, 4K/c4 +6.6%. This is a descriptive comparison for these matched harness settings, not a causal confidence interval. Candidate's lower median/p95 ITL and E2E are also observed here; no claim is made about varied prompts, sampling, longer contexts, other batch schedules, or p99.
+The service harness reports output throughput, not independent request/s or input TPS. Request IDs exist within run JSON, but there is no per-request server arrival→enqueue→admission→prefill timestamp chain. TTFT is client request-start to first streamed token and includes any queue/admission wait. In particular, 4K/c4 S1 has a 14.02 s observed p95 TTFT; existing data cannot separate queue from prefill or cache wait. No p99 claim is justified by 3/12 requests. c2 data are in the matrix and raw JSON; not repeated here.
 
-**Queue/latency interpretation:** 4K/c4 waves submit four requests together and show up to 13–14s client TTFT and ~20–21s E2E. The harness has no server-side enqueue/dequeue timestamps, so request queue waiting cannot be isolated from client TTFT. Treat these as user-visible client latencies, not decode-only service time. Aggregate wave tok/s includes request/wave scheduling behavior and is not RPS or prefill throughput.
+## Whole-device NVML — observed, window-scoped
 
-## Whole-device NVML — OBSERVED
+S1 and Candidate each have target-UUID-only 1 Hz NVML CSVs with 279 samples (~278 s) spanning six cells, not tagged per request/cell. S1 GPU busy mean/median/p95 95.25/99/100%; memory-controller busy 38.43% mean, 43% p95; VRAM 11,478 MiB; SM clock 1,513 MHz mean / 1,530 p95; memory clock 877 MHz; power 225.85 W mean / 289.30 p95 / 307.75 max; temperature max 72 C. Candidate matrix values are preserved in the matrix/report source: GPU busy mean 95.33%, memory busy 38.46%, SM clock mean 1,520.65 MHz, power mean 227.03 W, max temperature 72 C. Throttle mask `0x4` occurred in some prior samples; without mapping the exact raw active mask and sample window, no causal thermal/power claim is made. NVML percentages are not compute or HBM counters.
 
-The per-second CSVs each contain 279 samples (~278s), targeted only to the V100 UUID, and span the six service cells; samples are not labelled per individual request/cell. Statistics are descriptive across that complete matrix window.
+## NCU hardware — actual Falcon-derived operator fixtures, not live Graph
 
-| Route | GPU busy mean / median / p95 | Memory busy mean / median / p95 | VRAM used mean (MiB) | SM clock mean / p95 (MHz) | Mem clock mean (MHz) | Power mean / p95 / max (W) | Temp mean / max (°C) |
-|---|---|---|---:|---|---:|---|---|
-| S1 | 95.25 / 99 / 100% | 38.43 / 41 / 43% | 11,478 | 1,513 / 1,530 | 877 | 225.85 / 289.30 / 307.75 | 66.90 / 72 |
-| Candidate | 95.33 / 99 / 100% | 38.46 / 41 / 43% | 11,454 mean; 11,478 max | 1,521 / 1,530 | 877 | 227.03 / 290.24 / 300.93 | 67.12 / 72 |
+Root NCU 2025.1.1.0, kernel replay, target V100 UUID isolation profiled Falcon L43 M4 gate-up/down operands for S1 and Candidate. Per-fixture results in `artifacts/ncu-*.csv`; bytes/duration share the replayed kernel boundary. S1: gate-up 0.290496 ms, DRAM read/write 39.875/2.342 MB, effective ratio 145.3 GB/s; down 0.186112 ms, 19.793/1.709 MB, 115.5 GB/s. Candidate gate-up 0.234624 ms, 39.799/14.303 MB, 230.6 GB/s; down 0.125248 ms, 19.771/5.391 MB, 200.9 GB/s. Candidate fixture elapsed is 19.2% / 32.7% lower for these isolated gates, not whole-forward savings. Tensor pipe counters are zero in these four GPTQ kernels.
 
-Active throttle-reason mask included `0x4` in some samples and `0x0` in others. The mask is preserved as raw evidence; this report does not infer the reason represented by `0x4`. NVML GPU busy is a sampled whole-device busy percentage. It does not identify compute/Tensor utilization, attribute work to this process, or provide effective bandwidth.
+GV100 reports `sm__throughput.avg`, `dram__throughput.avg`, and `lts__throughput.avg` as `n/a` for these kernel replay aggregates; this is unsupported/evaluation failure for these specific aggregate metrics, not zero. NCU metric query is possible under authorized root; no full Falcon Graph NCU pass exists in this evidence. Duplicating fixture values as full-model utilization would be invalid. PCIe aggregate, per-Graph Tensor/SM utilization, launch overhead and full Graph L2 hit rate remain NOT COLLECTED.
 
-## NCU actual Falcon-derived GPTQ M4 fixtures — OBSERVED
+## G020 GPU decode owner ledger — partial profile window
 
-NCU 2025.1.1.0 used root, one selected kernel and kernel replay on the V100. Fixture tensors are captured from Falcon layer 43 production GPTQ gate-up/down execution (`x=[4,3072]`; gate-up output width 24576, down output width 3072); the wrapper was routed S1 or the SHA-pinned Candidate extension. Reports identify the exact kernel and grid. This measures the fixture's production kernel, **not a live CUDA Graph node or full Falcon decode pass**.
+G020 reused real G019 PyTorch/CUPTI trace windows; same V100 model/route lineage, profiler enabled, 3 requested decode steps. G020 annotations have common GPU timestamp coordinates with GPU activities and let the offline analyzer bound stable step windows, but not CUDA Graph node identities. Representative S1 stable step averages:
 
-Values labelled `.avg` are NCU's average across profiler passes; bytes and GPU duration `.sum` are read from the same captured kernel replay boundary. Effective GB/s below is calculated as `(dram read bytes.sum + dram write bytes.sum) / gpu duration.sum` using decimal GB/s. It is replay-boundary effective DRAM traffic per kernel duration, not a sustained Graph rate. The sample may reflect replay/cache behavior and should not be extrapolated to whole-device HBM utilization.
+| Condition / actual annotated batch | GPTQ gate_up | GPTQ down | Attention | identified Mamba | Other GEMM | Elementwise/norm | memcpy | UNKNOWN | kernel interval union / annotation |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1K / bs1 | 9.91 ms | 6.40 | 2.46 | 0.69 | 0.00 | 2.19 | 0.26 | 7.69 | 29.58 / 30.55 ms |
+| 1K / bs4 | 11.41 ms | 7.30 | 2.91 | 1.79 | 7.20 | 2.82 | 0.27 | 2.19 | 35.90 / 36.98 ms |
+| 4K / bs1 | 9.86 ms | 6.36 | 3.00 | 0.69 | 0.00 | 2.17 | 0.26 | 7.76 | 30.08 / 31.04 ms |
+| 4K / bs3 | 11.49 ms | 7.33 | 4.94 | 1.43 | 7.21 | 2.87 | 0.28 | 2.20 | 37.72 / 39.59 ms |
 
-| Route / projection | Grid (x,y,z) | GPU duration `.sum` (µs) | DRAM read/write `.sum` (MB) | Effective DRAM GB/s | L2 bytes `.avg` (MB) | SM active cycles `.avg` | SM issue active `.avg` | FP16 inst `.avg` | FMA inst `.avg` | Tensor inst / cycles `.avg` | Avg active warps / issue (NCU rate; % ref) | Long scoreboard `.avg` (warp cycles) |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| S1 gate-up | 192,1,24 | 290.496 | 39.875 / 2.342 | 145.3 | 3.139 | 364,604 | 170,734 | 134,609 | 165,137 | 0 / 0 | 18.20 (113.78%) | 1,805,282 |
-| Candidate gate-up | 192,1,24 | 234.624 | 39.799 / 14.303 | 230.6 | 2.836 | 290,253 | 187,529 | 58,982 | 289,094 | 0 / 0 | 10.25 (64.05%) | 606,935 |
-| S1 down | 24,1,96 | 186.112 | 19.793 / 1.709 | 115.5 | 1.890 | 220,165 | 86,385 | 67,962 | 83,226 | 0 / 0 | 21.62 (135.14%) | 1,206,732 |
-| Candidate down | 24,1,96 | 125.248 | 19.771 / 5.391 | 200.9 | 1.290 | 155,734 | 93,771 | 29,491 | 144,547 | 0 / 0 | 9.24 (57.74%) | 276,988 |
+Owner duration sums can overlap; interval union removes temporal overlap. `UNKNOWN` includes generic GEMV/GEMM with no source-backed callsite. Annotation tail and auxiliary streams are not forced into owners. Actual graph-node association, complete owner exclusivity across all GPU activity, SM/Tensor/HBM utilization, and unprofiled cost are not available. G020 is trace-window attribution only; do not compare it by subtraction to a different FPM run.
 
-NCU-replay duration difference: Candidate gate-up 19.2% shorter, Candidate down 32.7% shorter for this captured M4 input. **Inference limited to these isolated fixture kernels:** the two operators execute faster under the Candidate route in the NCU replay capture. This is not a whole-forward latency reduction. Candidate moves more FMA work and writes more DRAM bytes than S1 in the captured kernel; do not interpret the lower active-warps aggregate proxy as occupancy percentage. `sm__throughput.avg`, `dram__throughput.avg`, and `lts__throughput.avg` were returned as `n/a` for GV100 in these reports, not as zero. Tensor-pipe counters were observed zero for these two kernels in both routes; this says nothing about unrelated kernels in the model.
+## FPM production capture — PASS, bounded accepted Falcon S1 path
 
-## Matched S1 FPM overhead experiment — OBSERVED, limited
+FPM implementation SHA `631cfc89c2644d398a4555fcfbcb509919275bef` was pushed and verified. This 2026-10-11 S1 run pinned the target V100, had radix and piecewise graphs disabled and Graph capture sizes [1,2,4], and used 12 waves / 30 requests at 1K/4K × c1/c4, 96 outputs each. An exact `.0` endpoint subscriber wrote READY before service launch; shutdown handshake drained scheduler work and persisted final publisher/timer counters.
 
-A three-stage OFF→ON→OFF comparison was run after the earlier service runs proved to use different output lengths. The three phases used S1 SHA `fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842`, the same Falcon revision, V100 UUID, launcher/runtime parameters, Graph capture configuration [1,2,4], max-running-requests=4, prompt construction, streaming harness, 256 greedy outputs, and 1K/4K × c1/c4 with three waves per cell. The Candidate remained unloaded. Raw request JSON and target-only 1 Hz whole-device telemetry are stored outside the repository at `/mnt/data/pc01/sglang-v100-migration/experiments/E026/g021-fpm-{off-phase1,on-256-phase2,off-phase3}.json` and matching `*-telemetry.csv`; phase logs are under `/mnt/data/pc01/sglang-v100-migration/logs/g021-fpm-{off-phase1,on-256-phase2,off-phase3}.log`. Every request returned 256 output tokens.
-
-| Phase | Prompt / c | Mean aggregate output TPS | Mean client TTFT (ms) | Mean client streamed ITL (ms) | Mean client E2E (ms) |
-|---|---|---:|---:|---:|---:|
-| OFF1 | 1K / 1 | 33.53 | 300.0 | 28.77 | 7,635.9 |
-| ON | 1K / 1 | 33.49 | 309.1 | 28.76 | 7,643.5 |
-| OFF2 | 1K / 1 | 33.48 | 308.4 | 28.77 | 7,645.3 |
-| OFF1 | 1K / 4 | 73.95 | 2,369.1 | 33.70 | 10,962.8 |
-| ON | 1K / 4 | 73.93 | 2,363.4 | 33.69 | 10,953.8 |
-| OFF2 | 1K / 4 | 59.69 | 3,046.5 | 32.84 | 11,420.2 |
-| OFF1 | 4K / 1 | 29.54 | 1,210.7 | 29.24 | 8,666.6 |
-| ON | 4K / 1 | 29.55 | 1,212.9 | 29.22 | 8,663.0 |
-| OFF2 | 4K / 1 | 29.60 | 1,194.6 | 29.23 | 8,649.1 |
-| OFF1 | 4K / 4 | 29.58 | 14,179.3 | 29.24 | 21,634.9 |
-| ON | 4K / 4 | 29.59 | 14,178.0 | 29.22 | 21,628.2 |
-| OFF2 | 4K / 4 | 29.59 | 14,176.3 | 29.23 | 21,631.1 |
-
-At 1K/c4, both OFF phases showed substantial wave dispersion: OFF1 TPS `[59.23,59.86,102.76]`, ON `[59.43,102.45,59.90]`, OFF2 `[59.33,59.89,59.84]`. The ON TPS mean is essentially the OFF1 mean but above OFF2 because one fast wave shifted phase ordering; it is not evidence of a large overhead. Per-request TTFT/E2E includes queueing; actual server logs show continuous batching and queued requests. The source harness uses client-side wall timings; it does not capture server request admission or prove identical per-wave scheduler batch sequences. Across service logs, decode running batch 1/2/3/4 counts were OFF1 `134/6/12/7`, ON `146/0/13/6`, OFF2 `135/0/18/0`; Prefill new-sequence counts were OFF1 `47×1, 3×3`, ON `44×1, 3×3`, OFF2 `41×1, 3×3`. Thus identical configuration and request plan are confirmed, but realized batch schedules differ (and SGLang logs only periodic samples); this is a bounded service overhead estimate, not a perfectly paired scheduler trajectory. NVML CSVs contain 451 OFF1 and 478 ON samples; OFF2 sampler duration was interrupted by process cleanup and is not treated as a complete comparison window. Whole-device utilization is not per-process attribution.
-
-**Disposition:** For these S1, 256-token workloads, FPM-on/off means show no material TPS, TTFT or ITL change at c1 and 4K/c4; 1K/c4 is noisy but its paired ON mean is not lower than OFF1 and individual waves overlap substantially. This does not support the earlier apparent 1K/c4 103.78→75.11 or 4K/c4 47.73→24.22 differences as instrumentation effects: those were different service harness/output-length conditions (96 outputs in the later phase-varying benchmark versus 256 in the earlier matrix) and are not valid direct pairs. This three-stage test has 3 waves/cell but only 3 c1 requests/cell and 12 c4 requests/cell, so tail quantiles/P99 are not qualified. No production performance guarantee follows.
-
-## FPM, Cache, and R17 disposition
-
-- **FPM: PRODUCTION CAPTURE PASS for the bounded, already-accepted Falcon S1 path.** Commit `631cfc89c2644d398a4555fcfbcb509919275bef` is remotely verified. A ready-before-start exact `.0` subscriber capture reconciled scheduler Forward/timer/active emits/queue accepts at 2,357 each; publisher sent and subscriber received 2,506 messages (2,357 active plus 149 idle), with zero observed drops, failures, pending shutdown work, decode errors or sequence gaps. The experimental sidecar joins Forward identity, request snapshot, CUDA Event duration and graph selection; the v1 schema is unchanged and retains scheduler `wall_time` semantics. This is a bounded pass, not a PUB/SUB durability guarantee. FPM scope is closed; do not add further FPM qualification gates. See the final-capture section and audit artifact below. Earlier endpoint/lifecycle captures are superseded for the accepted-path decision.
-- **Decode response percentiles: PARTIAL OBSERVED.** TTFT, per-request streamed ITL p50/p95, and E2E p50/p95 are reported at 3 repeats only. p99 is not statistically characterized. No queue start/dequeue timestamps, queue-wait duration, RPS, or independently measured prefill token throughput exist in these artifacts.
-- **Cache cold/warm or hit rate: UNSUPPORTED / NOT MEASURED.** No token-weighted hit rate, cache layer recovered bytes/time, skipped prefill tokens, or cold-vs-warm causal test is present.
-- **State recovery (Attention KV + Mamba state): UNSUPPORTED / NOT MEASURED.** No restoration-path execution or recovery correctness/latency evidence is present.
-- **Whole-forward kernel-owner ledger / live Graph NCU: NOT MEASURED HERE.** Existing archived traces are separately bounded/partial; fixture NCU cannot fill their unknown ownership. Generic GEMV/GEMM names remain unowned absent verified source/call path.
-- **Full R17 E2E acceptance: INCOMPLETE.** No status upgrade is implied. S1 remains default; Candidate stays exact-SHA opt-in.
-
-## Reproduction and evidence files
-
-All paths are relative to repository root `experiments/G021/`.
-
-- Service source JSON: `artifacts/service-s1-all-cells.json`, `artifacts/service-candidate-dispatch-verified.json`.
-- NVML source CSV: `artifacts/nvml-s1-matrix.csv`, `artifacts/nvml-candidate-matrix.csv`. `nvml-candidate-dispatch-verified.csv` is an additional dispatch-verified sample window, not the six-cell matrix summary above.
-- NCU reports: `artifacts/ncu-s1-gateup.csv`, `ncu-candidate-gateup.csv`, `ncu-s1-down.csv`, `ncu-candidate-down.csv`.
-- Offline summary calculator: `artifacts/analyze_ncu_service.py` (no GPU action).
-- FPM: invalid old unsuffixed-endpoint outputs `artifacts/fpm-candidate.json`, `fpm-candidate-full.json`, `fpm-candidate-dispatch-verified.json`; corrected-endpoint zero-active captures `artifacts/fpm-candidate-fixed-endpoint-retry2.json`, `artifacts/fpm-candidate-fixed-endpoint-40step.json`, `artifacts/fpm-candidate-fallback.json` and their subscriber/server logs. Current-v1 compatible bounded decoder: `artifacts/fpm_subscriber_compat.py`. External archived `.0` bind corroboration: `/mnt/data/pc01/sglang-v100-migration/logs/g017-final-paired-s1-2.log`.
-- Resource/restart constraints and preflight: `preflight.md`, `resource-gate.csv`, `r17-resume-config.json`, `r17-result-schema.json`.
-
-**Bounded answer:** Under the tested local V100 Falcon-H1 settings, exact-SHA G017 Candidate dispatch is real and its M4 gate-up/down fixture kernels ran faster than S1 in targeted NCU replay; the original uninstrumented service matrix also observed higher mean output throughput in the four reported c1/c4 cells. The final bounded production FPM capture passes for the accepted S1 path and the matched OFF→ON→OFF 256-token runs provide a bounded overhead result; neither expands the measurement boundary. Whole-model/Graph SM/Tensor/HBM utilization, request queue lifecycle, cache/state recovery, p99 and several V1 matrix dimensions remain unmeasured or explicitly unsupported below. Candidate stays opt-in; S1 remains default. G021/R17 remains ACTIVE until its frozen metrics matrix is completed or each item is dispositioned with evidence.
-
-## FPM final bounded production capture — observed, not general delivery guarantee
-
-This section supersedes earlier report statements that real Falcon shutdown counters, identity, and loss accounting were absent. On 2026-10-11, a fresh S1-only Falcon service used exact endpoint `ipc:///tmp/g021-fpm-s1.0`. The subscriber established the exact socket and wrote its READY marker before server launch; its monotonic capture window enclosed the 12-wave/30-request, 1K/4K × c1/c4, 96-output request plan and graceful shutdown. Each request returned 96 tokens. V100 UUID was `GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189`; Candidate was not loaded. The shutdown path used a private scheduler control request after request draining and logged an acknowledgement before scheduler exit, permitting the existing cleanup/final audit to run.
-
-| Ledger stage | Count | Result |
+| Ledger | Count | Observation |
 |---|---:|---|
-| Scheduler Forward complete / CUDA Event timer complete | 2,357 / 2,357 | matched |
-| Active emit attempted / accepted into publisher queue | 2,357 / 2,357 | matched |
-| Internal queue drops / duplicate callbacks / unmatched timers / timeout | 0 / 0 / 0 / 0 | none observed |
-| Scheduler pending batches / completed GPU iters / timer intervals at shutdown | 0 / 0 / 0 | drained |
-| Publisher sent / send-dropped / send-failed | 2,506 / 0 / 0 | includes idle heartbeat traffic |
-| Subscriber received / active / idle heartbeat | 2,506 / 2,357 / 149 | active counts match |
-| Subscriber transport sequence | 0…2,505 | contiguous, zero gaps/errors |
+| scheduler Forward complete / Event timer complete / active emit / queue accept | 2,357 each | matched |
+| internal queue drop / timer duplicate / unmatched / timeout | 0 each | none observed |
+| pending scheduler snapshot / completed GPU iter / Event at shutdown | 0 each | drained |
+| publisher sent / send-drop / send-failed | 2,506 / 0 / 0 | includes 149 idle heartbeats |
+| subscriber received / active / idle | 2,506 / 2,357 / 149 | contiguous sequence 0..2505, zero gaps/errors |
 
-The final forward sidecar contains 2,357 unique `forward_iter` rows: 2,355 user-workload rows and 2 health-probe rows. It records per-Forward request IDs and pre-forward input/output token snapshot, scheduler wall duration, GPU Event duration, graph selection, and queue disposition. The service request harness independently confirms 30 non-health requests across 12 waves, each returning 96 tokens. The active v1 receiver rows account for the same 2,357 active records. The v1 schema itself remains unchanged: scheduler `wall_time` semantics remain distinct from Event time, and v1 carries no Forward identity or GPU elapsed.
+Forward identity and request-owned snapshots are in the research sidecar, not v1 wire. Across 43 user Extend forwards, request-owner sum(req.extend_input_len)=75,021; aggregate scheduler PrefillStats.log_input_tokens sum=75,376, difference 355 retained as a token-definition discrepancy. The single health-check Extend adds one request token to all-Extend owner sum (75,022). Cache snapshots are zero (radix disabled). 43 Extend Forwards' Event interval sum is 21.6828437 s; 2,312 Decode Forwards' is 68.0653266 s for 2,888 output-token steps. Event interval p50/p95 28.794/33.646 ms. Decode actual scheduled batch distribution was 2,024 bs1 and 288 bs3; selected Graph keys 1 and 4 respectively (bs3 padded to graph4). Other configured replay key evidence is in the controlled direct replay audit. Sidecar carries scheduler wall and CUDA Event separately; do not sum overlapping intervals as active union.
 
-For this bounded capture, 43 Extend forwards accumulated 75,021 scheduler-reported scheduled prefill tokens over 21.682844 CUDA Event seconds (diagnostic ratio **3,459.92 tokens/s**). This token total is the scheduler's sidecar field and is not asserted to equal client prompt tokens or cache-exclusive recomputation. The 2,312 user Decode forwards attributed 2,888 output-token steps over 68.065327 CUDA Event seconds (**42.4298 output-token steps/s**); CUDA Event interval p50/p95 was **28.794/33.646 ms**. Decode graph selections were key 1 for 2,024 forwards and key 4 for 288 actual scheduled batch-3 forwards (padding to graph key 4); no Extend forwards used Graph. The independent controlled graph audit previously recorded replay keys 1/2/4 (73/66/63 calls). Scheduler wall duration, CUDA Event elapsed, and sums of intervals remain separate; do not infer a GPU active union from these overlapping interval sums. These event/token ratios are request-workload-aligned diagnostics, not qualified end-to-end request-token throughput or a hardware counter profile.
+The Event-based ratios 3,459.9 Extend scheduled tokens/s and 42.43 Decode steps/s are diagnostic interval-sum ratios. The latter is explicitly **not** the complete GPU Decode TPS required by R17. FPM production capture is PASS for this bounded already-accepted S1 path; the pub/sub transport remains best effort by design, not durable exactly-once. No further FPM qualification gate is needed or authorized. Overhead evidence remains separate: same-S1 OFF→ON→OFF three waves/cell, 256 outputs; ordinary cells show no material shift, 1K/c4 is high variance (a ~103 TPS wave in both OFF1 and ON but not OFF2), so no deterministic instrumentation percentage is claimed.
 
-The OFF1→ON→OFF2 overhead evidence remains the separate three-phase 256-output experiment above; it must not be conflated with this 96-output production accounting capture. In the overhead experiment, each phase had three waves/cell; at 1K/c4 a single ~103 TPS wave occurred in OFF1 and ON but not OFF2, so the data do not support a deterministic overhead percentage or a strict same-schedule causal estimate. Across the other cells mean changes are small. This is bounded overhead evidence only.
+## Cache and state capability — source-supported, not run
 
-Artifacts and provenance: detailed machine-readable audit at `artifacts/fpm-source-gpu-event-audit.json`; FPM implementation is committed and remotely verified at `g018-local-v100-gpu-audit` SHA `631cfc89c2644d398a4555fcfbcb509919275bef`; external server log `/mnt/data/pc01/sglang-v100-migration/logs/g021-fpm-delivery-window.log`; request sidecar `/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl`; subscriber capture and READY marker `.../fpm-subscriber-delivery.json` and `.../fpm-subscriber-delivery.ready.json`; request plan/results `.../fpm-production-delivery-requests.json`. The subscriber script is `G018/experiments/E027/fpm_reconcile_subscriber.py`.
+The local source has GPU Radix cache and optional hierarchical host/disk paths. `mem_cache/registry.py` selects `HiMambaRadixCache` when hierarchical caching and hybrid SSM are enabled; Falcon-H1 has 44 layers with full attention and Mamba on each. Source includes host Mamba conv/temporal pool operations (`memory_pool_host.py`) and a KV+Mamba host pool assembler (`hybrid_cache/hybrid_pool_assembler.py`). This establishes implementation presence, **not** Falcon runtime correctness or measured restored reuse. The measured accepted service disabled radix cache; FPM request snapshots show cached-token sum zero. Cold/warm HiCache, tier-exclusive token hits, host/disk bytes/time, restore wait, TTFT benefit, and joint KV+Mamba prefix-frontier restore correctness are NOT_RUN/UNSUPPORTED for this dataset. Disk L3 backend was not enabled. No cache hit benefit or restore-overhead claim is made.
 
-**Residual limitations:** Zero missing messages/gaps were observed in this ready-before-start local IPC window; PUB/SUB remains best-effort, not durable or universal exactly-once. The 96-token accounting capture differs from the 256-token overhead comparison. No dedicated prefill/decode hardware-counter Graph profile, supported-cache recovery matrix, adequately powered p99/concurrency characterization, complete owner ledger, or 3090-comparability result is added. FPM production capture **PASS** is limited to this accepted S1 path; **G021/R17 remains ACTIVE**.
+## Scheduler/request lifecycle and saturation
+
+Request-side service JSON yields client TTFT/ITL/E2E but not server arrival, enqueue, admission, cache, first-token-ready or queue-exit timestamps. Periodic scheduler logs show sampled running/queued counts; they are not joined to request IDs and cannot explain the 4K/c4 tail. FPM sidecar is Forward-level, not the complete request lifecycle. Queue/admission wait, GPU admission delays, scheduling gaps, preemption and per-request cache wait remain NOT_MEASURED. c1/c2/c4 service cells exist; c8/12/16/20/24 saturation and safe upper bound were not run. P99 is not supported by existing per-cell sample sizes.
+
+## Required research answers and status
+
+1. **Actual GPU Prefill/Decode speed — PARTIAL.** Request-owned scheduled prefill token snapshots and forward Event intervals are available, with 355-token aggregate-field discrepancy; Event ratios are not GPU active TPS. Decode Event steps/s excludes a shared active-union boundary.
+2. **Service performance — PARTIAL / MEASURED at tested points.** See table and matrix. Output TPS and client TTFT/ITL/E2E p50/p95 reported; input TPS/RPS and p99 unavailable.
+3. **Actual SM/Tensor/HBM use — PARTIAL.** Whole-device NVML only for service windows; fixture-level GPTQ NCU counters only. No full Graph counters.
+4. **Major owner GPU time — PARTIAL.** G020 trace-step owner table; unknown GEMV/GEMM and missing graph-node identity prevent full budget.
+5. **Queue/admission/gap outside GPU — NOT_MEASURED.** No request-ID timestamp chain.
+6. **Cache hit reduced GPU prefill? — NOT_RUN.** Cache disabled, observed hits zero.
+7. **Host/disk restore cost vs benefit? — NOT_RUN.** No such restore workload; complete Falcon state pairing not proven.
+8. **First saturation point? — NOT_RUN beyond c4.** No c8+ scan.
+9. **V100 vs RTX3090 same workload/boundary? — UNRESOLVED_COMPARABILITY.** Historical 3090 data not aligned to workload/batch/cache/timing boundary.
+10. **Best next optimization / recoverable budget? — UNRESOLVED.** Unknown owner plus missing Graph hardware counters preclude a defensible owner/time budget.
+
+## Artifacts and reproduction
+
+- Matrix builder: `build_metric_matrix.py`; output `artifacts/r17-evidence-matrix.json`.
+- Hash manifest: `artifacts/manifest.json` (includes retained source CSV/JSON and external FPM raw hashes).
+- FPM reconciliation: `artifacts/fpm-source-gpu-event-audit.json`; implementation `g018-local-v100-gpu-audit` SHA above; exact subscriber utility and final notes at G018 `experiments/E027/`.
+- Existing services: `artifacts/service-s1-all-cells.json`, `artifacts/service-candidate-dispatch-verified.json`; NVML: `artifacts/nvml-{s1,candidate}-matrix.csv`; fixture NCU: `artifacts/ncu-{s1,candidate}-{gateup,down}.csv`.
+- Trace owner analysis: `experiments/G020/analysis.json`, offline generator `experiments/G020/analyze_traces.py`; raw traces remain in external G019 storage and are hashed in their manifest.
+- FPM external raw files: `/mnt/data/pc01/sglang-v100-migration/logs/g021-fpm-delivery-window.log`, `experiments/E026/fpm-request-sidecar.jsonl`, `fpm-subscriber-delivery.json`, `.ready.json`, `fpm-production-delivery-requests.json`.
+
+FPM PASS does not qualify the full performance contract. G021/R17 remains ACTIVE until remaining metrics are measured or individually evidence-dispositioned; no full bottleneck conclusion is claimed.

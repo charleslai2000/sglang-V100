@@ -1,0 +1,2065 @@
+{
+  "schema": "g021-r17-evidence-matrix-v1",
+  "generated_utc": "2026-10-12T00:42:52.498084+00:00",
+  "goal_status": "ACTIVE",
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "identity": {
+    "model": "Falcon-H1-7B-Instruct-GPTQ-Int4",
+    "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+    "accepted_route": "S1 default; Candidate remains exact-SHA opt-in",
+    "s1_extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+    "g021_commit": "bcd5a8cbf50f81e9169a412d30565ade5adbdc81",
+    "fpm_commit": "631cfc89c2644d398a4555fcfbcb509919275bef"
+  },
+  "service_runs": [
+    {
+      "run_id": "s1-service-1024-1-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "S1",
+      "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+      "workload": {
+        "prompt_tokens": 1024,
+        "output_tokens": 256,
+        "submitted_concurrency": 1,
+        "repeats": 3,
+        "requests": 3,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 33.700410143766696,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 312.71502998424694,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 313.66260698996484,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 28.548394970130175,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 32.53978700377047,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 7596.211499010678,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 7598.795279976912,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "s1-service-1024-2-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "S1",
+      "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+      "workload": {
+        "prompt_tokens": 1024,
+        "output_tokens": 256,
+        "submitted_concurrency": 2,
+        "repeats": 3,
+        "requests": 6,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 59.364575969908195,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 561.0575809841976,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 562.5418930430897,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 31.545489036943763,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 36.87240096041933,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 8621.724057011306,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 8628.959565015975,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "s1-service-1024-4-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "S1",
+      "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+      "workload": {
+        "prompt_tokens": 1024,
+        "output_tokens": 256,
+        "submitted_concurrency": 4,
+        "repeats": 3,
+        "requests": 12,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 103.78428872424678,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 815.7166320015676,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 1105.9634439880028,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 34.248440992087126,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 36.82425001170486,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 9862.783802032936,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 9867.762941983528,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "s1-service-4096-1-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "S1",
+      "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+      "workload": {
+        "prompt_tokens": 4096,
+        "output_tokens": 256,
+        "submitted_concurrency": 1,
+        "repeats": 3,
+        "requests": 3,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 29.684129741922092,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 1198.2854359666817,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 1201.659357000608,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 29.110206000041217,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 30.099890020210296,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 8625.013357028365,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 8626.869069994427,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "s1-service-4096-2-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "S1",
+      "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+      "workload": {
+        "prompt_tokens": 4096,
+        "output_tokens": 256,
+        "submitted_concurrency": 2,
+        "repeats": 3,
+        "requests": 6,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 46.616956036600676,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 1444.7383399819955,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 2369.471270998474,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 33.71745499316603,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 36.63757396861911,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 10973.082008014899,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 10989.909975032788,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "s1-service-4096-4-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "S1",
+      "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+      "workload": {
+        "prompt_tokens": 4096,
+        "output_tokens": 256,
+        "submitted_concurrency": 4,
+        "repeats": 3,
+        "requests": 12,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 47.733147971985126,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 2623.6835050513037,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 14021.223738032859,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 36.31442901678383,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 38.18724799202755,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 12819.845345045906,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 21454.418818990234,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-s1-all-cells.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "candidate-service-1024-1-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "Candidate",
+      "extension_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+      "workload": {
+        "prompt_tokens": 1024,
+        "output_tokens": 256,
+        "submitted_concurrency": 1,
+        "repeats": 3,
+        "requests": 3,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 36.54566918012445,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 307.6546890079044,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 307.6835789834149,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 26.249330025166273,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 27.326058014295995,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 7004.916706995573,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 7006.189234962221,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "candidate-service-1024-2-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "Candidate",
+      "extension_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+      "workload": {
+        "prompt_tokens": 1024,
+        "output_tokens": 256,
+        "submitted_concurrency": 2,
+        "repeats": 3,
+        "requests": 6,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 64.08192917589679,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 561.0741540440358,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 564.4422780023888,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 29.08648003358394,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 30.348633008543402,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 7987.682084960397,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 7992.892720038071,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "candidate-service-1024-4-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "Candidate",
+      "extension_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+      "workload": {
+        "prompt_tokens": 1024,
+        "output_tokens": 256,
+        "submitted_concurrency": 4,
+        "repeats": 3,
+        "requests": 12,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 111.08336081686835,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 804.6940970234573,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 1100.5183790111914,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 31.742905033752322,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 35.48908099764958,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 9212.999841955025,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 9221.667026984505,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "candidate-service-4096-1-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "Candidate",
+      "extension_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+      "workload": {
+        "prompt_tokens": 4096,
+        "output_tokens": 256,
+        "submitted_concurrency": 1,
+        "repeats": 3,
+        "requests": 3,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 31.876665450513233,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 1194.3996130139567,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 1195.9366319933906,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 26.794161996804178,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 27.665991976391524,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 8030.409105995204,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 8032.936003000941,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "candidate-service-4096-2-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "Candidate",
+      "extension_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+      "workload": {
+        "prompt_tokens": 4096,
+        "output_tokens": 256,
+        "submitted_concurrency": 2,
+        "repeats": 3,
+        "requests": 6,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 49.51926656512327,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 1448.6133179743774,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 2367.5610270001926,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 31.239429023116827,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 32.283801992889494,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 10337.192004022654,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 10343.672632006928,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 6,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    },
+    {
+      "run_id": "candidate-service-4096-4-3waves",
+      "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+      "source_commit": "G017 accepted base + service capture artifact",
+      "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+      "route": "Candidate",
+      "extension_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+      "workload": {
+        "prompt_tokens": 4096,
+        "output_tokens": 256,
+        "submitted_concurrency": 4,
+        "repeats": 3,
+        "requests": 12,
+        "cache": "radix disabled for S1; Candidate route/config as pinned in source JSON"
+      },
+      "actual_batch": {
+        "status": "PARTIAL",
+        "reason": "service JSON lacks per-forward batch; use separately scoped G020 trace / FPM captures"
+      },
+      "metrics": {
+        "output_tps": {
+          "value": 50.8675497487529,
+          "unit": "output tokens/s",
+          "boundary": "client wave aggregate, mean of 3 waves",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "input_tps": {
+          "value": null,
+          "unit": "input tokens/s",
+          "boundary": "not timed as a separate service interval",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Harness reports output TPS only."
+        },
+        "rps": {
+          "value": null,
+          "unit": "requests/s",
+          "boundary": "not exported as a separately bounded request rate",
+          "samples": 3,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Wave aggregate TPS cannot be relabelled RPS."
+        },
+        "ttft_ms_p50": {
+          "value": 2622.6008670055307,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p95": {
+          "value": 13295.179103966802,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "ttft_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to first streamed output",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Only 3 c1 / 12 c4 requests per cell; p99 not statistically supported."
+        },
+        "itl_ms_p50": {
+          "value": 33.47683098400012,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval per request; median of per-request p50",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "itl_ms_p95": {
+          "value": 34.60744896437973,
+          "unit": "ms",
+          "boundary": "streamed inter-token interval; p95 of per-request p95",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p50": {
+          "value": 12092.896140995435,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p95": {
+          "value": 20131.87006994849,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "MEASURED"
+        },
+        "e2e_ms_p99": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "client request start to completion",
+          "samples": 12,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Insufficient request samples for p99."
+        },
+        "queue_admission_wait": {
+          "value": null,
+          "unit": "ms",
+          "boundary": "server enqueue/admission timestamp pair",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "NOT_MEASURED",
+          "reason": "Client trace has no server arrival/admission timestamps."
+        },
+        "actual_running_queued": {
+          "value": null,
+          "unit": "requests",
+          "boundary": "per-request server lifecycle",
+          "samples": 0,
+          "source": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+          "status": "PARTIAL",
+          "reason": "Periodic server logs show queue/running observations but are not aligned to these exact request IDs."
+        },
+        "nvml_gpu_busy": {
+          "value": null,
+          "unit": "%",
+          "boundary": "per-request aligned device window",
+          "samples": 0,
+          "source": "artifacts/nvml-s1-matrix.csv",
+          "status": "UNAVAILABLE",
+          "reason": "Existing whole-device window spans multiple cells and has no per-request tags; matrix aggregate is documented in report."
+        }
+      },
+      "status": "PARTIAL"
+    }
+  ],
+  "fpm_capture": {
+    "run_id": "fpm-s1-ready-before-start-20261011",
+    "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+    "source_commit": "631cfc89c2644d398a4555fcfbcb509919275bef",
+    "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+    "route": "S1",
+    "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+    "workload": {
+      "prompts": [
+        1024,
+        4096
+      ],
+      "requested_concurrency": [
+        1,
+        4
+      ],
+      "waves": 12,
+      "requests": 30,
+      "outputs_each": 96,
+      "observed_cache": "radix disabled; per-request cached_tokens_before_forward sum 0"
+    },
+    "actual_batch_distribution": {
+      "1": 2024,
+      "3": 288
+    },
+    "decode_graph_key_distribution": {
+      "1": 2024,
+      "4": 288
+    },
+    "metrics": {
+      "scheduled_prefill_tokens": {
+        "value": 75021,
+        "unit": "tokens",
+        "boundary": "sum of per-request extend_input_len snapshots across user EXTEND forwards; excludes health-check",
+        "samples": 49,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "aggregate_prefill_stats_tokens": {
+        "value": 75376,
+        "unit": "tokens",
+        "boundary": "sum of PrefillStats.log_input_tokens across 43 user EXTEND forwards (health-check excluded)",
+        "samples": 43,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "PARTIAL"
+      },
+      "prefill_token_definition_difference": {
+        "value": 355,
+        "unit": "tokens",
+        "boundary": "aggregate PrefillStats sum minus sum(req.extend_input_len) on same 43 user EXTEND forwards",
+        "samples": 43,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "PARTIAL"
+      },
+      "all_extend_request_owner_tokens_including_health": {
+        "value": 75022,
+        "unit": "tokens",
+        "boundary": "sum request extend_input_len across all EXTENDs including one health probe",
+        "samples": 44,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "health_probe_extend_forwards": {
+        "value": 1,
+        "unit": "forward",
+        "boundary": "health endpoint EXTEND excluded from user-workload TPS",
+        "samples": 1,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "request_cached_tokens_before_forward_sum": {
+        "value": 0,
+        "unit": "tokens",
+        "boundary": "sum of per-request pre-forward cached token snapshots including health probe",
+        "samples": 49,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "prefill_cuda_event_elapsed_sum": {
+        "value": 21.68284366607666,
+        "unit": "s",
+        "boundary": "sum of one CUDA Event interval per EXTEND Forward; not active union",
+        "samples": 43,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "prefill_event_bound_tokens_per_second": {
+        "value": 3459.9244063808933,
+        "unit": "tokens/s",
+        "boundary": "scheduled Extend tokens divided by accumulated CUDA Event duration; diagnostic, overlapping intervals not unioned",
+        "samples": 43,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "PARTIAL"
+      },
+      "decode_output_token_steps": {
+        "value": 2888,
+        "unit": "tokens",
+        "boundary": "one output-token step per scheduled non-speculative request-forward",
+        "samples": 2312,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "decode_cuda_event_elapsed_sum": {
+        "value": 68.06532659721374,
+        "unit": "s",
+        "boundary": "sum of CUDA Event forward intervals; not GPU active union",
+        "samples": 2312,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "decode_event_bound_steps_per_second": {
+        "value": 42.429826526656534,
+        "unit": "steps/s",
+        "boundary": "token steps divided by accumulated Event intervals; diagnostic, not complete GPU Decode TPS",
+        "samples": 2312,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "PARTIAL"
+      },
+      "decode_step_event_p50_ms": {
+        "value": 28.793855667114258,
+        "unit": "ms",
+        "boundary": "single-Forward CUDA Event elapsed",
+        "samples": 2312,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "decode_step_event_p95_ms": {
+        "value": 33.64556884765625,
+        "unit": "ms",
+        "boundary": "single-Forward CUDA Event elapsed",
+        "samples": 2312,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "scheduler_wall_sum_prefill": {
+        "value": 32.59320602420485,
+        "unit": "s",
+        "boundary": "scheduler wall interval sum, separate from Event time",
+        "samples": 43,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "scheduler_wall_sum_decode": {
+        "value": 139.9991825541947,
+        "unit": "s",
+        "boundary": "scheduler wall interval sum, separate from Event time",
+        "samples": 2312,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "MEASURED"
+      },
+      "gpu_active_union": {
+        "value": null,
+        "unit": "s",
+        "boundary": "common device timestamp interval union",
+        "samples": 0,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "UNSUPPORTED",
+        "reason": "CUDA Event elapsed intervals have no shared absolute CUDA timestamp coordinate; interval sums are not a union."
+      },
+      "queue_admission_and_gap": {
+        "value": null,
+        "unit": "ms",
+        "boundary": "request arrival/enqueue/admission and worker scheduling gap",
+        "samples": 0,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "NOT_MEASURED",
+        "reason": "FPM snapshots are Forward-bound; no request lifecycle event chain."
+      },
+      "cache_reused_tokens": {
+        "value": 0,
+        "unit": "tokens",
+        "boundary": "accepted S1 capture; radix disabled and cached_tokens_before_forward snapshots sum to zero",
+        "samples": 49,
+        "source": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+        "status": "OBSERVED"
+      }
+    },
+    "transport_ledger": {
+      "scheduler_active_forward": 2357,
+      "publisher_sent": 2506,
+      "subscriber_received": 2506,
+      "subscriber_active": 2357,
+      "idle_records": 149,
+      "sequence_first_last": [
+        0,
+        2505
+      ],
+      "sequence_gaps": 0,
+      "queue_drops": 0,
+      "send_drops": 0,
+      "send_failed": 0,
+      "pending_batches": 0,
+      "pending_gpu_intervals": 0
+    },
+    "qualification_scope": "PASS for bounded accepted Falcon S1 production capture; no further FPM gates.",
+    "status": "PARTIAL for R17 GPU throughput (event-bound diagnostic only)"
+  },
+  "hardware_inventory": {
+    "whole_device_nvml": {
+      "status": "MEASURED_WINDOW_AGGREGATE",
+      "evidence": "experiments/G021/artifacts/nvml-s1-matrix.csv",
+      "summary": {
+        "GPU busy mean/median/p95": "95.25/99/100 %",
+        "Memory busy mean/p95": "38.43/43 %",
+        "VRAM used": "11478 MiB",
+        "SM clock mean/p95": "1513/1530 MHz",
+        "memory clock": "877 MHz",
+        "power mean/p95/max": "225.85/289.30/307.75 W",
+        "temperature max": "72 C"
+      },
+      "limitation": "Whole-device windows span six service cells, not per-request; NVML Busy is not SM throughput or HBM bandwidth."
+    },
+    "ncu_actual_falcon_derived_kernel_fixtures": {
+      "status": "MEASURED_KERNEL_SCOPE",
+      "evidence": [
+        "experiments/G021/artifacts/ncu-s1-gateup.csv",
+        "experiments/G021/artifacts/ncu-s1-down.csv"
+      ],
+      "values": {
+        "S1 gate_up": {
+          "duration_ms": 0.290496,
+          "dram_read_MB": 39.875,
+          "dram_write_MB": 2.342,
+          "effective_DRAM_GB_s": 145.3,
+          "tensor_pipe_instructions": 0
+        },
+        "S1 down": {
+          "duration_ms": 0.186112,
+          "dram_read_MB": 19.793,
+          "dram_write_MB": 1.709,
+          "effective_DRAM_GB_s": 115.5,
+          "tensor_pipe_instructions": 0
+        }
+      },
+      "limitation": "Real Falcon L43 M4 operand fixture under NCU kernel replay, not live Graph. GV100 sm__throughput.avg, dram__throughput.avg, lts__throughput.avg are n/a in these reports; NCU queried metrics are supported but no new full Graph profile exists."
+    },
+    "real_graph_full_model_hardware_counters": {
+      "status": "NOT_COLLECTED",
+      "value": null,
+      "reason": "Archived G019 CUDA activity traces do not carry Graph node identity or hardware counters. No directly attributable full-model Graph NCU measurement in repository."
+    }
+  },
+  "owner_ledger": {
+    "status": "PARTIAL_TRACE_WINDOW",
+    "evidence": "experiments/G020/analysis.json",
+    "s1_1k_bs1_stable_step_ms": {
+      "GPTQ gate_up": 9.91,
+      "GPTQ down": 6.4,
+      "Attention": 2.46,
+      "Mamba": 0.69,
+      "Other GEMM": 0.0,
+      "Elementwise_norm": 2.19,
+      "Memcpy_memset": 0.26,
+      "UNKNOWN": 7.69,
+      "kernel_union": 29.58,
+      "annotation_span": 30.55
+    },
+    "s1_1k_bs4_stable_step_ms": {
+      "GPTQ gate_up": 11.41,
+      "GPTQ down": 7.3,
+      "Attention": 2.91,
+      "Mamba": 1.79,
+      "Other GEMM": 7.2,
+      "Elementwise_norm": 2.82,
+      "Memcpy_memset": 0.27,
+      "UNKNOWN": 2.19,
+      "kernel_union": 35.9,
+      "annotation_span": 36.98
+    },
+    "limitation": "Three-step torch.profiler windows with per-step GPU annotations; owner durations are sums, can overlap; graph node IDs absent; UNKNOWN includes unowned GEMV/GEMM. Not uninstrumented service timing."
+  },
+  "cache_capability": {
+    "status": "SOURCE_SUPPORTED_BUT_NOT_RUN",
+    "observed_service": "radix/hierarchical cache disabled; cached tokens 0 in measured S1 request set.",
+    "source": "SGLang registry selects HiMambaRadixCache when enable_hierarchical_cache and hybrid SSM; Falcon config has all 44 layers with both full attention and Mamba. Host Mamba pool/restore implementation exists in memory_pool_host.py and hybrid_cache/hybrid_pool_assembler.py.",
+    "L1_gpu": "Radix prefix cache available in source but disabled in measured service; cold/warm benefit NOT_RUN.",
+    "L2_host": "HiCache host KV + Mamba state path present in source; Falcon-H1 runtime compatibility/correctness and measurement NOT_RUN.",
+    "L3_disk": "Optional storage backend exists; no backend/path enabled, no restore bytes/time. DISABLED/NOT_RUN.",
+    "state_pair": "Source has HiMambaRadixCache and host Mamba conv/temporal state pools, but complete Falcon joint prefix-frontier restore not demonstrated; correctness/effect UNSUPPORTED for this evidence set."
+  },
+  "scheduler_lifecycle": {
+    "status": "PARTIAL",
+    "fpm_actual_batch_counts": {
+      "decode_bs1": 2024,
+      "decode_bs3": 288,
+      "decode_graph_key1": 2024,
+      "decode_graph_key4": 288
+    },
+    "queue_wait": "NOT_MEASURED per request; server periodic queue logs are not ID-correlated.",
+    "periodic_log_observation": "The FPM capture service log is periodic and shows #queue-req 0 at sampled Prefill/Decode logs, but samples are not exhaustive or joined to HTTP request IDs; cannot rule out short queue waits.",
+    "4k_c4_tail": "Existing S1 service p95 TTFT 14021.0 ms (12 request samples across 3 waves); observed client TTFT includes queue. Root cause unresolved because request IDs are not joined to arrival/enqueue/admission/cache/first-token timestamps.",
+    "saturation": "Only c1/c4 bounded 256-output S1/Candidate cells exist for common workload; c8+ scan NOT_RUN."
+  },
+  "required_answers": [
+    {
+      "question": 1,
+      "status": "PARTIAL",
+      "answer": "Measured service output TPS is reported by workload; request-aligned Event ratios are diagnostics, not qualified GPU active TPS."
+    },
+    {
+      "question": 2,
+      "status": "PARTIAL",
+      "answer": "Service S1/Candidate TTFT/ITL/E2E p50/p95 measured at small n; p99 unsupported."
+    },
+    {
+      "question": 3,
+      "status": "PARTIAL",
+      "answer": "Whole-device NVML busy and memory-controller busy measured; full Graph SM/Tensor/HBM counters unavailable/not collected."
+    },
+    {
+      "question": 4,
+      "status": "PARTIAL",
+      "answer": "G020 trace-window owner table exists; UNKNOWN and no Graph-node mapping remain."
+    },
+    {
+      "question": 5,
+      "status": "NOT_MEASURED",
+      "answer": "No request-ID-correlated server Queue/Admission/GPU-gap lifecycle."
+    },
+    {
+      "question": 6,
+      "status": "NOT_RUN",
+      "answer": "Measured service disabled radix cache and observed zero cached tokens; causal cache-vs-prefill benefit not run."
+    },
+    {
+      "question": 7,
+      "status": "NOT_RUN",
+      "answer": "No Host/Disk restore bytes/time/benefit workload."
+    },
+    {
+      "question": 8,
+      "status": "NOT_RUN",
+      "answer": "No safe c8+ saturation scan; only c1/c4 measured."
+    },
+    {
+      "question": 9,
+      "status": "UNRESOLVED_COMPARABILITY",
+      "answer": "3090 historical workload/timing boundaries not aligned."
+    },
+    {
+      "question": 10,
+      "status": "UNRESOLVED",
+      "answer": "Partial G020 owner ledger has large UNKNOWN GEMV/GEMM; hardware counters/recoverable exclusive owner budget incomplete."
+    }
+  ]
+}

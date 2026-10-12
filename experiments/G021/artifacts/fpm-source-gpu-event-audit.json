@@ -37,7 +37,7 @@
     "subscriber_started_before_publisher": true,
     "implementation_commit": "631cfc89c2644d398a4555fcfbcb509919275bef",
     "shutdown_control": "TokenizerManager drained requests, sent private GetInternalStateReq(action=fpm_shutdown), scheduler acknowledged, exited only from fully idle on_idle, and ran its existing finally cleanup. This makes final event and publisher counters persistent without altering FPM v1 payload.",
-    "forward_sidecar_run_field_gap": "This capture records request IDs/input lengths/output-so-far, aggregate scheduled prefill token count, Event and scheduler wall durations, Graph identity and queue disposition; it does not persist per-request extend_input_len/cache counts, so no per-request actual scheduled-extend-token sum is asserted.",
+    "forward_sidecar_run_field_gap": "This capture records request IDs/input lengths/output-so-far, per-request req.extend_input_len and cached_tokens_before_forward, aggregate PrefillStats scheduled-token count, Event and scheduler wall durations, Graph identity and queue disposition. Across 43 EXTEND forwards sum(req.extend_input_len)=75021 while sum(PrefillStats.log_input_tokens)=75376; retain the 355-token metric-definition discrepancy.",
     "qualification_disposition": "PASS for the bounded accepted Falcon S1 production path. Do not add FPM-specific gates. Retain best-effort PUB/SUB and timing-scope limitations; these explicit contract boundaries are not blockers to this capture disposition."
   },
   "forward_timer_publisher_audit": {
@@ -76,7 +76,7 @@
     "sidecar_user_forward_rows": 2355,
     "sidecar_health_forward_rows": 2,
     "all_sidecar_rows_have_one_cuda_interval": true,
-    "per_request_input_tokens": "origin_input_ids_unpadded length in request snapshot; output tokens before Forward are separately recorded. The capture does not persist each request.extend_input_len; aggregate scheduled_prefill_tokens is the scheduler prefill_stats.log_input_tokens field.",
+    "per_request_input_tokens": "origin_input_ids_unpadded length and scheduled_prefill_input_tokens=req.extend_input_len were recorded per request; cached_tokens_before_forward was also recorded. Output tokens before Forward are separate. Sum of request scheduled_prefill_input_tokens=75021 versus aggregate scheduled_prefill_tokens (PrefillStats.log_input_tokens)=75376 across 43 EXTEND forwards; treat as an explicit definition/reconciliation discrepancy.",
     "decode_output_token_semantics": "one new decode token per scheduled non-speculative decode request in this non-speculative Falcon path; output tokens are attributed per Forward, not mistaken for KV context tokens."
   },
   "graph_coverage_and_batch_distribution": {
@@ -99,7 +99,10 @@
     ]
   },
   "gpu_and_scheduler_timing": {
-    "prefill_extend_scheduled_input_tokens": "75021 scheduler-reported aggregate scheduled_prefill_tokens across 43 Extend forwards; not assumed to equal client prompt tokens, request sum of extend_input_len, or cache-exclusive recomputation.",
+    "prefill_extend_scheduled_input_tokens": 75021,
+    "prefill_extend_request_owner_sum": 75021,
+    "prefill_extend_aggregate_prefill_stats_field": 75376,
+    "prefill_token_definition_difference": "Per-request sum(req.extend_input_len) and aggregate PrefillStats.log_input_tokens differ by 355 tokens in this capture. Sidecar cached_tokens_before_forward sum is zero; radix cache disabled. Not client input TPS or cache-exclusive recomputation.",
     "prefill_extend_gpu_event_elapsed_sum_s": 21.68284366607666,
     "prefill_extend_event_aggregate_tokens_per_second": 3459.9244,
     "decode_output_tokens": 2888,
@@ -148,6 +151,6 @@
     "The bounded 96-token GPU timing workload is not the same as the 256-token overhead workload; GPU TPS and FPM overhead scopes must not be conflated.",
     "No hardware-counter SM/Tensor/HBM Graph profiling, cache tier/recovery matrix, saturation/P99 matrix or complete owner attribution is supplied by this FPM artifact.",
     "PUB/SUB best-effort delivery cannot guarantee future runs; this specific ready-before-start window had no unexplained receive difference.",
-    "Per-request extend_input_len/cached_tokens_before_forward were not captured; precise per-request scheduled prefill/cache decomposition remains open as a broader R17 measurement item, not an FPM capture gate. The aggregate scheduler prefill field and per-request original-input/request IDs are present."
+    "Per-request token attribution exists. A 355-token difference remains between sum(req.extend_input_len)=75021 and summed PrefillStats.log_input_tokens=75376 across the same 43 Extend forwards; resolve their token/chunk definition before treating either as the unique actual model-token count. This is broader R17 metric interpretation, not an FPM gate."
   ]
 }

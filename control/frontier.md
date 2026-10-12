@@ -2,7 +2,7 @@
 
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
-  - frontier: FPM PASS for bounded accepted Falcon S1 scope at commit `631cfc89c2644d398a4555fcfbcb509919275bef`; no further FPM gates. Continue R17 request-aligned GPU/scheduler, target-only hardware, supported-cache dispositions, service tails, owners, comparability, and unified evidence matrix.
+  - frontier: FPM PASS; unified matrix + SHA manifest summarize existing service/NVML/fixture NCU/G020/FPM evidence. Continue actual Graph hardware counters or precise metric-specific dispositions, scheduler lifecycle/cache/service-tail evidence, owner/3090 reconciliation, and final questions.
   - task: `control/G021-v100-hardware-utilization/tasks/T001-hardware-utilization.md`
   - unblock/reopen: Prior resource gate/resume authorization remains; maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
 

@@ -1,0 +1,92 @@
+{
+  "schema": "g021-r17-artifact-manifest-v1",
+  "g021_commit": "bcd5a8cbf50f81e9169a412d30565ade5adbdc81",
+  "fpm_commit": "631cfc89c2644d398a4555fcfbcb509919275bef",
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+  "matrix": "experiments/G021/artifacts/r17-evidence-matrix.json",
+  "generator": "experiments/G021/build_metric_matrix.py",
+  "artifacts": [
+    {
+      "path": "experiments/G021/artifacts/service-s1-all-cells.json",
+      "sha256": "1990ea32863612b6ce48b2b1436fee9cb0dcb459daa6854e7ef8e91152f2511d",
+      "bytes": 1277223
+    },
+    {
+      "path": "experiments/G021/artifacts/service-candidate-dispatch-verified.json",
+      "sha256": "7b3897204e8c9ae11273d70a31893a1b7f8785399191552f4d758827a89a44a7",
+      "bytes": 1277172
+    },
+    {
+      "path": "experiments/G021/artifacts/nvml-s1-matrix.csv",
+      "sha256": "f4462c127d0c7a20e2f7ee52807599fe0cb0ce4d1f845a0f12ee493ccb8d465d",
+      "bytes": 38927
+    },
+    {
+      "path": "experiments/G021/artifacts/nvml-candidate-matrix.csv",
+      "sha256": "0beb0a3671a9e371df9f26770ffb3da3c1e0284143ef723e45bddd328b81ac66",
+      "bytes": 38906
+    },
+    {
+      "path": "experiments/G021/artifacts/ncu-s1-gateup.csv",
+      "sha256": "b8b3f197ddd47d524c575e00ff489210bb4f0ffe5829c5d21ddfd1b812effdaf",
+      "bytes": 17320
+    },
+    {
+      "path": "experiments/G021/artifacts/ncu-s1-down.csv",
+      "sha256": "51a67278f1d89a2302f305f0e12493f7fd6a6e1aeaf3582ba17800220a6f23e1",
+      "bytes": 17251
+    },
+    {
+      "path": "experiments/G021/artifacts/ncu-candidate-gateup.csv",
+      "sha256": "13f481a5e74c30c389c82e69c806ad8396d0facec1931e971dd246082416ec7e",
+      "bytes": 17046
+    },
+    {
+      "path": "experiments/G021/artifacts/ncu-candidate-down.csv",
+      "sha256": "cc7b481705dd34d8cf0e7a43c79b32990472dd2d113651bbfaf7cd7c93d4827a",
+      "bytes": 16976
+    },
+    {
+      "path": "experiments/G020/analysis.json",
+      "sha256": "65c8ebfdf2a8874c3a18c7ff2832ba479e7e028fd8e91b5d9fbe5b8f7bb031e6",
+      "bytes": 433332
+    },
+    {
+      "path": "experiments/G020/analyze_traces.py",
+      "sha256": "24264618e3af20dd34bb253a774fab4435274695f9be86d28d256f8016d62425",
+      "bytes": 7182
+    },
+    {
+      "path": "experiments/G021/report.md",
+      "sha256": "370ec82de79e075f5bc28a59972e1539398abb561a469041e890e3c934949158",
+      "bytes": 16844
+    },
+    {
+      "path": "experiments/G021/artifacts/fpm-source-gpu-event-audit.json",
+      "sha256": "352538528946765fad46919497f9e9866a4cd1d7fc60fc6fe62367023efe880c",
+      "bytes": 9692
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+      "sha256": "d703a889064675a43011ada4eb31f640025ddabbb539c332a67a437a78badc0b",
+      "bytes": 2668190
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-subscriber-delivery.json",
+      "sha256": "b1d1a00cb111b9ed2ce9fee6c312a7681daebf32a1ba2a8a60b3f641a6feb733",
+      "bytes": 857312
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g021-fpm-delivery-window.log",
+      "sha256": "56e993034038ed5a7b2d064dd46a3589a83eba9d75eca7c331b6990f0ff46e64",
+      "bytes": 1848346
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-production-delivery-requests.json",
+      "sha256": "4d5a43dcdb3ea557ecaeac852f7914b540920134c8779691237e66b5ad487520",
+      "bytes": 1454
+    }
+  ],
+  "status": "PARTIAL_G021_ACTIVE; FPM bounded accepted S1 capture PASS; no qualification claims beyond recorded boundaries"
+}
