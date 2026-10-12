@@ -1,0 +1,153 @@
+{
+  "schema": "g021-fpm-source-gpu-event-audit-v3",
+  "status": "PRODUCTION_CAPTURE_PASS_FOR_BOUNDED_ACCEPTED_FALCON_S1_PATH; no additional FPM qualification gates",
+  "source_worktree": "/home/charles/Workspaces/3rdparty/sglang-V100-G018",
+  "source_base_commit": "df975fc3a209bca90536d19861c3ee7404eca45d",
+  "source_commit": "631cfc89c2644d398a4555fcfbcb509919275bef",
+  "source_branch": "g018-local-v100-gpu-audit",
+  "source_remote_verified": "origin/g018-local-v100-gpu-audit",
+  "source_changes_uncommitted": false,
+  "wire_v1": {
+    "schema_unchanged": true,
+    "fields": [
+      "version",
+      "worker_id",
+      "dp_rank",
+      "counter_id",
+      "wall_time",
+      "scheduled_requests",
+      "queued_requests"
+    ],
+    "wall_time_semantics": "scheduler wall duration; GPU CUDA Event elapsed remains outside v1 wire",
+    "delivery_contract": "PUB/SUB is best effort; no cross-process exactly-once guarantee"
+  },
+  "production_capture": {
+    "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+    "route": "S1 only; Candidate extension not loaded",
+    "service_config": "Falcon-H1-7B-Instruct-GPTQ-Int4, 1K/4K prompts, c1/c4, 3 waves/cell, 96 output tokens/request, capture graph sizes [1,2,4], radix and piecewise graphs disabled",
+    "requests_artifact": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-production-delivery-requests.json",
+    "requests": 30,
+    "waves": 12,
+    "outputs_each": 96,
+    "server_log": "/mnt/data/pc01/sglang-v100-migration/logs/g021-fpm-delivery-window.log",
+    "source_commit": "631cfc89c2644d398a4555fcfbcb509919275bef",
+    "forward_sidecar": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",
+    "subscriber_capture": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-subscriber-delivery.json",
+    "subscriber_ready_handshake": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-subscriber-delivery.ready.json",
+    "subscriber_started_before_publisher": true,
+    "implementation_commit": "631cfc89c2644d398a4555fcfbcb509919275bef",
+    "shutdown_control": "TokenizerManager drained requests, sent private GetInternalStateReq(action=fpm_shutdown), scheduler acknowledged, exited only from fully idle on_idle, and ran its existing finally cleanup. This makes final event and publisher counters persistent without altering FPM v1 payload.",
+    "forward_sidecar_run_field_gap": "This capture records request IDs/input lengths/output-so-far, aggregate scheduled prefill token count, Event and scheduler wall durations, Graph identity and queue disposition; it does not persist per-request extend_input_len/cache counts, so no per-request actual scheduled-extend-token sum is asserted.",
+    "qualification_disposition": "PASS for the bounded accepted Falcon S1 production path. Do not add FPM-specific gates. Retain best-effort PUB/SUB and timing-scope limitations; these explicit contract boundaries are not blockers to this capture disposition."
+  },
+  "forward_timer_publisher_audit": {
+    "scheduler_forward_completed": 2357,
+    "timer_completed": 2357,
+    "active_emit_attempted": 2357,
+    "queue_accepted": 2357,
+    "queue_dropped": 0,
+    "timer_duplicate": 0,
+    "unmatched_timer": 0,
+    "pending_timeout": 0,
+    "pending_scheduler_snapshots_at_shutdown": 0,
+    "completed_gpu_iters_at_shutdown": 0,
+    "timer_intervals_pending_at_shutdown": 0,
+    "transport_sent": 2506,
+    "transport_send_dropped": 0,
+    "transport_send_failed": 0,
+    "subscriber_received": 2506,
+    "subscriber_active": 2357,
+    "subscriber_idle_heartbeats": 149,
+    "subscriber_decode_errors": 0,
+    "transport_sequence_first_last": [
+      0,
+      2505
+    ],
+    "transport_sequence_gaps": 0,
+    "publisher_internal_drop": 0,
+    "transport_send_failure": 0,
+    "receiver_unexplained_difference": 0,
+    "interpretation": "Across the bounded ready-before-start window, scheduler active Forward records match active receiver records 2357:2357; publisher sent count equals receiver count including 149 idle heartbeats. No internal drop, send failure, sequence gap or unresolved difference was observed. This is one bounded observed run, not a PUB/SUB exactly-once guarantee."
+  },
+  "forward_identity_and_requests": {
+    "forward_identity": "Scheduler.run_batch allocates monotonically increasing forward_iter once before immutable FPM request snapshot; timer carries forward_iter/timer_key; experimental sidecar carries forward_iter, batch_id, request IDs and per-request pre-forward token state. v1 wire does not carry this identity.",
+    "non_health_request_ids": 30,
+    "health_probe_request_ids": 1,
+    "sidecar_user_forward_rows": 2355,
+    "sidecar_health_forward_rows": 2,
+    "all_sidecar_rows_have_one_cuda_interval": true,
+    "per_request_input_tokens": "origin_input_ids_unpadded length in request snapshot; output tokens before Forward are separately recorded. The capture does not persist each request.extend_input_len; aggregate scheduled_prefill_tokens is the scheduler prefill_stats.log_input_tokens field.",
+    "decode_output_token_semantics": "one new decode token per scheduled non-speculative decode request in this non-speculative Falcon path; output tokens are attributed per Forward, not mistaken for KV context tokens."
+  },
+  "graph_coverage_and_batch_distribution": {
+    "actual_decode_forwards": 2312,
+    "actual_decode_scheduled_batch_distribution": {
+      "1": 2024,
+      "3": 288
+    },
+    "selected_cuda_graph_key_distribution": {
+      "1": 2024,
+      "4": 288
+    },
+    "graph_key_matches": "Each batch-3 decode selects the actual captured graph key 4 due CUDA Graph padding; batch-1 selects key 1. A separate controlled audit also directly observed keys 1/2/4 (73/66/63 calls).",
+    "extend_forwards": 43,
+    "extend_graph_key": null,
+    "capture_sizes": [
+      1,
+      2,
+      4
+    ]
+  },
+  "gpu_and_scheduler_timing": {
+    "prefill_extend_scheduled_input_tokens": "75021 scheduler-reported aggregate scheduled_prefill_tokens across 43 Extend forwards; not assumed to equal client prompt tokens, request sum of extend_input_len, or cache-exclusive recomputation.",
+    "prefill_extend_gpu_event_elapsed_sum_s": 21.68284366607666,
+    "prefill_extend_event_aggregate_tokens_per_second": 3459.9244,
+    "decode_output_tokens": 2888,
+    "decode_gpu_event_elapsed_sum_s": 68.06532659721374,
+    "decode_event_aggregate_tokens_per_second": 42.42983,
+    "decode_gpu_event_latency_p50_ms": 28.79386,
+    "decode_gpu_event_latency_p95_ms": 33.64557,
+    "scheduler_wall_s": "Retained per forward in sidecar, distinct from CUDA event elapsed.",
+    "gpu_active_union": "UNSUPPORTED; interval duration sums have no common CUDA timestamp coordinate and overlapping forward streams are not converted to an active union."
+  },
+  "loss_semantics": {
+    "publisher_internal": "queue_dropped=0; send_dropped=0; send_failed=0; shutdown pending=0",
+    "late_subscriber": "Not applicable to this run: subscriber exact .0 endpoint wrote READY before service launch; its start/end monotonic bounds enclose the run and shutdown.",
+    "receiver_difference": "zero for bounded observed window: sequence 0..2505 contiguous and subscriber rows=transport sent=2506",
+    "residual_limitation": "PUB/SUB remains best-effort, not end-to-end acknowledged or durable; results establish observed run accounting only."
+  },
+  "overhead_experiment": {
+    "artifacts": {
+      "OFF1": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g021-fpm-off-phase1.json",
+      "ON": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g021-fpm-on-256-phase2.json",
+      "OFF2": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g021-fpm-off-phase3.json"
+    },
+    "same_binary_and_graph_config": true,
+    "waves_per_cell_per_phase": 3,
+    "output_tokens_per_request": 256,
+    "1k_c4_tps_waves": {
+      "OFF1": [
+        59.23,
+        59.86,
+        102.76
+      ],
+      "ON": [
+        59.43,
+        102.45,
+        59.9
+      ],
+      "OFF2": [
+        59.41,
+        59.83,
+        59.84
+      ]
+    },
+    "disposition": "No material FPM-on shift is identifiable at 1K/c1 or 4K/c1/c4. At 1K/c4, one fast wave occurs in OFF1 and ON, while OFF2 has three ~60 TPS waves; service batch/queue trajectory variability dominates. Do not assign a deterministic instrumentation percentage."
+  },
+  "unresolved": [
+    "The bounded 96-token GPU timing workload is not the same as the 256-token overhead workload; GPU TPS and FPM overhead scopes must not be conflated.",
+    "No hardware-counter SM/Tensor/HBM Graph profiling, cache tier/recovery matrix, saturation/P99 matrix or complete owner attribution is supplied by this FPM artifact.",
+    "PUB/SUB best-effort delivery cannot guarantee future runs; this specific ready-before-start window had no unexplained receive difference.",
+    "Per-request extend_input_len/cached_tokens_before_forward were not captured; precise per-request scheduled prefill/cache decomposition remains open as a broader R17 measurement item, not an FPM capture gate. The aggregate scheduler prefill field and per-request original-input/request IDs are present."
+  ]
+}

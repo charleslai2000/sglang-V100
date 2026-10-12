@@ -2,7 +2,7 @@
 
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
-  - frontier: frozen contract expands G021. First forensic the FPM zero-record publisher/IPC/subscriber lifecycle; then obtain worker/request timeline provenance before broad service/hardware/cache/owner matrices. Existing S1/Candidate, NVML and fixture NCU evidence remains partial.
+  - frontier: FPM PASS for bounded accepted Falcon S1 scope at commit `631cfc89c2644d398a4555fcfbcb509919275bef`; no further FPM gates. Continue R17 request-aligned GPU/scheduler, target-only hardware, supported-cache dispositions, service tails, owners, comparability, and unified evidence matrix.
   - task: `control/G021-v100-hardware-utilization/tasks/T001-hardware-utilization.md`
   - unblock/reopen: Prior resource gate/resume authorization remains; maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
 
