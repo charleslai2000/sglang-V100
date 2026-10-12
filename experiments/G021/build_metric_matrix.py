@@ -265,7 +265,7 @@ inputs = [ROOT/'experiments/G021/artifacts/service-s1-all-cells.json', ROOT/'exp
           STORE/'experiments/E026/r17-s1-lifecycle-client.jsonl',
           STORE/'logs/r17-lifecycle-s1-server.log', STORE/'logs/r17-lifecycle-reqtime.log',
           ROOT/'experiments/G021/analyze_lifecycle_capture.py']
-manifest = {'schema':'g021-r17-artifact-manifest-v1','g021_commit':'06f24c55acec088c1684013054c99299579a73a4',
+manifest = {'schema':'g021-r17-artifact-manifest-v1','g021_commit':'f21156e0a73e515206817f216f6c5c9a6636cc87',
  'fpm_commit':'631cfc89c2644d398a4555fcfbcb509919275bef','target_uuid':UUID,'model_revision':MODEL_REV,
  'matrix':'experiments/G021/artifacts/r17-evidence-matrix.json','generator':'experiments/G021/build_metric_matrix.py',
  'artifacts':[{'path':os.path.relpath(p,ROOT) if str(p).startswith(str(ROOT)) else str(p), 'sha256':sha(p), 'bytes':p.stat().st_size} for p in inputs],
