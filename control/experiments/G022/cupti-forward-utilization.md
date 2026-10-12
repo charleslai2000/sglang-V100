@@ -10,7 +10,7 @@ No NCU, DCGM, or Kineto was collecting simultaneously; no global profiler pause,
 
 ## Repeated matched core vector
 
-Metric names and CUPTI formula outputs are preserved literally. For each row, each cell shows three observations; `mean` is arithmetic mean of the three single-range values (not a time series). Read/write counters retain the returned `dram__bytes_*` names and raw values. Their physical byte interpretation is **not validated**, so no physical HBM bandwidth or %peak is calculated from them. `DRAM throughput` is the independent CUPTI formula metric and is reported as such.
+Metric names and CUPTI formula outputs are preserved literally. For each row, each cell shows three observations; `mean` is arithmetic mean of the three single-range values (not a time series). Read/write counters retain the returned `dram__bytes_*` names and raw values. Their byte interpretation and the derived range-average bandwidth are cross-checked against the independent CUPTI `DRAM throughput` formula; the derivation and limits are documented below. `DRAM throughput` remains independently reported as CUPTI formula output.
 
 | Workload (range; actual batch) | Forward CUDA Event, ms (rep1 / rep2 / rep3) | SM Active % | SM throughput %peak | Active warps / occupancy %peak | Tensor pipe active %peak | DRAM throughput %peak | L2 sector hit % | Effective DRAM BW GB/s (rep1 / rep2 / rep3; mean) | Effective DRAM BW / nominal 900 GB/s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -48,11 +48,19 @@ These are CUPTI throughput formula percentages. No L2 bytes/second is derived. S
 
 ## HBM/bandwidth interpretation
 
-For each accepted core-vector run, effective range-average DRAM bandwidth is calculated as `(dram__bytes_read.sum + dram__bytes_write.sum) / (Forward CUDA Event seconds)`. NVIDIA Nsight Compute's metric glossary defines `dram_read_bytes`/`dram_write_bytes` as `dram__bytes_read.sum`/`dram__bytes_write.sum` (official CLI metric table); its profiling glossary defines a sector as an aligned 32-byte chunk. The `.sum` rollup is a sum across instances of the relevant hardware unit, not an additional sum over ApplicationReplay passes; the CUPTI CounterData result is taken from the single named range once `allPassSubmitted=true`. NVIDIA's Volta V100 data sheet specifies 900 GB/s peak bandwidth for this 16-GB V100 configuration. Sources: [Nsight Compute CLI 12.8 metric table](https://archive.docs.nvidia.com/nsight-compute/2025.1/NsightComputeCli/index.html), [Nsight Compute Profiling Guide metric terminology](https://docs.nvidia.com/nsight-compute/2024.2/ProfilingGuide/index.html), [NVIDIA Tesla V100 data sheet](https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf).
+**Derived effective range-average bandwidth (observed bytes per matched Forward Event):**
 
-The independently reported `dram__throughput.avg.pct_of_peak_sustained_elapsed` provides a consistency check: e.g. Prefill1K mean byte/event bandwidth 230.1 GB/s predicts 25.57% of 900 GB/s, versus directly measured CUPTI DRAM throughput mean 25.742%; Prefill4K 212.1 GB/s predicts 23.57%, versus 23.736%; Graph1 269.4 GB/s gives 29.93%, versus 29.879%; Graph2 254.1 GB/s gives 28.23%, versus 28.096%; Graph4 256.3 GB/s gives 28.48%, versus 27.892%. Close agreement across all five distinct phases corroborates that the byte counters and event denominator are coherently interpreted for these ranges. These effective values are range-average observed traffic, not a time-series peak, and the ratio to 900 GB/s is a fraction of nominal peak, not a claim of sustained peak capability.
+| Workload | Calculation | Effective read+write GB/s | Ratio of nominal 900 GB/s |
+|---|---|---:|---:|
+| Prefill EXTEND 1K bs1 | mean(raw read+write bytes) / mean(Event seconds) | 230.1 | 25.57% |
+| Prefill EXTEND 4K bs1 | same | 212.1 | 23.57% |
+| Decode Graph1 bs1 | same | 269.4 | 29.93% |
+| Decode Graph2 bs2 | same | 254.1 | 28.23% |
+| Decode Graph4 bs4 | same | 256.3 | 28.48% |
 
-Raw read/write inputs remain available above and in supervisor logs for audit. No latency-based kernel owner attribution is made from these range totals.
+The independently reported `dram__throughput.avg.pct_of_peak_sustained_elapsed` provides a consistency check: means are 25.742%, 23.736%, 29.879%, 28.096%, and 27.892%, respectively. Derived byte/Event ratios correspond to 25.57%, 23.57%, 29.93%, 28.23%, and 28.48% of 900 GB/s. Differences are at most 0.7 percentage points. The two measurements are distinct formulas and should not be forced to match exactly; their agreement across all five phases supports this event-normalized, range-average interpretation.
+
+**Scope caveat:** CUDA Event brackets the real Forward once in each ApplicationReplay invocation; CUPTI's final CounterData range is produced only after replay passes complete. These are documented as event-normalized range averages, corroborated by `dram__throughput`, not time-resolved sampling or an NCU kernel metric. They do not measure burst peaks or a device-wide time series. `900 GB/s` is the V100 vendor nominal peak reference, not achieved capacity. Raw read/write inputs remain above and in logs; no latency-based kernel owner attribution is made from these range totals.
 
 ## Raw evidence and reproducibility
 
@@ -76,7 +84,7 @@ All `.supervisor.log` and `.results.jsonl` raw files reside in `/mnt/data/pc01/s
 
 ## Still unavailable / not claimed
 
-- Physical HBM effective GB/s, effective % of nominal peak from byte sums: withheld pending unit/aggregation validation. DRAM throughput %peak itself is measured.
+- Effective range-average DRAM bandwidth and nominal-peak ratio are reported from raw byte sums divided by the matched Forward Event, and cross-checked against the independent CUPTI DRAM-throughput formula. Device time-series peak bandwidth is not measured.
 - L2 bytes/s, individual L1, FP32/FP16 pipe activity, instruction issue and stall reasons: not captured by this seven-metric group and not substituted with kernel-level NCU values.
 - A device-wide 100-ms timeline, peak values, 100-ms means, or repeated time samples: not captured; these are repeated Forward-range captures with no time series.
 - Per-kernel or exclusive owner budgets: this is aggregate annotation scope; it does not isolate GPTQ/GEMV/attention contributions.

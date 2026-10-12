@@ -2,10 +2,9 @@
 
 ## G022-falcon-v100-c4-performance
 - T001 — P0 real Falcon hardware-utilization capture — ACTIVE
-  - frontier: CUPTI Forward-range metric vector is complete for Prefill EXTEND 1K/4K and Decode Graph1/2/4: three matched seven-metric captures/workload, plus two L2-throughput captures/workload. Effective range-average DRAM bandwidth is derived and cross-checked against CUPTI throughput/nominal peak; temporal peak and unrelated owner/service evidence remain open.
-  - task: `control/G022-falcon-v100-c4-performance/tasks/T001-c4-baseline-and-owner-ledger.md`
-  - unblock/reopen: Safe V100-only CUPTI replay completed above the 8-GiB MemAvailable floor; RTX2060 untouched. T002/kernel optimization remains explicitly paused; do not modify kernels.
-
+  - frontier: T001 hardware PASS (commit `50dde9932`) accepted by user. T002 resumed: unify c1/c2/c4 timeline+CUPTI+NCU rank; reconcile HBM wording; then validate one matched-geometry, falsifiable hotspot hypothesis through correctness → NCU → GPU Forward A/B → uninstrumented service A/B.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
+  - unblock/reopen: User explicitly lifted the pause. No repeat of the passed five-row CUPTI qualification; target-only V100 and >=8-GiB host floor remain mandatory. Keep S1 default/G017 Candidate fallback and unrelated dirty state.
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
   - frontier: Keep the frozen V1 contract open: cache restore, safe higher concurrency/P99 dispositions, remaining owner/3090 comparability and full-Graph aggregate remain unresolved. Do not re-open bounded FPM qualification.
