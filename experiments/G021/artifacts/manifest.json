@@ -59,8 +59,8 @@
     },
     {
       "path": "experiments/G021/report.md",
-      "sha256": "5767c9446439eb68c374e43cb00bd501ba891fbf704d294d889b25c8cbec8bb4",
-      "bytes": 31344
+      "sha256": "22a0e7114d062d7943da24d60a05b00464650fbbfa67cb8ea326fe2f3fe273f2",
+      "bytes": 32437
     },
     {
       "path": "experiments/G021/metric-differential-notes.md",
@@ -76,6 +76,36 @@
       "path": "experiments/G021/artifacts/fpm-source-gpu-event-audit.json",
       "sha256": "352538528946765fad46919497f9e9866a4cd1d7fc60fc6fe62367023efe880c",
       "bytes": 9692
+    },
+    {
+      "path": "experiments/E027/G018-final-audit.md",
+      "sha256": "4ddad40ec28075ef4fc4fe03b42c277ebc6a0e4509f24a89472945737a9c5b2e",
+      "bytes": 12195
+    },
+    {
+      "path": "experiments/E027/artifact-manifest.json",
+      "sha256": "08d4ff2d0d4f067e8b08034788ebf66a12b1d19148522b191b3c5608f43ba4ba",
+      "bytes": 4531
+    },
+    {
+      "path": "experiments/G019/report.md",
+      "sha256": "4b2164ff6dd1691601e1bfdf32e4de35f91d6720d20e64c3474825ed68b8f3c4",
+      "bytes": 14124
+    },
+    {
+      "path": "experiments/G019/artifact-manifest.json",
+      "sha256": "0dd8cf01bfe4ee28fb7e5d83fdafd845dffc84432297f7fbd3620aea4b05125c",
+      "bytes": 4137
+    },
+    {
+      "path": "cupti-sample/cuda_graphs_trace.cu",
+      "sha256": "d8fcef6f9e49d7a03f04cbca5f9df81611467686d03b784d56ad8392c8a0ed44",
+      "bytes": 10409
+    },
+    {
+      "path": "cupti-sample/Makefile",
+      "sha256": "6126e1e8009b0c6533c5d7b7b4f2b56a02253ad4c622371037d934fe78892e20",
+      "bytes": 3111
     },
     {
       "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-request-sidecar.jsonl",

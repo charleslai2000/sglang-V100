@@ -1,0 +1,48 @@
+{
+  "schema": "g018-artifact-manifest-v1",
+  "base_commit": "149c70f10b49ff1d1fe28ac5a7016526157a04a9",
+  "branch": "g018-local-v100-gpu-audit",
+  "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "runtime_sha256": {
+    "S1": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+    "G017_candidate": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9"
+  },
+  "local_report": "experiments/E027/G018-final-audit.md",
+  "hardware_evidence": "experiments/E027/hardware-evidence.json",
+  "telemetry_schema": "experiments/E027/telemetry-schema-v2.json",
+  "repository_assets": [
+    "experiments/E027/G018-final-audit.md",
+    "experiments/E027/hardware-evidence.json",
+    "experiments/E027/telemetry-schema-v2.json",
+    "experiments/E027/telemetry_legacy_parser.py",
+    "experiments/E027/gpu_sampler.py",
+    "experiments/E027/fpm_subscriber.py",
+    "experiments/E027/ncu_gptq_single.py",
+    "control/G018-goal.md",
+    "control/G018-plan.md",
+    "control/G018-task-T001.md"
+  ],
+  "scripts": {
+    "gpu_sampler.py_sha256": "abcbd0c0d7244e5d7ff410865412738f6412a2074911a0396d6d717e6ceb55c4",
+    "telemetry_legacy_parser.py_sha256": "671f6539447bfa73fe2835a6cdeddb2686c3bba3b52918ab6ac44f895ba6e848",
+    "fpm_subscriber.py_sha256": "3b92f0bf03583b9ce44e27b1fb9110fac3ce2bb526b3c68af0d450f1c8732038",
+    "ncu_gptq_single.py_sha256": "26515e744792b5119f3fad0ee40426e2028b3dd51d3bf0887b52ef316db0ba66"
+  },
+  "external_artifacts": [
+    {"path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-s1-fpm-v2.json", "sha256": "4739b5eb7d103643a5b40576e16c4754c9235485da57debb237a75fe17d5eb89", "kind": "FPM CUDA-event iteration capture; old scheduler field schema"},
+    {"path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-s1-fpm-v2-service.json", "sha256": "e2949c86dba24c5d24002bef87e5aaefe5e947cda9c4d555a415c566e206d34d", "kind": "instrumented service, S1, 3 repeats/cell"},
+    {"path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-s1-fpm-v2-telemetry.csv", "sha256": "0528049202d47b7da4a863bb28e0f2648155f3f1f248b8e7179496fd7e2777d7", "kind": "UUID-targeted telemetry, legacy duplicate-timestamp positional format"},
+    {"path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-candidate-fpm.json", "sha256": "5aaab6bfa6e551787789908acf53796c0bed5148696db9c020a45b3c97f3632d", "kind": "FPM CUDA-event iteration capture; old scheduler field schema"},
+    {"path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-candidate-fpm-v2-service.json", "sha256": "ee589d0e464ff22e9fd320155c15b8dd8bf27239ea98d1824d18e864d3ae1bf8", "kind": "instrumented service, c57, 3 repeats/cell"},
+    {"path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-candidate-fpm-telemetry.csv", "sha256": "1587e7eef8aef1248b3f3a000b51d77b0bedfa88d7c580d187866e5ae8abf2e7", "kind": "UUID-targeted telemetry, legacy duplicate-timestamp positional format"},
+    {"path": "/tmp/g018-telemetry-csv-smoke.csv", "sha256": "d656ba8d9d987c8e1eb13e21bc8b8e3c066bf1e6f08f123473e211ab9a595aa9", "kind": "corrected aligned 13-column telemetry v2 schema smoke"},
+    {"path": "/tmp/g016-root-ncu.ncu-rep", "sha256": "aed3156bdf2e237279711bc10bcb239ece64c5a1b980760398fd6f9233ada835", "kind": "prior root permission proof; standalone probe, not model data"},
+    {"path": "/tmp/g018-s1-gptq-full.ncu-rep", "sha256": "432675f3506e6c38d90cd1bece8721c27aa5e84ddb9cb87457bc6f070c9d047b", "kind": "one-launch synthetic G018 S1 GPTQ operator fixture"},
+    {"path": "/tmp/g018-c57-gptq-full.ncu-rep", "sha256": "718e9562f17190c2cd2544ac548dce40031f5706fc6e7abe5b30328bb278a04e", "kind": "one-launch synthetic G018 c57 GPTQ operator fixture"},
+    {"path": "/tmp/g018-g016-ncu-report.csv", "sha256": "a36cc43ed30b696955c516a4d9dad91739eea1c8411d3936ee6e968db7e2b86d", "kind": "raw CSV export of archived root G016 standalone proof"},
+    {"path": "/tmp/g018-s1-gptq-full.csv", "sha256": "ba7aa4506f9ae584e4aa4792d63b51c4a9a5c782753f97a19151e01f35512a1a", "kind": "raw CSV export of G018 S1 fixture NCU report"},
+    {"path": "/tmp/g018-c57-gptq-full.csv", "sha256": "a42ce0c87f2761c8ea1947d6823bc5eaa2e5bc043aa8a152a89dc34f7cd9f283", "kind": "raw CSV export of G018 c57 fixture NCU report"}
+  ],
+  "not_collected": ["matched 4K c2/c4 FPM", "uninstrumented service matrix", "Falcon Graph per-owner timing/counts", "model worker allocator/graph-pool bytes", "full-forward NCU metrics", "DCGM"]
+}

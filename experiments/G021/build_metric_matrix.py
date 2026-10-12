@@ -230,7 +230,12 @@ matrix = {
      'cuda_launch_overhead':'NOT_RUN; no isolated/attributable launch-overhead measurement retained.',
      'safe_concurrency_above_c4':'NOT_RUN; accepted S1 max_num_reqs=4 and no validated higher running-request pool headroom/config was evidenced. No c8+ point claimed safe.',
      'request_p99':'NOT_RUN / insufficient sample size: service matrix has 3 requests at c1 and 12 at c4 per cell; no qualified p99.',
-     'rtx_3090_comparison':'UNRESOLVED_COMPARABILITY; historical E021 path is external and raw workload/config dataset is unavailable in the current checkout/capture store.'},
+     'rtx_3090_comparison':'UNRESOLVED_COMPARABILITY; historical E021 path is external and raw workload/config dataset is unavailable in the current checkout/capture store.',
+     'upstream_evidence_checkpoints':{'G017':'origin/g017-close-prod-checkpoint at 149c70f10b49ff1d1fe28ac5a7016526157a04a9; accepted source/runtime baseline retained in branch history.',
+       'G018':'origin/g018-local-v100-gpu-audit at 631cfc89c2644d398a4555fcfbcb509919275bef; bounded FPM implementation/evidence preserved, but source is not cherry-picked into current mainline because subsequent source evolution diverged and G021 reports the tested SHA explicitly.',
+       'G019':'origin/g019-partial-graph-attribution at db08f603033ccebb252ed8f8cb209b2d0203eda1; report/manifest/CUPTI sample preserved under experiments/G019 and cupti-sample.',
+       'G020':'origin/g020-existing-trace-offline at 572bcd751; offline report/analysis preserved under experiments/G020 and summarized in G021.'}},
+
 
   'scheduler_lifecycle': {'status':'PARTIAL', 'fpm_actual_batch_counts':{'decode_bs1':2024,'decode_bs3':288,'decode_graph_key1':2024,'decode_graph_key4':288},
     'queue_wait':'PARTIAL measured in one additional S1 service capture via existing --enable-request-time-stats-logging. Ten request IDs join client TTFT to scheduler queue_duration and forward_duration; one 4K/c4 wave shows TTFT tail tracking wait-queue residence. Admission subphases, GPU first-token duration, scheduling gap, cache wait and preemption remain NOT_RUN; this is not an uninstrumented quantile authority.',
@@ -263,6 +268,9 @@ inputs = [ROOT/'experiments/G021/artifacts/service-s1-all-cells.json', ROOT/'exp
           ROOT/'experiments/G021/report.md', ROOT/'experiments/G021/metric-differential-notes.md',
           ROOT/'experiments/G021/parse_ncu_hotspots.py',
           ROOT/'experiments/G021/artifacts/fpm-source-gpu-event-audit.json',
+          ROOT/'experiments/E027/G018-final-audit.md', ROOT/'experiments/E027/artifact-manifest.json',
+          ROOT/'experiments/G019/report.md', ROOT/'experiments/G019/artifact-manifest.json',
+          ROOT/'cupti-sample/cuda_graphs_trace.cu', ROOT/'cupti-sample/Makefile',
           sidecar_path, subscriber_path, server_log, request_path,
           STORE/'experiments/E026/r17-s1-valid.jsonl',
           STORE/'profiles/r17-s1-valid_batch1_input1024_output64_prefill.trace.json.gz',
