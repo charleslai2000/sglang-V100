@@ -59,8 +59,13 @@
     },
     {
       "path": "experiments/G021/report.md",
-      "sha256": "370ec82de79e075f5bc28a59972e1539398abb561a469041e890e3c934949158",
-      "bytes": 16844
+      "sha256": "ebf361ca373429a9c22918f6cd82faad85b10d08f324298edfa6cd0dbf94f73d",
+      "bytes": 20480
+    },
+    {
+      "path": "experiments/G021/metric-differential-notes.md",
+      "sha256": "4efbaec0d45c85bf6a9aac90162b13341659b77e69d42de8316014b9f88f8cf4",
+      "bytes": 6389
     },
     {
       "path": "experiments/G021/artifacts/fpm-source-gpu-event-audit.json",
@@ -86,6 +91,26 @@
       "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/fpm-production-delivery-requests.json",
       "sha256": "4d5a43dcdb3ea557ecaeac852f7914b540920134c8779691237e66b5ad487520",
       "bytes": 1454
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/r17-s1-valid.jsonl",
+      "sha256": "9ec104f3073d2ec9003b9903696a088c1aca40d3fa1672dda06cffa0c14f5c45",
+      "bytes": 338
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/profiles/r17-s1-valid_batch1_input1024_output64_prefill.trace.json.gz",
+      "sha256": "4fdcd4f60d0cbf656e311bb441e131589724c37203eeec7d2c3072531e962aea",
+      "bytes": 2642239
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/profiles/r17-s1-valid_batch1_input1024_output64_decode.trace.json.gz",
+      "sha256": "699d0ebc094a6215a6754a2b1dfb0b7753bbac8d51d1708fd5b24489bdcec50c",
+      "bytes": 408638
+    },
+    {
+      "path": "/mnt/data/pc01/sglang-v100-migration/profiles/r17-ncu-tmp/s1-prefill-1k-c1-range.ncu-rep",
+      "sha256": "deea41bd74d09ba10c38f97a6b7e7e261a7e63619222263ba6e844d76d2020f5",
+      "bytes": 5336290
     }
   ],
   "status": "PARTIAL_G021_ACTIVE; FPM bounded accepted S1 capture PASS; no qualification claims beyond recorded boundaries"

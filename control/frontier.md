@@ -2,7 +2,7 @@
 
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
-  - frontier: FPM PASS; unified matrix + SHA manifest summarize existing service/NVML/fixture NCU/G020/FPM evidence. Continue actual Graph hardware counters or precise metric-specific dispositions, scheduler lifecycle/cache/service-tail evidence, owner/3090 reconciliation, and final questions.
+  - frontier: FPM PASS; standalone S1 c1/1K speed smoke measured (single-run diagnostic); NCU Graph attempt captured only a prefill initialization kernel and is rejected as serving-Graph evidence. Add its provenance to matrix/manifest; continue request lifecycle/cache/service-tail, owner/3090 reconciliation, and final questions.
   - task: `control/G021-v100-hardware-utilization/tasks/T001-hardware-utilization.md`
   - unblock/reopen: Prior resource gate/resume authorization remains; maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
 
