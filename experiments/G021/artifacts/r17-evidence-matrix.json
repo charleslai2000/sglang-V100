@@ -8,7 +8,7 @@
     "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
     "accepted_route": "S1 default; Candidate remains exact-SHA opt-in",
     "s1_extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
-    "g021_commit": "bcd5a8cbf50f81e9169a412d30565ade5adbdc81",
+    "g021_commit": "f21156e0a73e515206817f216f6c5c9a6636cc87",
     "fpm_commit": "631cfc89c2644d398a4555fcfbcb509919275bef"
   },
   "service_runs": [
