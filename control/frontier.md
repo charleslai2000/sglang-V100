@@ -1,8 +1,8 @@
 # Current frontier
 
 ## G022-falcon-v100-c4-performance
-- T001 — P0 real Falcon hardware-utilization capture — ACTIVE
-  - frontier: T001 hardware PASS (commit `50dde9932`) accepted by user. T002 resumed: unify c1/c2/c4 timeline+CUPTI+NCU rank; reconcile HBM wording; then validate one matched-geometry, falsifiable hotspot hypothesis through correctness → NCU → GPU Forward A/B → uninstrumented service A/B.
+- T002 — evidence-driven low-batch optimization — ACTIVE
+  - frontier: Exact-SHA Candidate-vs-S1 GPTQ NCU is matched at M1/M2/M4 for gate-up/down and reproduces lower kernel time/long-scoreboard with higher math/not-selected/DRAM-write pressure. This is archived Candidate, not a new change or full-path qualification. Close a concrete owner/source attribution or missing performance context before selecting another implementation; any new change still requires correctness → NCU → GPU Forward A/B → uninstrumented service A/B.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
   - unblock/reopen: User explicitly lifted the pause. No repeat of the passed five-row CUPTI qualification; target-only V100 and >=8-GiB host floor remain mandatory. Keep S1 default/G017 Candidate fallback and unrelated dirty state.
 ## G021-v100-hardware-utilization
