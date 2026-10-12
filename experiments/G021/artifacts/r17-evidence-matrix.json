@@ -1,6 +1,6 @@
 {
   "schema": "g021-r17-evidence-matrix-v1",
-  "generated_utc": "2026-10-12T04:05:17.782844+00:00",
+  "generated_utc": "2026-10-12T04:30:28.747308+00:00",
   "goal_status": "ACTIVE",
   "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
   "identity": {
@@ -8,7 +8,7 @@
     "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
     "accepted_route": "S1 default; Candidate remains exact-SHA opt-in",
     "s1_extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
-    "g021_commit": "f21156e0a73e515206817f216f6c5c9a6636cc87",
+    "g021_commit": "bcd5a8cbf50f81e9169a412d30565ade5adbdc81",
     "fpm_commit": "631cfc89c2644d398a4555fcfbcb509919275bef"
   },
   "service_runs": [
@@ -2223,11 +2223,20 @@
   "cache_capability": {
     "status": "SOURCE_SUPPORTED_BUT_NOT_RUN",
     "observed_service": "radix/hierarchical cache disabled; cached tokens 0 in measured S1 request set.",
-    "source": "SGLang registry selects HiMambaRadixCache when enable_hierarchical_cache and hybrid SSM; Falcon config has all 44 layers with both full attention and Mamba. Host Mamba pool/restore implementation exists in memory_pool_host.py and hybrid_cache/hybrid_pool_assembler.py.",
-    "L1_gpu": "Radix prefix cache available in source but disabled in measured service; cold/warm benefit NOT_RUN.",
-    "L2_host": "HiCache host KV + Mamba state path present in source; Falcon-H1 runtime compatibility/correctness and measurement NOT_RUN.",
-    "L3_disk": "Optional storage backend exists; no backend/path enabled, no restore bytes/time. DISABLED/NOT_RUN.",
-    "state_pair": "Source has HiMambaRadixCache and host Mamba conv/temporal state pools, but complete Falcon joint prefix-frontier restore not demonstrated; correctness/effect UNSUPPORTED for this evidence set."
+    "source": "Accepted G017 tree source audit: mem_cache/registry.py selects HiMambaRadixCache for hierarchical cache + hybrid SSM; Falcon config has 44 full-attention/Mamba layers. hi_mamba_radix_cache.py builds distinct PoolName.MAMBA backup/restore transfers; hicache_storage.py documents v2 usable-prefix intersection across KV and auxiliary pools; host state pools are assembled in hybrid_cache/hybrid_pool_assembler.py.",
+    "L1_gpu": "GPU Radix prefix cache source-supported; disabled in measured service and cached-token snapshots sum to zero. Cold/warm benefit NOT_RUN.",
+    "L2_host": "Host KV and Mamba state backup/restore source-supported. Valid full Falcon prefix-frontier restore and runtime correctness were not executed; empirical benefit/cost NOT_RUN (not UNSUPPORTED).",
+    "L3_disk": "Optional storage backend and HiMamba archive/prefetch hooks exist; no backend/path enabled. DISABLED/NOT_RUN; no restore bytes/time.",
+    "state_pair": "Source exposes paired KV + Mamba state handling and prefix-hit intersection; this is capability evidence only. Full Falcon restore correctness and reuse are NOT_RUN."
+  },
+  "remaining_metric_dispositions": {
+    "full_graph_hardware_aggregate": "NOT_RUN; earlier NCU graph-profiling attempt captured initialization only and was rejected. Selected actual Falcon kernel NCU is KERNEL_SCOPE.",
+    "gpu_active_union": "UNSUPPORTED by retained CUDA Event data: event durations lack shared absolute CUDA timestamps; do not sum intervals as union.",
+    "pcie_h2d_d2h_bandwidth": "NOT_RUN; no valid per-workload directional PCIe byte/time record retained.",
+    "cuda_launch_overhead": "NOT_RUN; no isolated/attributable launch-overhead measurement retained.",
+    "safe_concurrency_above_c4": "NOT_RUN; accepted S1 max_num_reqs=4 and no validated higher running-request pool headroom/config was evidenced. No c8+ point claimed safe.",
+    "request_p99": "NOT_RUN / insufficient sample size: service matrix has 3 requests at c1 and 12 at c4 per cell; no qualified p99.",
+    "rtx_3090_comparison": "UNRESOLVED_COMPARABILITY; historical E021 path is external and raw workload/config dataset is unavailable in the current checkout/capture store."
   },
   "scheduler_lifecycle": {
     "status": "PARTIAL",
@@ -2237,7 +2246,7 @@
       "decode_graph_key1": 2024,
       "decode_graph_key4": 288
     },
-    "queue_wait": "PARTIAL measured in one additional S1 service capture via existing --enable-request-time-stats-logging. Ten request IDs join client TTFT to scheduler queue_duration and forward_duration; captured log output is separate/instrumented, not an uninstrumented service quantile authority.",
+    "queue_wait": "PARTIAL measured in one additional S1 service capture via existing --enable-request-time-stats-logging. Ten request IDs join client TTFT to scheduler queue_duration and forward_duration; one 4K/c4 wave shows TTFT tail tracking wait-queue residence. Admission subphases, GPU first-token duration, scheduling gap, cache wait and preemption remain NOT_RUN; this is not an uninstrumented quantile authority.",
     "measured_service_speed_diagnostic": {
       "context": "4K/c4",
       "client_wave_tps": 29.6806,
@@ -2265,7 +2274,7 @@
       "follow_up_capture": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/r17-s1-lifecycle-client.jsonl and /mnt/data/pc01/sglang-v100-migration/logs/r17-lifecycle-reqtime.log; 10/10 request IDs joined to ReqTimeStats. In a new 4K/c4 wave, queue durations were 0.20, 8367.65, 16991.85, 25620.53 ms; corresponding client TTFT 1191, 9815, 18452, 27070 ms. 4K/c1 matched queue 0.24ms and TTFT 1198ms. Cache disabled/0 cached tokens. This directly shows first-token tail tracks SGLang wait-queue residence in this one capture; forward_duration is request lifecycle span, not isolated GPU active time.",
       "limits": "one 4K/c4 and one comparison wave; not a new quantile authority and not enough to explain all historical waves."
     },
-    "saturation": "Only c1/c4 bounded 256-output S1/Candidate cells exist for common workload; c8+ scan NOT_RUN."
+    "saturation": "Only c1/c2/c4 bounded 256-output S1/Candidate cells exist for common workload; c8+ scan NOT_RUN. Higher points were not treated as safe because no validated live KV/Mamba pool headroom or running-request limit above accepted max_num_reqs=4 was recorded."
   },
   "required_answers": [
     {
@@ -2290,8 +2299,8 @@
     },
     {
       "question": 5,
-      "status": "NOT_MEASURED",
-      "answer": "No request-ID-correlated server Queue/Admission/GPU-gap lifecycle."
+      "status": "PARTIAL",
+      "answer": "10/10 request-ID join and one 4K/c4 queue-residence capture; admission subphases, GPU-time separation, scheduling gaps/cache wait remain unmeasured."
     },
     {
       "question": 6,
@@ -2311,12 +2320,12 @@
     {
       "question": 9,
       "status": "UNRESOLVED_COMPARABILITY",
-      "answer": "3090 historical workload/timing boundaries not aligned."
+      "answer": "No raw RTX 3090 workload/config dataset found in current checkout or searched capture store; historical E021 result is external to this environment. Workload, actual batch, cache and timing boundaries cannot be reconciled, so no direct ratio is calculated."
     },
     {
       "question": 10,
       "status": "UNRESOLVED",
-      "answer": "Selected actual Falcon hot-kernel NCU and G020 attribution reduce some unknowns but do not form exclusive whole-forward owner budget; optimization recommendation remains unresolved."
+      "answer": "Selected actual Falcon hot-kernel NCU and G020 attribution do not form an exclusive uninstrumented whole-forward owner budget. No optimization owner or recoverable-time estimate is defensible; the single 4K/c4 queue-tail finding is bounded evidence, not a general optimization budget."
     }
   ]
 }
