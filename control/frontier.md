@@ -1,13 +1,28 @@
 # Current frontier
 
+## G022-falcon-v100-c4-performance
+- T001 c1/c2/c4 baseline and owner ledger — ACTIVE
+  - frontier: Establish actual admitted GPU batch and stable GPU Decode Step/service baseline for S1 and exact G017 Candidate; reuse G020/G021 without rebuilding profiling infrastructure and preserve Prefill/Cold-Warm Cache metrics.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T001-c4-baseline-and-owner-ledger.md`
+  - unblock/reopen: Target V100 UUID only; 8-GiB MemAvailable floor; preserve unrelated dirty worktree.
+
+- T002 evidence-driven low-batch optimization — READY
+  - frontier: Select first optimization only after T001 produces a bounded c1/c2/c4 GPU owner/time budget and exact hotspot identity.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
+  - unblock/reopen: T001 identifies a defensible optimization owner; preserve numerical semantics, S1/Candidate fallback and c1/c2/c4 comparison.
+
+## G022-falcon-v100-c4-performance
+- T001 c1/c2/c4 baseline and owner ledger — ACTIVE
+  - frontier: Establish actual admitted GPU batch and stable GPU Decode Step/service baseline for S1 and exact G017 Candidate; reuse G020/G021 without rebuilding profiling infrastructure and preserve Prefill/Cold-Warm Cache metrics.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T001-c4-baseline-and-owner-ledger.md`
+  - unblock/reopen: Target V100 UUID only; 8-GiB MemAvailable floor; preserve unrelated dirty worktree.
+- T002 evidence-driven low-batch optimization — READY
+  - frontier: Select first optimization only after T001 produces a bounded c1/c2/c4 GPU owner/time budget and exact hotspot identity.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
+  - unblock/reopen: T001 identifies a defensible optimization owner; preserve numerical semantics, S1/Candidate fallback and c1/c2/c4 comparison.
+
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
-  - frontier: FPM PASS; Falcon NCU KERNEL_SCOPE counters are measured. One request-time-logging wave joined 10/10 RIDs and directly associated 4K/c4 TTFT tail with queue residence. Continue cache restore, safe saturation/P99, owner/3090 and full-Graph aggregate dispositions.
+  - frontier: Keep the frozen V1 contract open: cache restore, safe higher concurrency/P99 dispositions, remaining owner/3090 comparability and full-Graph aggregate remain unresolved. Do not re-open bounded FPM qualification.
   - task: `control/G021-v100-hardware-utilization/tasks/T001-hardware-utilization.md`
-  - unblock/reopen: Prior resource gate/resume authorization remains; maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
-
-## G018-local-v100-falcon-h1-gpu-audit
-- T001 Profile ledger and resource audit — ACTIVE
-  - frontier: run separate service, FPM/device-event, and UUID-targeted nvidia-smi windows; establish graph-safe complete c1/c4 owner/count ledger and c1/c2/c4 × 1K/4K prefill/decode matrix; mark NCU hardware counters UNKNOWN due denied permission.
-  - task: `control/G018-local-v100-falcon-h1-gpu-audit/tasks/T001-profile-ledger-and-resource-audit.md`
-  - unblock/reopen: Clean worktree at G017 accepted commit; exact S1/c57 pins and 44-layer topology confirmed. DCGM unavailable; NCU smoke denied `ERR_NVGPUCTRPERM` with `RmProfilingAdminOnly:1`, do not modify global policy. Use nvidia-smi/FPM/CUDA events; no RTX2060 target, no production kernel change, full-service Nsys remains DEFERRED.
+  - unblock/reopen: Maintain MemAvailable >=8GiB and target-only V100 ownership. Preserve G017/S1 default; do not touch RTX2060, global profiling policy, or unrelated tasks.
