@@ -16,13 +16,9 @@ def classify(name, cat, args=None):
     if cat in ('gpu_memcpy','gpu_memset') or name.startswith(('memcpy','memset')): return 'Memcpy / memset'
     if name in ('_fwd_grouped_kernel_stage1','_fwd_kernel_stage2') or 'fused_rope_kernel<' in name or 'store_kvcache<' in name: return 'Attention'
     if name == '_selective_scan_update_kernel' or 'causal_conv1d_update_kernel<' in name: return 'Mamba'
-<<<<<<< HEAD
     # Generic GEMV stays UNKNOWN in this historical classifier; later G022
     # source review maps the repeated c4 FP32 grid-16264 symbol to Falcon lm_head,
     # but this analyzer intentionally preserves its original trace buckets.
-=======
-    # Generic CUBLAS GEMV deliberately stays UNKNOWN: callsite is not identified.
->>>>>>> origin/g020-existing-trace-offline
     if any(x in name for x in ('cutlass::Kernel2<','cublasLt::splitKreduce_kernel<')): return 'Other GEMM'
     if any(x in name for x in ('elementwise_kernel<','vectorized_elementwise_kernel<','unrolled_elementwise_kernel<','FusedAddRMSNormKernel<','RMSNormKernel<','act_and_mul_kernel<')): return 'Elementwise / normalization'
     return 'UNKNOWN'
