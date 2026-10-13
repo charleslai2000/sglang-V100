@@ -15,4 +15,4 @@
 - The candidate kernel uses scalar FP32 FMA and shuffle reduction, not Tensor Cores. No claim about reduced SM70 dependency or performance is supported.
 
 ## Bounded answer
-Source attribution establishes Mamba in_proj as a substantial c4 owner, but the first mature small-M candidate fails actual checkpoint M2 correctness and is rejected. No production implementation changed. The failure is preserved; default route remains untouched.
+Source attribution establishes Mamba in_proj as a substantial c4 owner, but the mature small-M candidate fails actual checkpoint M2 correctness and is rejected. A distinct no-source-change screen of fused attention QKV actual weights passes unchanged FP16 linear elementwise bounds at M2/M4 and is ~1.57x/1.69x faster than Torch F.linear in isolated CUDA-event median (not a model/service result). QKV was explored separately under E033; its temporary dispatch passed exact-weight direct Graph checks but was removed before NCU because matched replay safety is unresolved. No Mamba or QKV implementation remains in source.

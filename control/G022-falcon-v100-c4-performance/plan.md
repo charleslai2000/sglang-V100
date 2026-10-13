@@ -4,6 +4,10 @@ Status: **ACTIVE — T001 hardware utilization PASS; T002 optimization RESUMED b
 
 ## Established inputs
 
+- **E031 source attribution committed/pushed** at `7cbd6c04e2377c83ab4500f26e7b51a26657e9aa`. Exact real Decode module spans show all 44-per-layer sources: GPTQ gate_up/down, attention QKV and o_proj, Mamba in_proj/out_proj. c4 CUTLASS `[8,8,4]` maps to QKV; `[8,12,4]` maps to attention o_proj and Mamba out_proj; `[8,53,2]` maps to Mamba in_proj. Eager traces are attribution-only and their durations are not production Graph budgets. See `experiments/E031-g022-live-linear-attribution/results.md` and raw trace pointers.
+- **E032 Mamba candidate correctly rejected** at `0b7c2b4051bf6b2f0f30067f91a9b30aeda0d03b`. Existing SM70 small-M kernel on actual Falcon Mamba in_proj M2 failed unchanged torch linear output bound on 67/13,360 elements (max abs 0.00390625); no tolerance adjusted, no route/code retained. Exploratory Mamba out_proj screen passed M2 but failed M4 and did not proceed.
+- **E033 QKV candidate screened then removed before NCU**. Temporary opt-in route passed exact layer-0 checkpoint QKV output comparison at M2/M4 (0 failures) and direct CUDA Graph replay. Isolated event medians were 28.672/29.696 us vs F.linear 45.056/50.176 us but not production timing. Pytest absent. Prior matched NCU exceeded host memory floor; no new replay attempted and no route/source change remains. See `experiments/E033-g022-qkv-smallm/results.md`; G022 T002 still needs a safe exact-geometry NCU path before considering full model/service A/B.
+
 - T001 hardware stage explicitly accepted PASS by user 2026-10-14 at commit `50dde9932aeb2449a59046e17a601daf75046117`. The S1 CUPTI range vectors and L2 runs are authoritative; no repeat measurement qualification.
 
 - G017 S1 and Candidate remain frozen comparison paths; Candidate identity must be exact-path/SHA.
