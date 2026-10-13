@@ -368,6 +368,7 @@ class SchedulerMetricsReporter:
             "batch_id": id(batch),
             "mode": batch.forward_mode.name,
             "scheduled_batch_size": batch.batch_size(),
+            "batch_size": batch.batch_size(),
             "actual_tokens": getattr(batch, "actual_input_token_count", batch.batch_size()),
             "actual_batch_size": batch.batch_size(),
             "actual_input_token_count": getattr(batch, "actual_input_token_count", batch.batch_size()),
@@ -473,6 +474,33 @@ class SchedulerMetricsReporter:
             "sidecar_status": pending["sidecar_status"],
         }
         self._write_timeline_sidecar(forward_iter, completion)
+
+    def _write_fpm_research_sidecar(
+        self, forward_iter: int, item: dict, *, status: str, invalid_reason=None,
+        scheduler_wall_s=None, gpu_elapsed_s=None, queue_accepted=None,
+    ):
+        """Append bounded, opt-in FPM/GPU-event audit rows to a JSONL sidecar."""
+        path = os.environ.get("SGLANG_G022_FPM_GPU_SIDECAR")
+        if not path:
+            return
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        row = {
+            "record_type": "fpm_forward", "forward_iter": forward_iter,
+            "status": status, "invalid_reason": invalid_reason,
+            "mode": item.get("mode"), "batch_size": item.get("actual_batch_size"),
+            "scheduled_decode_requests": item.get("scheduled_decode_requests"),
+            "scheduled_decode_kv_tokens": item.get("scheduled_decode_kv_tokens"),
+            "scheduled_prefill_tokens": item.get("scheduled_prefill_tokens"),
+            "graph_replay_expected": item.get("graph_replay_expected"),
+            "graph_key": item.get("graph_key"), "trace_capture_active": item.get("trace_capture_active"),
+            "gpu_interval_count": len(item.get("gpu_intervals", [])),
+            "gpu_event_intervals": item.get("gpu_event_intervals", []),
+            "scheduler_wall_s": scheduler_wall_s,
+            "gpu_interval_sum_s": item.get("gpu_interval_sum_s"),
+            "gpu_elapsed_s": gpu_elapsed_s, "queue_accepted": queue_accepted,
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, separators=(",", ":"), sort_keys=True) + "\n")
 
     def _build_scheduled_request_metrics(self, batch: ScheduleBatch):
         from sglang.srt.observability.forward_pass_metrics import (
@@ -1191,17 +1219,12 @@ class SchedulerMetricsReporter:
                             interval["duration_s"] for interval in item["gpu_intervals"]
                         ),
                     }
-                    if hasattr(self, "_write_fpm_research_sidecar"):
-                        self._write_fpm_research_sidecar(
-                            completed_iter,
-                            item,
-                            status="INVALID",
-                            invalid_reason=item["invalid_reason"],
-                            scheduler_wall_s=max(
-                                0.0, item["scheduler_end_time"] - item["start_time"]
-                            ),
-                            gpu_elapsed_s=None,
-                        )
+                    self._write_fpm_research_sidecar(
+                        completed_iter, item, status="INVALID",
+                        invalid_reason=item["invalid_reason"],
+                        scheduler_wall_s=max(0.0, item["scheduler_end_time"] - item["start_time"]),
+                        gpu_elapsed_s=None,
+                    )
                     self.scheduler._fpm_pending_batches.pop(completed_iter)
                     self.scheduler._fpm_closed_batches.add(completed_iter)
                     continue
@@ -1278,22 +1301,17 @@ class SchedulerMetricsReporter:
                     self.scheduler._fpm_audit_counters["queue_accepted"] += 1
                 else:
                     self.scheduler._fpm_audit_counters["queue_dropped"] += 1
-                if hasattr(self, "_write_fpm_research_sidecar"):
-                    self._write_fpm_research_sidecar(
-                        completed_iter,
-                        item,
-                        status="MEASURED",
-                        invalid_reason=None,
-                        scheduler_wall_s=scheduler_wall_duration,
-                        gpu_elapsed_s=gpu_forward_elapsed,
-                        queue_accepted=queue_accepted,
-                    )
                 if not queue_accepted:
                     logger.error(
                         "FPM publish enqueue dropped forward_iter=%s batch_id=%x",
                         completed_iter,
                         item["batch_id"],
                     )
+                self._write_fpm_research_sidecar(
+                    completed_iter, item, status="MEASURED",
+                    invalid_reason=None, scheduler_wall_s=scheduler_wall_duration,
+                    gpu_elapsed_s=gpu_forward_elapsed, queue_accepted=queue_accepted,
+                )
                 self.scheduler._fpm_pending_batches.pop(completed_iter)
                 self.scheduler._fpm_closed_batches.add(completed_iter)
                 if os.environ.get("SGLANG_G021_FPM_DIAG") == "1":
