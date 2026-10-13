@@ -133,6 +133,7 @@ class GPTQLinearKernel:
         reshaped_x = x.reshape(-1, x.shape[-1])
 
         candidate_expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
+        candidate_extension_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
         candidate_enabled = (
             not self.use_shuffle
             and 1 <= reshaped_x.shape[0] <= 4
@@ -140,14 +141,28 @@ class GPTQLinearKernel:
             and reshaped_x.dtype == torch.float16
             and torch.cuda.is_available()
             and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
-            and __import__("os").environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
+            and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
         )
         if candidate_enabled:
-            # Validate the loaded extension path and bytes, not merely the opt-in flag.
+            # Both exact extension identity and bytes are required before dispatch.
+            if not candidate_extension_path:
+                raise RuntimeError(
+                    "G017 candidate is enabled but SGLANG_KERNEL_G017_CANDIDATE_PATH is unset"
+                )
             loaded_common_ops = __import__("sgl_kernel").common_ops
             loaded_path = os.path.realpath(loaded_common_ops.__file__)
-            loaded_sha = hashlib.sha256(open(loaded_path, "rb").read()).hexdigest()
-            if candidate_expected_sha and loaded_sha != candidate_expected_sha:
+            expected_path = os.path.realpath(candidate_extension_path)
+            if loaded_path != expected_path:
+                raise RuntimeError(
+                    f"G017 candidate extension path mismatch: expected {expected_path}, got {loaded_path}"
+                )
+            with open(loaded_path, "rb") as module_file:
+                loaded_sha = hashlib.sha256(module_file.read()).hexdigest()
+            if not candidate_expected_sha:
+                raise RuntimeError(
+                    "G017 candidate is enabled but SGLANG_G017_CANDIDATE_SHA256 is unset"
+                )
+            if loaded_sha != candidate_expected_sha:
                 raise RuntimeError(
                     f"G017 candidate extension SHA mismatch: expected {candidate_expected_sha}, got {loaded_sha} at {loaded_path}"
                 )

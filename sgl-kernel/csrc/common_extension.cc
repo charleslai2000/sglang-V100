@@ -19,7 +19,9 @@ limitations under the License.
 #include "sgl_kernel_ops.h"
 
 #ifdef SGL_KERNEL_GPTQ_CANDIDATE
-at::Tensor packed_q4_fp32_candidate(at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, bool);
+at::Tensor packed_q4_fp32_candidate(
+    at::Tensor x, at::Tensor qw, at::Tensor qz,
+    at::Tensor scales, at::Tensor gidx, bool return_fp32);
 #endif
 
 TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {

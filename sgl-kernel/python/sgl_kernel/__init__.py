@@ -8,6 +8,7 @@ from sgl_kernel.version import __version__  # noqa: F401
 if sys.platform == "darwin" and platform.machine() == "arm64":
     from sgl_kernel.metal import *
 else:
+    import os
     import torch
     from sgl_kernel.debug_utils import maybe_wrap_debug_kernel
     from sgl_kernel.load_utils import (
@@ -15,7 +16,8 @@ else:
         _preload_cuda_library,
     )
 
-    # Initialize the ops library based on current GPU
+    # Initialize the ops library based on current GPU. The G017 path is
+    # explicit and hash-checked inside load_utils; unset means normal S1 lookup.
     common_ops = _load_architecture_specific_ops()
 
     # Preload the CUDA library to avoid the issue of libcudart.so.12 not found
