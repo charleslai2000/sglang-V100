@@ -1,4 +1,5 @@
 from collections import deque
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Deque, Dict, List, Optional
@@ -10,17 +11,26 @@ class DeviceTimer:
     def __init__(self, reporter: Callable):
         self._intervals: Deque[_TimingInterval] = deque()
         self._reporters: List[Callable] = [reporter]
+        self._next_timer_key = 0
 
     def add_reporter(self, reporter: Callable):
         self._reporters.append(reporter)
 
     @contextmanager
     def wrap(self, metadata: Dict):
-        self._intervals.append(_TimingInterval.create())
+        # Keep the CUDA event interval's host-clock brackets and a stable key so
+        # the asynchronous completion can be joined to its scheduled forward.
+        metadata = dict(metadata)
+        metadata.setdefault("timer_key", self._next_timer_key)
+        self._next_timer_key += 1
+        metadata.setdefault("timer_start_host_ns", time.monotonic_ns())
+        interval = _TimingInterval.create()
+        self._intervals.append(interval)
         try:
             yield
         finally:
-            self._intervals[-1].end(metadata=metadata)
+            metadata.setdefault("timer_end_host_ns", time.monotonic_ns())
+            interval.end(metadata=metadata)
             self._report()
 
     def _report(self):

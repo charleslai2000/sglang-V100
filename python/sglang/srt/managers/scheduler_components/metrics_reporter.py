@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
+import os
 import tempfile
 import time
 from collections import defaultdict
@@ -219,9 +221,30 @@ class SchedulerMetricsReporter:
                 dp_rank=self.scheduler._fpm_dp_rank,
             )
             self.scheduler._fpm_gpu_time_acc = 0.0
+            self.scheduler._fpm_timeline_pending = {}
 
             def _fpm_device_timer_reporter(t, **_kwargs):
                 self.scheduler._fpm_gpu_time_acc += t
+                forward_iter = _kwargs.get("forward_iter")
+                pending = self.scheduler._fpm_timeline_pending.get(forward_iter)
+                if pending is not None:
+                    interval = {
+                        "timer_key": _kwargs.get("timer_key"),
+                        "category": _kwargs.get("category"),
+                        "graph_bs": _kwargs.get("graph_bs"),
+                        "graph_key": _kwargs.get("graph_key"),
+                        "cuda_event_elapsed_s": t,
+                        "timer_start_host_ns": _kwargs.get("timer_start_host_ns"),
+                        "timer_end_host_ns": _kwargs.get("timer_end_host_ns"),
+                    }
+                    pending.setdefault("gpu_event_intervals", []).append(interval)
+                    event_row = {
+                        "record_type": "gpu_event_completion",
+                        "forward_iter": forward_iter,
+                        "batch_id": pending["batch_id"],
+                        **interval,
+                    }
+                    self._write_timeline_sidecar(forward_iter, event_row)
 
             if self.forward_pass_device_timer is not None:
                 self.forward_pass_device_timer.add_reporter(_fpm_device_timer_reporter)
@@ -237,6 +260,138 @@ class SchedulerMetricsReporter:
                 self.scheduler._fpm_dp_rank,
                 self.scheduler._fpm_uses_device_timer,
             )
+
+    def _snapshot_forward_pass_metrics(self, batch: ScheduleBatch):
+        """Snapshot forward identity and request ownership before GPU execution."""
+        path = os.environ.get("SGLANG_G021_FPM_SIDECAR")
+        if not path or not self.scheduler._fpm_uses_device_timer:
+            return
+        forward_iter = batch.forward_iter
+        if forward_iter is None:
+            raise RuntimeError("Timeline sidecar requires forward_iter")
+        pending = self.scheduler._fpm_timeline_pending.get(forward_iter)
+        if pending is not None:
+            if pending["batch_id"] != id(batch):
+                raise RuntimeError(f"Duplicate forward_iter {forward_iter}")
+            return
+        scheduled = self._build_scheduled_request_metrics(batch)
+        graph_replay_expected = batch.forward_mode.is_decode()
+        clock_sync_start_ns = time.monotonic_ns()
+        clock_sync_name = f"G022_CLOCK_SYNC_START forward_iter={forward_iter}"
+        try:
+            import torch
+
+            with torch.profiler.record_function(clock_sync_name):
+                clock_sync_end_ns = time.monotonic_ns()
+        except RuntimeError:
+            clock_sync_end_ns = time.monotonic_ns()
+        request_owners = [
+            {
+                "rid": getattr(req, "rid", None),
+                "input_tokens": len(
+                    getattr(req, "origin_input_ids_unpadded", req.origin_input_ids)
+                ),
+                "output_tokens_before_forward": len(req.output_ids),
+                "first_token_time_perf_counter": getattr(
+                    getattr(req, "time_stats", None), "first_token_time", None
+                ),
+                "prefill_finished_time_perf_counter": getattr(
+                    getattr(req, "time_stats", None), "prefill_finished_time", None
+                ),
+            }
+            for req in batch.reqs
+        ]
+        pending = {
+            "forward_iter": forward_iter,
+            "batch_id": id(batch),
+            "mode": batch.forward_mode.name,
+            "scheduled_batch_size": batch.batch_size(),
+            "actual_tokens": batch.actual_input_token_count,
+            "actual_batch_size": batch.batch_size(),
+            "actual_input_token_count": batch.actual_input_token_count,
+            "scheduled_prefill_tokens": scheduled.sum_prefill_tokens,
+            "scheduled_decode_requests": scheduled.num_decode_requests,
+            "scheduled_decode_kv_tokens": scheduled.sum_decode_kv_tokens,
+            "requests": request_owners,
+            "scheduler_start_monotonic_ns": time.monotonic_ns(),
+            "batch_result_start_monotonic_ns": None,
+            "scheduler_end_monotonic_ns": None,
+            "trace_capture_active": batch.profiling_trace_active,
+            "clock_sync_name": clock_sync_name,
+            "clock_sync_monotonic_start_ns": clock_sync_start_ns,
+            "clock_sync_monotonic_end_ns": clock_sync_end_ns,
+            "first_token_ready_perf_counter": max(
+                (r["first_token_time_perf_counter"] or 0.0 for r in request_owners),
+                default=0.0,
+            ) or None,
+            "graph_replay_expected": graph_replay_expected,
+            "graph_key": None,
+            "gpu_event_intervals": [],
+            "sidecar_status": "SCHEDULED",
+        }
+        self.scheduler._fpm_timeline_pending[forward_iter] = pending
+        self._write_timeline_sidecar(
+            forward_iter, {**pending, "record_type": "forward_snapshot"}
+        )
+
+    def _write_timeline_sidecar(self, forward_iter: int, item: dict):
+        """Append one bounded research record; consumers join rows by forward_iter."""
+        path = os.environ.get("SGLANG_G021_FPM_SIDECAR")
+        if not path:
+            return
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as dst:
+            dst.write(
+                json.dumps(item, separators=(",", ":"), sort_keys=True) + "\n"
+            )
+
+    def _complete_forward_timeline(self, batch: ScheduleBatch):
+        if not os.environ.get("SGLANG_G021_FPM_SIDECAR"):
+            return
+        forward_iter = batch.forward_iter
+        pending = self.scheduler._fpm_timeline_pending.get(forward_iter)
+        if pending is None:
+            return
+        pending["batch_result_start_monotonic_ns"] = time.monotonic_ns()
+        clock_sync_start_ns = time.monotonic_ns()
+        clock_sync_name = f"G022_CLOCK_SYNC_END forward_iter={forward_iter}"
+        try:
+            import torch
+
+            with torch.profiler.record_function(clock_sync_name):
+                clock_sync_end_ns = time.monotonic_ns()
+        except RuntimeError:
+            clock_sync_end_ns = time.monotonic_ns()
+        pending["scheduler_end_monotonic_ns"] = time.monotonic_ns()
+        pending["completion_clock_sync_name"] = clock_sync_name
+        pending["completion_clock_sync_start_ns"] = clock_sync_start_ns
+        pending["completion_clock_sync_end_ns"] = clock_sync_end_ns
+        pending["request_completion_snapshot"] = [
+            {
+                "rid": getattr(req, "rid", None),
+                "output_tokens_after_forward": len(req.output_ids),
+                "first_token_time_perf_counter": getattr(
+                    getattr(req, "time_stats", None), "first_token_time", None
+                ),
+                "prefill_finished_time_perf_counter": getattr(
+                    getattr(req, "time_stats", None), "prefill_finished_time", None
+                ),
+                "completion_time_perf_counter": getattr(
+                    getattr(req, "time_stats", None), "completion_time", None
+                ),
+            }
+            for req in batch.reqs
+        ]
+        pending["sidecar_status"] = "SCHEDULER_COMPLETE"
+        completion = {
+            "record_type": "scheduler_completion",
+            "forward_iter": forward_iter,
+            "batch_id": pending["batch_id"],
+            "batch_result_start_monotonic_ns": pending["batch_result_start_monotonic_ns"],
+            "scheduler_end_monotonic_ns": pending["scheduler_end_monotonic_ns"],
+            "sidecar_status": pending["sidecar_status"],
+        }
+        self._write_timeline_sidecar(forward_iter, completion)
 
     def _build_scheduled_request_metrics(self, batch: ScheduleBatch):
         from sglang.srt.observability.forward_pass_metrics import (
@@ -842,6 +997,10 @@ class SchedulerMetricsReporter:
 
         if self.scheduler._fpm_uses_device_timer:
             self.forward_pass_device_timer._report()
+            self._complete_forward_timeline(batch)
+            timeline = self.scheduler._fpm_timeline_pending.pop(
+                batch.forward_iter, None
+            )
             wall_time = self.scheduler._fpm_gpu_time_acc
             self.scheduler._fpm_gpu_time_acc = 0.0
             if wall_time == 0.0:

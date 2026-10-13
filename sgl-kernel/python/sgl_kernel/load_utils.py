@@ -74,6 +74,33 @@ def _load_architecture_specific_ops():
         variant_name = "CPU/No GPU detected (using precise math)"
         fallback_subdirs = None
 
+    # Explicit path is only for the isolated, opt-in G017 candidate runtime.
+    # It avoids editable-install/package-finder ambiguity while leaving S1 default.
+    candidate_path = os.environ.get("SGL_KERNEL_G017_CANDIDATE_PATH")
+    if os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1" and candidate_path:
+        candidate_path = Path(candidate_path).resolve()
+        if not candidate_path.is_file():
+            raise ImportError(f"G017 candidate extension does not exist: {candidate_path}")
+        spec = importlib.util.spec_from_file_location("common_ops", str(candidate_path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load G017 candidate extension: {candidate_path}")
+        common_ops = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(common_ops)
+        import hashlib
+
+        sha = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+        expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
+        if expected_sha and sha != expected_sha:
+            raise ImportError(
+                f"G017 candidate extension SHA mismatch: expected {expected_sha}, got {sha}"
+            )
+        logger.warning(
+            "G017 candidate extension loaded path=%s sha256=%s",
+            common_ops.__file__,
+            sha,
+        )
+        return common_ops
+
     # Look for the compiled module with any valid extension
 
     ops_pattern = str(sgl_kernel_dir / ops_subdir / "common_ops.*")

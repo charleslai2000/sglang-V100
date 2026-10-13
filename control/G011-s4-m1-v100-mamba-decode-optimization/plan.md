@@ -1,0 +1,29 @@
+# Plan: S4-M1 V100 Mamba decode optimization
+
+## Established baseline
+
+- Frozen S1 c96 / 1K / 256 service baseline: 391.20 ± 0.98 aggregate tok/s (n=3); same-serving diagnostic c96 wave near 391.806. Do not overwrite the n=3 evidence.
+- Node ledger: Mamba selective scan `_selective_scan_update_kernel`, grid 32×96×24, 44 calls/forward, 1.006 ms/call, 31.85% of graph-kernel time. `_fwd_grouped_kernel_stage1`, grid 96×2×64, also occurs 44 times/forward at 0.710 ms/call / 22.46%; source inspection identifies this as grouped decode attention in `python/sglang/srt/layers/attention/triton_ops/decode_attention.py`, not Mamba state/layout. Exclude it from M1. This corrects the prior S004 ledger owner label.
+- Current Falcon Mamba decode invokes SGLang Triton `selective_state_update` via `ops/ssu_dispatch.py`. Config: d_ssm=3072, 24 heads, head_dim=128, d_state=256, groups=1, conv=4. Production wrapper normalizes rank-4 tensors and selects BLOCK_SIZE_M=4 / 8 warps for dstate=256. Exact graph launch is now observed directly: grid `(32,96,24)`, block `(256,1,1)`, SMEM 4096 B; see metadata inventory artifact and graph identity result below. Python call hooks do not observe steady replay.
+- Mature donor candidate: installed FlashInfer source has a generic simple STP kernel at `include/flashinfer/mamba/kernel_selective_state_update_stp.cuh`, plus host dispatch in `csrc/selective_state_update.cu`. Simple path uses ordinary CUDA loads/shared memory, no observed SM80+ intrinsics; SM90 TMA producer-consumer implementations are separately macro-guarded. Auto dispatch selects simple for SM70, with the same 4-warps/4-rows and dim-tiling policy as current Triton. Stock JIT nevertheless rejects SM70 in generator allowlist, so port/standalone qualification (not backend-flag selection) is the donor route to evaluate. Whole-TU compile/toolchain compatibility and actual c96 parity/performance remain untested. Upstream SGLang Triton remains same state-spaces/mamba-derived math with added newer-generation features.
+- Legacy synthetic Triton smoke was non-qualifying; superseded for real fixture coverage by the qualified node21 replay fixture documented below.
+- State-space group/layout work is not presently a measured Mamba owner. The second-ranked node kernel was incorrectly attributed as Mamba in the previous ledger; correction above avoids spending M1 on attention.
+- GPTQ stays out of implementation scope; map row reconstruction / h884 / WMMA callsites and geometry from graph order/source only. The observed reconstruction grid `(192,384,1)` maps in the legacy q4 kernel to weight `N=24,576,K=12,288`, while GEMM M=96 is independent. Model source uses GPTQ only in MLP `gate_up_proj`/`down_proj`; attention qkv/o are BF16. The merged gate_up has two 12,288-output shards over K=3,072 and is a strong candidate, but validate checkpoint weight dimensions and call sequence before confirming; do not infer h884/WMMA roles from call counts alone.
+
+## Decisive frontier
+
+Live Triton launch capture now uniquely binds node21: during the real bs96 graph build, the scheduler records 132 SSU calls over two eager warmups plus graph capture; the final 44 correspond to graph capture and match the retained graph's exact 44 SSU nodes/order. All are one loaded function/module, grid `(32,96,24)`, block `(256,1,1)`, 4096 dynamic SMEM, 71 args, 8 warps/3 stages. Triton hash `f885fdb9be41b73d52b8d4305880fdeb403da8e06df60e98154e8b615db86d00` uniquely matches on-disk cache entry `7CC73ON6IG3T2UVY2QYFRAH55NAD3KHANX3A5GAVJ2FWCXNYNUAA`; ordered ABI and constexprs are in experiment artifacts. The old CUDA raw-slot decoder remains invalid and unused.
+
+One request-triggered steady graph replay saved a qualified real fixture for node21/layer0: all scan operands, 96 indices, only those 96 complete FP32 state slices before/after, full output, scalar contract, shapes/strides/hashes. Snapshot was D2H-direct to avoid transient GPU clone allocation. A later unrelated decode copy in the diagnostic service OOMed after fixture save; all processes are stopped and frozen runner/model-runner/Mamba hashes restored. Next use the fixture alone to build/qualify FlashInfer STP-simple on SM70 with identical state reset, full output/state comparison, and warmed timing; donor/service AB remains undone.
+
+## Remaining sequence
+
+1. FlashInfer STP-simple donor is source-mapped and evaluated on the frozen node21 fixture. Exact tied values were proven for dt/A/dt_bias/D; no reduction used. Full `[96,24,128]` output and `[96,24,128,256]` FP32 after-state comparison gives max abs output `1.83105e-4` / rel-L2 `8.88956e-8`, state max abs `4.57764e-5` / rel-L2 `1.66093e-7`; numerical differences reflect execution order. Donor kernel median 0.868352 ms; mandatory operand-adapter median 0.106176 ms; total ~0.974528 ms vs production 1.006 ms, only 3.13% lower before service/API overhead. Rejected as not materially faster; no integration/A-B/ledger update.
+2. Next mature donor: state-spaces/mamba v2.2.4 `selective_state_update` CUDA path; source audit and exact SM70 qualification against same frozen fixture.
+3. Continue donor-first; maintain frozen fallback and G010 ledger. No scheduler/prefill/GPTQ changes.
+
+## Current state
+
+ACTIVE; frozen graph/ABI/fixture are untouched. FlashInfer STP-simple source contract is documented in E021 `contract_table.md`; tied-head value invariant is proven. Full-fixture donor result recorded in E021 results: output rel-L2 `8.88956e-8`, state rel-L2 `1.66093e-7`; donor median 0.868352 ms plus adapter 0.106176 ms = ~0.974528 ms, only ~3.13% below 1.006 ms production kernel baseline before API overhead. Rejected as not useful enough; no production integration/A-B. Next mature donor is state-spaces/mamba v2.2.4 CUDA selective_state_update, to source-audit and qualify on SM70 against the same fixture. V100 idle, frozen files intact; G010 ledger remains frozen; GPTQ read-only.
+
+

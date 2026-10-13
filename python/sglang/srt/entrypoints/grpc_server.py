@@ -117,6 +117,7 @@ def _add_admin_routes(app, request_manager):
                 merge_profiles=body.get("merge_profiles", False),
                 profile_prefix=body.get("profile_prefix"),
                 profile_stages=body.get("profile_stages"),
+                profile_range=body.get("profile_range"),
             )
             results = await request_manager.send_communicator_req(
                 req, "profile_communicator", timeout=600.0

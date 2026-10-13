@@ -1734,6 +1734,8 @@ class ProfileReqInput(BaseReq):
     profile_prefix: Optional[str] = None
     # Only profile these stages and ignore others
     profile_stages: Optional[List[str]] = None
+    # Optional synchronized CUDA-profiler capture window; enabled only for bounded traces.
+    profile_range: Optional[str] = None
 
 
 class ProfileReqType(Enum):
@@ -1755,6 +1757,7 @@ class ProfileReq(BaseReq):
     merge_profiles: bool = False
     profile_prefix: Optional[str] = None
     profile_stages: Optional[List[str]] = None
+    profile_range: Optional[str] = None
 
 
 @dataclass

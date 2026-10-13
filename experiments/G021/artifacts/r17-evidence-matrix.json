@@ -1,6 +1,6 @@
 {
   "schema": "g021-r17-evidence-matrix-v1",
-  "generated_utc": "2026-10-12T04:59:03.861028+00:00",
+  "generated_utc": "2026-10-12T06:45:12.787949+00:00",
   "goal_status": "ACTIVE",
   "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
   "identity": {
@@ -1923,7 +1923,7 @@
     "extension_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
     "benchmark": "bench_one_batch S1 synthetic valid-vocabulary input, bs1, input1024, output64, graph keys [1,2,4], radix/piecewise disabled, static fraction .75; same warmed standalone run has separate Prefill and Decode profiler ranges. Captured 2026-10-12 on V100; NCU PID worker, helper subprocess tracked.",
     "capture": "--target-processes all --device 0 --profile-from-start off --nvtx --nvtx-include R17_MEASURED_FORWARD --graph-profiling node --replay-mode kernel; name-filtered actual Falcon calls. NVTX is start/end around benchmark stage; CUDA graph capture occurs before it. NCU selected the intended main worker (PID is recorded in report); child tokenizer process is tracked but has no selected matching kernels.",
-    "scope": "Real full Falcon forward call path and actual kernel inputs, but values are selected kernel/grid records, not full Graph aggregate or whole Forward. Replayed NCU metrics are arithmetic means across 2-4 NCU replay records for identical kernel/grid. Decode captures CUDA Graph replay kernels from one real decode graph forward; no conversion to complete GPU-active union.",
+    "scope": "Real full Falcon forward call path and actual kernel inputs, but values are selected kernel/grid records, not full Graph aggregate or whole Forward. Replayed NCU metrics are arithmetic means across 2-4 NCU replay records for identical kernel/grid. Decode captures CUDA Graph replay kernels from one real decode graph forward; no conversion to complete GPU-active union. G022 offline signature audit corrected grid 835 to FP16 gemv2T_kernel_val with unresolved callsite; it is not the Falcon FP32 lm_head projection. Archived G019 c4 trace has separate FP32 grid 16264 gemmSN_TN kernel (~1.9ms once/step), source-attributable to Falcon lm_head; no NCU metrics for that kernel were collected.",
     "metric_notes": {
       "gpu__time_duration.sum": "per-selected-kernel elapsed; Prefill CSV unit ms, Decode CSV unit us",
       "dram__bytes_read/write.sum": "per selected-kernel aggregate; NCU displays Mbyte",
@@ -2032,7 +2032,8 @@
         "issue_active_pct_mean": 36.6483,
         "long_scoreboard_pct_mean": 67.7226
       },
-      "decode_vocab_gemv_grid835": {
+      "decode_fp16_gemv_grid835_unattributed": {
+        "symbol": "gemv2T_kernel_val<int,int,__half,...>",
         "grid": "835,1,1",
         "ncu_records": 2,
         "duration_us_mean": 62.08,

@@ -72,6 +72,8 @@ class SchedulerProfilerManager:
         self.profile_by_stage: bool = False
         self.profile_in_progress: bool = False
         self.merge_profiles = False
+        self.profile_range: Optional[str] = None
+        self.cuda_profiler_range_active = False
 
         # For ROCM
         self.rpd_profiler = None
@@ -89,8 +91,11 @@ class SchedulerProfilerManager:
         merge_profiles: bool = False,
         profile_prefix: str = "",
         profile_stages: Optional[List[str]] = None,
+        profile_range: Optional[str] = None,
     ) -> ProfileReqOutput:
         if envs.SGLANG_PROFILE_V2.get():
+            if profile_range is not None:
+                raise ValueError("profile_range requires the legacy CUDA profiler")
             return self._profile_manager.configure(
                 output_dir=output_dir,
                 start_step=start_step,
@@ -113,6 +118,15 @@ class SchedulerProfilerManager:
 
         self.profile_by_stage = profile_by_stage
         self.merge_profiles = merge_profiles
+        self.profile_range = profile_range
+        self.cuda_profiler_range_active = False
+        if profile_range is not None:
+            if profile_range not in ("prefill", "decode"):
+                raise ValueError("profile_range must be 'prefill' or 'decode'")
+            if not profile_by_stage or not num_steps:
+                raise ValueError("profile_range requires profile_by_stage and num_steps")
+            if not activities or "CUDA_PROFILER" not in activities:
+                raise ValueError("profile_range requires activities including CUDA_PROFILER")
 
         if output_dir is None:
             output_dir = os.getenv("SGLANG_TORCH_PROFILER_DIR", "/tmp")
@@ -126,13 +140,17 @@ class SchedulerProfilerManager:
         self.profile_id = profile_id
         self.profile_prefix = profile_prefix
 
+        if profile_range is not None:
+            self.profiler_prefill_ct = 0
+            self.profiler_decode_ct = 0
         if start_step:
             self.profiler_start_forward_ct = max(start_step, self.get_forward_ct() + 1)
 
         if num_steps:
             if self.profile_by_stage:
-                self.profiler_prefill_ct = 0
-                self.profiler_decode_ct = 0
+                if profile_range is None:
+                    self.profiler_prefill_ct = 0
+                    self.profiler_decode_ct = 0
                 self.profiler_target_prefill_ct = num_steps
                 self.profiler_target_decode_ct = num_steps
             elif start_step:
@@ -224,6 +242,7 @@ class SchedulerProfilerManager:
         if "CUDA_PROFILER" in activities:
             if self.ps.gpu_id == get_global_server_args().base_gpu_id:
                 torch.cuda.cudart().cudaProfilerStart()
+                self.cuda_profiler_range_active = True
             self.profile_in_progress = True
 
         return ProfileReqOutput(success=True, message="Succeeded")
@@ -332,8 +351,10 @@ class SchedulerProfilerManager:
             torch.cuda.memory._record_memory_history(enabled=None)
 
         if "CUDA_PROFILER" in self.profiler_activities:
-            if self.ps.gpu_id == get_global_server_args().base_gpu_id:
-                torch.cuda.cudart().cudaProfilerStop()
+            if self.cuda_profiler_range_active:
+                if self.ps.gpu_id == get_global_server_args().base_gpu_id:
+                    torch.cuda.cudart().cudaProfilerStop()
+                self.cuda_profiler_range_active = False
 
         merge_message = self._merge_profile_traces()
 
@@ -353,6 +374,33 @@ class SchedulerProfilerManager:
             self._profile_manager.step(forward_mode=batch.forward_mode)
             return
 
+        if self.profile_range in ("prefill", "decode"):
+            matches = (
+                batch.forward_mode.is_prefill()
+                if self.profile_range == "prefill"
+                else batch.forward_mode.is_decode()
+            )
+            count = (
+                self.profiler_prefill_ct
+                if self.profile_range == "prefill"
+                else self.profiler_decode_ct
+            )
+            target = (
+                self.profiler_target_prefill_ct
+                if self.profile_range == "prefill"
+                else self.profiler_target_decode_ct
+            )
+            if matches:
+                if self.profile_range == "prefill":
+                    count += 1
+                    self.profiler_prefill_ct = count
+                else:
+                    if count == 0 and not self.profile_in_progress:
+                        self._start_profile(batch.forward_mode)
+                    count += 1
+                    self.profiler_decode_ct = count
+            return
+
         if self.profile_by_stage:
             if batch.forward_mode.is_prefill():
                 if self.profiler_prefill_ct == 0:
@@ -363,10 +411,11 @@ class SchedulerProfilerManager:
                         self._stop_profile(stage=ForwardMode.EXTEND)
             elif batch.forward_mode.is_decode():
                 if self.profiler_decode_ct == 0:
-                    if self.profile_in_progress:
+                    if self.profile_in_progress and self.profile_range is None:
                         # force trace flush
                         self._stop_profile(stage=ForwardMode.EXTEND)
-                    self._start_profile(batch.forward_mode)
+                    if self.profile_range is None:
+                        self._start_profile(batch.forward_mode)
                 self.profiler_decode_ct += 1
                 if self.profiler_decode_ct > self.profiler_target_decode_ct:
                     if self.profile_in_progress:
@@ -388,6 +437,28 @@ class SchedulerProfilerManager:
             ):
                 self._start_profile()
 
+    def _profile_forward_completed(self, batch: ScheduleBatch):
+        if self.profile_range is None or not self.profile_in_progress:
+            return
+        matches = (
+            batch.forward_mode.is_prefill()
+            if self.profile_range == "prefill"
+            else batch.forward_mode.is_decode()
+        )
+        count = (
+            self.profiler_prefill_ct
+            if self.profile_range == "prefill"
+            else self.profiler_decode_ct
+        )
+        target = (
+            self.profiler_target_prefill_ct
+            if self.profile_range == "prefill"
+            else self.profiler_target_decode_ct
+        )
+        if matches and target is not None and count >= target:
+            self._stop_profile(batch.forward_mode)
+            self.cuda_profiler_range_active = False
+
     def _profile(self, recv_req: ProfileReq):
         if recv_req.type == ProfileReqType.START_PROFILE:
             if recv_req.profile_by_stage or recv_req.start_step:
@@ -403,6 +474,7 @@ class SchedulerProfilerManager:
                     recv_req.merge_profiles,
                     recv_req.profile_prefix,
                     recv_req.profile_stages,
+                    recv_req.profile_range,
                 )
             else:
                 self._init_profile(
@@ -416,6 +488,8 @@ class SchedulerProfilerManager:
                     recv_req.profile_id,
                     recv_req.merge_profiles,
                     recv_req.profile_prefix,
+                    recv_req.profile_stages,
+                    recv_req.profile_range,
                 )
                 return self._start_profile()
         else:

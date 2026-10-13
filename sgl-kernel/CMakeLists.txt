@@ -219,6 +219,7 @@ option(SGL_KERNEL_ENABLE_FA3              "Enable FA3"              OFF)
 option(SGL_KERNEL_ENABLE_SM90A            "Enable SM90A"            OFF)
 option(SGL_KERNEL_ENABLE_SM100A           "Enable SM100A"           OFF)
 option(SGL_KERNEL_V100_ONLY               "Build only for V100 sm70, skip all sm80/sm89/sm90/sm100 targets"  OFF)
+option(SGL_KERNEL_GPTQ_CANDIDATE "Build isolated GPTQ candidate dispatch" OFF)
 
 if (SGL_KERNEL_ENABLE_BF16)
     list(APPEND SGL_KERNEL_CUDA_FLAGS
@@ -400,6 +401,13 @@ endif()
 # =========================== Common SM100+ / SM70 Build ============================= #
 # Build SM100+ library with precise math (same namespace, different directory)
 # When SGL_KERNEL_V100_ONLY: only sm70, skip sm90/sm100 targets
+if(SGL_KERNEL_GPTQ_CANDIDATE AND NOT SGL_KERNEL_V100_ONLY)
+    message(FATAL_ERROR "SGL_KERNEL_GPTQ_CANDIDATE requires an isolated V100-only build")
+endif()
+if(SGL_KERNEL_GPTQ_CANDIDATE)
+    list(APPEND SOURCES "csrc/gemm/gptq/gptq_candidate_v8.cu")
+    add_compile_definitions(SGL_KERNEL_GPTQ_CANDIDATE)
+endif()
 Python_add_library(common_ops_sm100_build MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI ${SOURCES})
 
 target_compile_options(common_ops_sm100_build PRIVATE

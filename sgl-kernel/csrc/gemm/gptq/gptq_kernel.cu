@@ -11,6 +11,8 @@ https://github.com/qwopqwop200/GPTQ-for-LLaMa
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 
 #include "compat.cuh"
 #include "matrix_view.cuh"
@@ -1889,6 +1891,12 @@ void shuffle_exllama_weight(uint32_t* q_weight, int* q_perm, int height, int wid
 }  // namespace gptq
 }  // namespace sglang
 
+#ifdef SGL_KERNEL_GPTQ_CANDIDATE
+torch::Tensor packed_q4_fp32_candidate(
+    torch::Tensor x, torch::Tensor qw, torch::Tensor qz,
+    torch::Tensor scales, torch::Tensor gidx, bool return_fp32);
+#endif
+
 torch::Tensor gptq_gemm(
     torch::Tensor a,
     torch::Tensor b_q_weight,
@@ -1901,6 +1909,16 @@ torch::Tensor gptq_gemm(
   auto options = torch::TensorOptions().dtype(a.dtype()).device(a.device());
   at::Tensor c = torch::empty({a.size(0), b_q_weight.size(1)}, options);
   at::Tensor temp_dq = torch::empty({b_q_weight.size(0) * 32 / bit, b_q_weight.size(1)}, options);
+
+#ifdef SGL_KERNEL_GPTQ_CANDIDATE
+  if (a.is_cuda() && bit == 4 && !use_shuffle && a.size(0) >= 1 && a.size(0) <= 4 &&
+      std::getenv("SGLANG_G017_Q4_FP32_CANDIDATE") &&
+      std::string(std::getenv("SGLANG_G017_Q4_FP32_CANDIDATE")) == "1") {
+    return packed_q4_fp32_candidate(
+        a, b_q_weight.to(at::kInt), b_gptq_qzeros.to(at::kInt),
+        b_gptq_scales, b_g_idx, false);
+  }
+#endif
 
   sglang::gptq::gemm_half_q_half_cuda(
       at::cuda::getCurrentCUDABlasHandle(),

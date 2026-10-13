@@ -1371,6 +1371,9 @@ class CudaGraphRunner:
             self.model_runner.device_timer.wrap(
                 metadata={
                     "category": forward_batch.forward_mode.name.lower(),
+                    "forward_iter": forward_batch.forward_iter,
+                    "graph_bs": self.bs,
+                    "graph_key": graph_key,
                 }
             )
             if self.model_runner.device_timer
