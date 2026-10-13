@@ -1,0 +1,18 @@
+# E032 Results — Falcon Mamba in_proj SM70 candidate
+
+## OBSERVED
+- An opt-in candidate was temporarily wired for exact Mamba `.mixer.in_proj` M2/M4 and synthetic correctness/Graph smoke passed, then actual-weight numerical probing was run on V100. Candidate code/config/test edits were removed after real-weight failure; final source has no E032 implementation.
+- E031 eager source-attribution mapped `model.layers.i.mixer.in_proj` exactly 44 times/Forward at c1/c2/c4. M=2/4 input `[M,3072]`, output `[M,6680]`, FP16, unquantized Row/Column parallel linear. At M2/M4, each module call launches the same CUTLASS WMMA `[8,53,2]` kernel; N=6680, K=3072. E031 approximate correlated source kernel-sum is 2.83–2.85ms/Forward. Its trace was eager, not graph, and sum may include boundary effects.
+- Existing mature local SGLang code `python/sglang/jit_kernel/sm70_small_gemm.py` plus `python/sglang/jit_kernel/csrc/elementwise/sm70_small_gemm.cuh` supports M2/M4 scalar FP32 accumulation with vectorized FP16 weight fetch reused across rows. Synthetic random Mamba-in_proj geometry passed its torch FP32-matmul comparison and Graph replay (max abs 0.0004883, relative L2 <1.2e-5). On actual checkpoint layer-0 operand `model.layers.0.mamba.in_proj.weight` (stored BF16, runtime FP16, shape `[6680,3072]`; source shard SHA `00a9f15ca3dec4de0d4698e638b9d0a3328a1b3a95556b2b17746274ba21f822`), candidate output failed unchanged comparison to `torch.nn.functional.linear(x,w)` at M2: 67/13,360 elements exceed rtol=0.002/atol=0.001; max abs 0.00390625, max relative 0.28955. The probe stopped before writing its timing JSON; no candidate latency number exists. This realistic failure supersedes synthetic pass; no tolerance change. Candidate code/config/test edits were removed without staging; default SGLang behavior is unchanged.
+- A separate exploratory exact-weight screen on Falcon `model.layers.0.mamba.out_proj.weight` `[3072,3072]` passed unchanged elementwise bound at M2 (0 bad/6144, max abs 0.0004883, relative-L2 `4.09e-6`) but failed at M4 (max abs `0.00390625`, relative-L2 `2.71e-5`). This was only a no-source-change correctness screen, not an implementation or benchmark; neither route was modified.
+
+## INFERRED
+- This is a reversible low-batch experiment: a named feature flag could dispatch only the exact Mamba `in_proj` prefix and only M2/M4 FP16 contiguous aligned V100 shapes, leaving all existing behavior default/off. No M1 branch. Existing code suggests a viable implementation route but says nothing about performance/correctness on Falcon geometry.
+- Budget ceiling is at most the E031 ~2.84ms eager per-Forward in_proj correlated kernel sum, not exclusive Recoverable Forward time. The graph-profile category “Other GEMM” is ~6.5–7.2ms and includes QKV/output projection owners too; in_proj is a subset.
+
+## UNRESOLVED
+- No M4 real-checkpoint in_proj candidate run was needed after the M2 numerical failure. Neither in_proj nor out_proj has candidate performance measurement, NCU, full model Graph/state test, real Graph GPU step A/B, service TPS/ITL/TTFT, prefill/cache, memory/capacity or integration result; the Mamba in_proj candidate is rejected before those gates.
+- The candidate kernel uses scalar FP32 FMA and shuffle reduction, not Tensor Cores. No claim about reduced SM70 dependency or performance is supported.
+
+## Bounded answer
+Source attribution establishes Mamba in_proj as a substantial c4 owner, but the first mature small-M candidate fails actual checkpoint M2 correctness and is rejected. No production implementation changed. The failure is preserved; default route remains untouched.

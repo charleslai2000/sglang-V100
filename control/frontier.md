@@ -2,7 +2,7 @@
 
 ## G022-falcon-v100-c4-performance
 - T002 — evidence-driven low-batch optimization — ACTIVE
-  - frontier: E031 live eager source-span traces attribute all 44-per-layer GPTQ and FP16 projection calls, including c4 CUTLASS “Other GEMM” families to Falcon QKV, attention o_proj, and Mamba in/out projections. GPTQ Candidate remains the only qualified optimization; source spans are eager attribution, not Graph timing. Next choose an implementation on exact geometry/resource evidence, then correctness → matched NCU → real Graph GPU Forward A/B → uninstrumented service/Prefill/cache A/B.
+  - frontier: E031 live eager source-span traces attribute GPTQ and FP16 projection calls and c4 CUTLASS families to Falcon QKV, attention o_proj and Mamba in/out. The first Mamba in_proj small-M candidate failed the unchanged real-checkpoint M2 correctness bound and was fully reverted; no numerical tolerance change. S1 default/G017 rollback remain intact. Select a different exact-geometry candidate only after real-weight correctness, then correctness → matched NCU → production-Graph GPU Forward → service/Prefill/cache A/B.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
   - unblock/reopen: User explicitly lifted the pause. No repeat of the passed five-row CUPTI qualification; target-only V100 and >=8-GiB host floor remain mandatory. Keep S1 default/G017 Candidate fallback and unrelated dirty state.
 ## G021-v100-hardware-utilization
