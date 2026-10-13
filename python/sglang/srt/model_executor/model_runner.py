@@ -1715,6 +1715,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             )
         ):
             self.init_device_graphs()
+            # Graph runner is rebuilt in-place; preserve scheduler-installed
+            # timer identity on this ModelRunner (graph replay reads this field).
+            self.device_timer = getattr(self, "device_timer", None)
 
         logger.info("Update weights end.")
         return True, "Succeeded to update model weights."

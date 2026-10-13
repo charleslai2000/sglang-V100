@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import hashlib
 import logging
@@ -795,6 +794,17 @@ class TokenizerControlMixin:
         )
         # Many DP ranks
         return [res.internal_state for res in responses]
+
+    async def request_scheduler_fpm_shutdown(self: TokenizerManager) -> List[bool]:
+        self.auto_create_handle_loop()
+        loop = asyncio.get_running_loop()
+        self._fpm_shutdown_ack_future = loop.create_future()
+        self.send_to_scheduler.send_pyobj(GetInternalStateReq(action="fpm_shutdown"))
+        try:
+            response = await asyncio.wait_for(self._fpm_shutdown_ack_future, timeout=10.0)
+            return [bool(response.get("shutdown_requested"))]
+        except asyncio.TimeoutError:
+            return [False]
 
     async def set_internal_state(
         self: TokenizerManager, obj: SetInternalStateReq

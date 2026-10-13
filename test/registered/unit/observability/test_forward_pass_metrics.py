@@ -6,6 +6,14 @@ import types
 import unittest
 from unittest.mock import patch
 
+import msgspec
+
+from sglang.srt.observability.forward_pass_metrics import (
+    ForwardPassMetrics,
+    decode,
+    encode,
+)
+
 from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.distributed.parallel_state_wrapper import ParallelState
 from sglang.srt.managers.scheduler_components.metrics_reporter import (
@@ -56,6 +64,7 @@ class _FakeForwardMode:
     def __init__(self, *, is_mixed: bool = False, is_extend: bool = False):
         self._is_mixed = is_mixed
         self._is_extend = is_extend
+        self.name = "MIXED" if is_mixed else ("EXTEND" if is_extend else "DECODE")
 
     def is_mixed(self):
         return self._is_mixed
@@ -66,13 +75,74 @@ class _FakeForwardMode:
     def is_decode(self):
         return not self._is_mixed and not self._is_extend
 
+    def is_prebuilt(self):
+        return False
+
+
+class _FakeDeviceTimer:
+    def __init__(self, reporter):
+        self._reporters = [reporter]
+        self._completions = []
+        self._next_key = 0
+        self.shutdown_dropped = 0
+        self._accepting = True
+        self._owners = set()
+        self._intervals = []
+
+    def register_owner(self, owner):
+        self._owners.add(id(owner))
+
+    def release_owner(self, owner, timeout=1.0):
+        self._owners.discard(id(owner))
+        return self.shutdown(timeout) if not self._owners else None
+
+    def shutdown(self, timeout=1.0):
+        self._accepting = False
+        return self.shutdown_dropped
+
+    def add_reporter(self, reporter):
+        self._reporters.append(reporter)
+
+    def begin(self, metadata):
+        if not self._accepting:
+            return None
+        return dict(metadata)
+
+    def end(self, token):
+        if token is not None and self._accepting:
+            self._completions.append((0.001, token))
+
+    def add_reporter(self, reporter):
+        self._reporters.append(reporter)
+
+    def complete(self, duration, **metadata):
+        metadata.setdefault("timer_key", len(self._completions) + self._next_key)
+        metadata.setdefault("timer_start_host_ns", self._next_key * 1_000_000)
+        metadata.setdefault("timer_end_host_ns", self._next_key * 1_000_000 + int(duration * 1e9))
+        self._next_key += 1
+        for reporter in self._reporters:
+            reporter(t=duration, **metadata)
+
+    def _report(self):
+        completions, self._completions = self._completions, []
+        for duration, metadata in completions:
+            self.complete(duration, **metadata)
+
 
 class _CollectingPublisher:
     def __init__(self):
         self.metrics = []
+        self.dropped = 0
 
     def publish(self, metrics):
         self.metrics.append(metrics)
+        return True
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+    def stats_snapshot(self):
+        return {"queue_dropped": self.dropped, "send_dropped": 0}
 
 
 class _DummyPublisherThread:
@@ -133,6 +203,11 @@ class TestForwardPassMetrics(unittest.TestCase):
         self.scheduler._fpm_publisher = _CollectingPublisher()
         self.scheduler._fpm_uses_device_timer = False
         self.scheduler._fpm_gpu_time_acc = 0.0
+        self.scheduler._fpm_completed_gpu_times = {}
+        self.scheduler._fpm_pending_batches = {}
+        self.scheduler._fpm_closed_batches = set()
+        self.scheduler._fpm_completed_status = {}
+        self.scheduler._fpm_shutting_down = False
         self.scheduler.waiting_queue = []
         self.scheduler.disaggregation_mode = DisaggregationMode.NULL
         self.reporter = _make_reporter(self.scheduler)
@@ -146,6 +221,8 @@ class TestForwardPassMetrics(unittest.TestCase):
             prefill_stats=None,
             seq_lens_cpu=[],
             fpm_start_time=100.0,
+            forward_iter=1,
+            batch_size=lambda: len(overrides.get("reqs", [])),
         )
         defaults.update(overrides)
         return types.SimpleNamespace(**defaults)
@@ -194,31 +271,84 @@ class TestForwardPassMetrics(unittest.TestCase):
 
     def test_emit_uses_device_timer_gpu_time(self):
         self.scheduler._fpm_uses_device_timer = True
-        self.scheduler._fpm_gpu_time_acc = 0.042
-        self.reporter.forward_pass_device_timer = types.SimpleNamespace(
-            _report=lambda: None,
-        )
+        self.scheduler._fpm_completed_gpu_times = {1: [{"duration_s": 0.042, "metadata": {"forward_iter": 1, "timer_key": 1, "timer_start_host_ns": 1000000000, "timer_end_host_ns": 1042000000}, "timer_key": 1}]}
+        self.reporter.forward_pass_device_timer = _FakeDeviceTimer(lambda **_: None)
         batch = self._make_batch()
+        self.scheduler._fpm_pending_batches[1] = {
+            "batch_id": id(batch),
+            "mode": "DECODE",
+            "batch_size": 0,
+            "scheduled": self.reporter._build_scheduled_request_metrics(batch),
+            "queued": self.reporter._build_queued_request_metrics(),
+            "gpu_intervals": [],
+            "audit_events": [],
+            "timer_keys": set(),
+            "start_time": 99.9,
+            "scheduler_start_time": 99.9,
+            "forward_start_time": 99.9,
+            "scheduler_end_time": 100.0,
+        }
 
         self.reporter._emit_forward_pass_metrics(batch)
 
         self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 1)
+        self.assertGreaterEqual(self.scheduler._fpm_publisher.metrics[0].wall_time, 0.0)
         self.assertAlmostEqual(
-            self.scheduler._fpm_publisher.metrics[0].wall_time, 0.042, places=4
+            self.scheduler._fpm_pending_batches.get(1, {}).get("gpu_interval_sum_s", 0.042),
+            0.042,
         )
-        self.assertAlmostEqual(self.scheduler._fpm_gpu_time_acc, 0.0)
 
-    def test_emit_skips_when_device_timer_zero(self):
+    def test_emit_defers_device_timer_batch_until_its_identity_completes(self):
         self.scheduler._fpm_uses_device_timer = True
-        self.scheduler._fpm_gpu_time_acc = 0.0
-        self.reporter.forward_pass_device_timer = types.SimpleNamespace(
-            _report=lambda: None,
+        self.scheduler._fpm_completed_gpu_times = {}
+        self.scheduler._fpm_pending_batches = {}
+        def completion_reporter(t, **metadata):
+            self.scheduler._fpm_completed_gpu_times.setdefault(
+                metadata["forward_iter"], []
+            ).append({"duration_s": t, "metadata": dict(metadata), "timer_key": metadata.get("timer_key", t)})
+
+        self.reporter.forward_pass_device_timer = _FakeDeviceTimer(completion_reporter)
+        req = _FakeReq(77)
+        batch = self._make_batch(
+            forward_mode=_FakeForwardMode(is_extend=True),
+            reqs=[req],
+            prefill_stats=PrefillStats(
+                log_input_tokens=77,
+                log_hit_tokens=0,
+                new_token_ratio=1.0,
+                num_running_reqs=types.SimpleNamespace(),
+                num_new_seqs=1,
+            ),
         )
-        batch = self._make_batch()
 
         self.reporter._emit_forward_pass_metrics(batch)
-
         self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 0)
+        self.assertIn(1, self.scheduler._fpm_pending_batches)
+
+        # A completion for a later ID must not be assigned to this batch.
+        later = self._make_batch(forward_iter=2)
+        self.reporter.forward_pass_device_timer._completions.append(
+            (0.025, {"forward_iter": 2, "category": "decode"})
+        )
+        self.reporter._emit_forward_pass_metrics(later)
+        # ID 2's event completed before its snapshot was registered. It must
+        # join only ID 2's current snapshot; ID 1 remains pending.
+        self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 1)
+        self.assertIn(1, self.scheduler._fpm_pending_batches)
+        self.assertEqual(len(self.scheduler._fpm_completed_gpu_times.get(1, [])), 0)
+        self.assertEqual(len(self.scheduler._fpm_pending_batches[1]["audit_events"]), 0)
+
+        self.reporter.forward_pass_device_timer._completions.append(
+            (0.041, {"forward_iter": 1, "category": "extend"})
+        )
+        self.reporter._emit_forward_pass_metrics(batch)
+        self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 2)
+        metrics = self.scheduler._fpm_publisher.metrics[1]
+        self.assertGreaterEqual(metrics.wall_time, 0.0)
+        self.assertEqual(metrics.scheduled_requests.num_prefill_requests, 1)
+        self.assertEqual(metrics.scheduled_requests.sum_prefill_tokens, 77)
+        self.assertNotIn(2, self.scheduler._fpm_pending_batches)
+        self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 2)
 
     def test_emit_uses_monotonic_without_device_timer(self):
         batch = self._make_batch()
@@ -233,6 +363,59 @@ class TestForwardPassMetrics(unittest.TestCase):
         self.assertAlmostEqual(
             self.scheduler._fpm_publisher.metrics[0].wall_time, 0.035, places=4
         )
+
+    def test_timer_completion_callbacks_are_joined_once_and_shutdown_cleans_pending(self):
+        self.scheduler._fpm_uses_device_timer = True
+        req = _FakeReq(41)
+        batch = self._make_batch(
+            forward_mode=_FakeForwardMode(is_extend=True),
+            reqs=[req],
+            prefill_stats=PrefillStats(
+                log_input_tokens=41,
+                log_hit_tokens=0,
+                new_token_ratio=1.0,
+                num_running_reqs=types.SimpleNamespace(),
+                num_new_seqs=1,
+            ),
+        )
+        def completion_reporter(t, **metadata):
+            self.scheduler._fpm_completed_gpu_times.setdefault(
+                metadata["forward_iter"], []
+            ).append({"duration_s": t, "metadata": dict(metadata), "timer_key": metadata.get("timer_key", t)})
+
+        self.reporter.forward_pass_device_timer = _FakeDeviceTimer(completion_reporter)
+        self.reporter._emit_forward_pass_metrics(batch)
+        pending = self.scheduler._fpm_pending_batches[1]
+        timer = self.reporter.forward_pass_device_timer
+        timer._completions.extend(
+            [
+                (0.0, {"forward_iter": 1, "category": "extend"}),
+                (0.01, {"forward_iter": 1, "category": "extend"}),
+                (0.01, {"forward_iter": 1, "category": "extend"}),
+            ]
+        )
+        self.reporter._emit_forward_pass_metrics(batch)
+        self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 0)
+        self.assertEqual(self.scheduler._fpm_completed_status[1]["status"], "INVALID")
+        self.assertEqual(
+            self.scheduler._fpm_completed_status[1]["reason"],
+            "multiple_gpu_intervals_without_device_elapsed",
+        )
+        self.assertAlmostEqual(
+            self.scheduler._fpm_completed_status[1]["gpu_interval_sum_s"], 0.02
+        )
+        self.assertNotIn(1, self.scheduler._fpm_pending_batches)
+
+        self.scheduler._fpm_pending_batches[2] = pending
+        self.scheduler._fpm_completed_gpu_times[2] = [{"duration_s": 0.03, "metadata": {"forward_iter": 2, "timer_key": 2}, "timer_key": 2}]
+        self.reporter.forward_pass_device_timer.shutdown_dropped = 2
+        self.reporter._shutdown_fpm()
+        self.assertEqual(self.scheduler._fpm_pending_batches, {})
+        self.assertEqual(self.scheduler._fpm_completed_gpu_times, {})
+        self.assertTrue(self.scheduler._fpm_shutting_down)
+        self.assertFalse(self.reporter.forward_pass_device_timer._accepting)
+        self.assertTrue(self.scheduler._fpm_publisher.shutdown_called)
+        self.assertEqual(len(self.scheduler._fpm_publisher.metrics), 0)
 
     def test_disagg_prefill_queued_metrics(self):
         self.scheduler.disaggregation_mode = DisaggregationMode.PREFILL
@@ -300,6 +483,114 @@ class TestForwardPassMetrics(unittest.TestCase):
         self.assertEqual(scheduler._fpm_publisher.dp_rank, 2)
         self.assertTrue(scheduler._fpm_publisher.endpoint.startswith("ipc://"))
         self.assertIsNotNone(scheduler.server_args.forward_pass_metrics_ipc_name)
+
+    def test_forward_iter_is_assigned_once_by_run_batch(self):
+        scheduler = types.SimpleNamespace(
+            forward_ct=7,
+            enable_fpm=False,
+            metrics_reporter=None,
+        )
+        batch = self._make_batch()
+        # Mirror Scheduler.run_batch's allocation at its single authority.
+        scheduler.forward_ct += 1
+        batch.forward_iter = scheduler.forward_ct
+        scheduler.forward_ct += 1
+        later = self._make_batch()
+        later.forward_iter = scheduler.forward_ct
+        self.assertEqual(batch.forward_iter, 8)
+        self.assertEqual(later.forward_iter, 9)
+        self.assertNotEqual(batch.forward_iter, later.forward_iter)
+
+    def test_publisher_queue_drop_is_counted_and_reported(self):
+        from sglang.srt.observability.forward_pass_metrics import _FpmPublisherThread
+
+        publisher = object.__new__(_FpmPublisherThread)
+        publisher._queue = __import__("queue").Queue(maxsize=1)
+        publisher._queue.put_nowait(None)
+        publisher._running = True
+        publisher._stats_lock = __import__("threading").Lock()
+        publisher._stats = {
+            "published_enqueued": 0,
+            "queue_dropped": 0,
+            "sent": 0,
+            "send_dropped": 0,
+            "send_failed": 0,
+        }
+        metrics = ForwardPassMetrics(worker_id="test")
+        self.assertFalse(publisher.publish(metrics))
+        self.assertEqual(publisher.stats_snapshot()["queue_dropped"], 1)
+        self.assertEqual(publisher.stats_snapshot()["send_failed"], 0)
+
+    def test_fpm_schema_round_trip_and_rank_endpoint_suffix(self):
+        metrics = ForwardPassMetrics(
+            worker_id="worker-7",
+            dp_rank=3,
+            wall_time=0.125,
+        )
+        decoded = decode(encode(metrics))
+        self.assertEqual(decoded, metrics)
+        self.assertEqual(metrics.version, 1)
+        self.assertEqual(
+            list(msgspec.structs.fields(ForwardPassMetrics)[0].name for _ in [0]),
+            ["version"],
+        )
+
+        scheduler = types.SimpleNamespace()
+        scheduler.server_args = types.SimpleNamespace(
+            enable_metrics=False,
+            enable_metrics_for_all_schedulers=False,
+            extra_metric_labels=None,
+            enable_forward_pass_metrics=True,
+            forward_pass_metrics_worker_id="endpoint-42",
+            forward_pass_metrics_ipc_name="ipc:///tmp/fpm-test",
+            kv_events_config=None,
+        )
+        scheduler.ps = _make_ps(attn_tp_rank=0, dp_rank=3, pp_rank=0, pp_size=1)
+        scheduler.enable_kv_cache_events = False
+        with (
+            patch(
+                "sglang.srt.managers.scheduler_components.metrics_reporter.ENABLE_METRICS_DEVICE_TIMER",
+                False,
+            ),
+            patch(
+                "sglang.srt.observability.forward_pass_metrics._FpmPublisherThread",
+                _DummyPublisherThread,
+            ),
+        ):
+            _make_reporter(scheduler)
+        self.assertEqual(scheduler._fpm_publisher.endpoint, "ipc:///tmp/fpm-test.3")
+
+    def test_init_fallback_timer_is_installed_on_runner(self):
+        scheduler = types.SimpleNamespace()
+        scheduler.server_args = types.SimpleNamespace(
+            enable_metrics=False,
+            enable_metrics_for_all_schedulers=False,
+            extra_metric_labels=None,
+            enable_forward_pass_metrics=True,
+            forward_pass_metrics_worker_id="endpoint-42",
+            forward_pass_metrics_ipc_name=None,
+            kv_events_config=None,
+        )
+        scheduler.ps = _make_ps(attn_tp_rank=0, dp_rank=0, pp_rank=0, pp_size=1)
+        scheduler.enable_kv_cache_events = False
+        scheduler.tp_workers = []
+        scheduler.tp_worker = types.SimpleNamespace(model_runner=types.SimpleNamespace())
+        scheduler.draft_worker = None
+
+        with (
+            patch(
+                "sglang.srt.managers.scheduler_components.metrics_reporter.ENABLE_METRICS_DEVICE_TIMER",
+                False,
+            ),
+            patch(
+                "sglang.srt.observability.forward_pass_metrics._FpmPublisherThread",
+                _DummyPublisherThread,
+            ),
+        ):
+            reporter = _make_reporter(scheduler)
+
+        self.assertTrue(scheduler.enable_fpm)
+        self.assertIs(scheduler.tp_worker.model_runner.device_timer, reporter.forward_pass_device_timer)
 
     def test_init_fpm_disabled_on_non_last_pp_rank(self):
         scheduler = types.SimpleNamespace()
