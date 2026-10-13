@@ -2,7 +2,7 @@
 
 ## G022-falcon-v100-c4-performance
 - T002 — evidence-driven low-batch optimization — ACTIVE
-  - frontier: E031 attributes projection sources. E032 Mamba in_proj small-M failed exact-weight correctness and is rejected. E033 QKV small-M passed exact-weight direct dispatch + Graph, but the temporary route was removed before NCU because prior matched replay crossed the host 8-GiB floor; no implementation remains. Next requires a demonstrably safe matched-NCU route, then full Graph Forward c1/c2/c4 and uninstrumented service/Prefill/cache A/B. S1 default/G017 rollback unchanged.
+  - frontier: Main merge regression in FPM async identity joins repaired/pushed at 0e7b65a97; related registered/manual tests pass. S1 and exact final Candidate extensions load with verified hashes; wrong hash rejected. Single-job V100 CUDA extension rebuild is running, then bounded Falcon S1/Candidate opt-in smoke on Graph1/2/4. T002 continues only after runtime integration gates; no new NCU yet. Mamba candidate rejected and QKV screen was removed pre-NCU; S1 default/G017 fallback intact.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
   - unblock/reopen: User explicitly lifted the pause. No repeat of the passed five-row CUPTI qualification; target-only V100 and >=8-GiB host floor remain mandatory. Keep S1 default/G017 Candidate fallback and unrelated dirty state.
 ## G021-v100-hardware-utilization
