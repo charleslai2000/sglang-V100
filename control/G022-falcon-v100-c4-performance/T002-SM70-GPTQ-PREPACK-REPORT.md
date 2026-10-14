@@ -1,0 +1,74 @@
+# G022/T002 — SM70 GPTQ 预打包路线定向调查
+
+## 裁决：NO-GO-DONOR
+
+不建议把`zhinianqin/marlin_v100` Dense直接接入当前 Falcon GPTQ线性热路径。决定性不兼容是：现有SGLang的SM70 Dense GEMM按Marlin symmetric `uint4b8`类型解释Q4，并把零点留在隐式中心；Falcon真实GPTQ checkpoint仍需逐group/逐output channel读取`qzeros`，并按GPTQ-v1语义使用`stored_zero + 1`。已审核的donor Dense op没有证据表明接受并消费SGLang `GPTQMarlinLinearKernel`当前传入的zero-point tensor/显式g_idx；直接把数据重排成现有donor格式会丢失非固定zero-point信息。不得因`is_sym=true`臆定所有实际zero均为8。Donor的SM70 GEMM/repack不宜直接复用；可复用候选的紧凑Q4读取、加载期layout变换、按g_idx gather和FP32 split-K累加思想，但应沿当前GPTQ-v1数学合同建立明确的新layout/路径。
+
+此裁决只针对**当前公开Dense接口按原样复用**，不证明所有可能重构都不可能，也不是性能认证。G017 accepted Candidate的历史证据继续有效，S1默认与G017精确SHA opt-in保持不变。此次仅提交调查文档，无源码、kernel、dispatcher、配置/default改动，无新服务/性能实验。
+
+## 1. 当前主线、源码身份与完整调用链
+
+**调查对象实际HEAD**：开始检查时`main=dca488908ee4e3f1bc676c3bf5dcd26ff049cfc3`；审阅`origin/main`仅领先三个README/field-report提交后，快进到`2d06a902aeba2d9cf38d80f1a916107d0520a2f5`。结束时本地main与origin/main一致，工作树干净。RTX3090工作树中的S1/G017代码不是此repo；不能混淆二者。
+
+**S1**：Falcon GPTQ被选为普通GPTQ后，由`GPTQConfig.get_quant_method`→`GPTQLinearMethod`→`GPTQLinearScheme`→`GPTQLinearKernel`。权重加载到packed qweight、qzeros、scales、g_idx；`process_weights_after_loading`调用`gptq_shuffle`（是否有效取决于`use_shuffle`/desc_act）；实际Forward每次调用`gptq_gemm(x,qweight,qzeros,scales,g_idx,use_shuffle,bits)`。这是基础GPTQ CUDA路径，不是Marlin。
+
+**显式/可转换GPTQ-Marlin**：`GPTQMarlinConfig.override_quantization_method`只对`user_quant is None | marlin | gptq_marlin`且配置可转换的checkpoint选择Marlin；用户显式`quantization=gptq`保持GPTQ。Marlin scheme加载期由`GPTQMarlinLinearKernel.process_weights_after_loading`排序g_idx、在`g_idx_sort_indices`保存原K置换、repack qweight、permute scales、zero_points并分配workspace；apply经`apply_gptq_marlin_linear`传activation、packed weights、scale、zero、g_idx及排序索引。该调用最终是`gptq_marlin_gemm`或compile-context wrapper，**不是**`_sm70_marlin_v100_gemm_op`。
+
+**SM70 donor Dense状态**：`scripts/setup_v100_marlin.sh`固定默认`MARLIN_V100_REF=6d72a49939701d26b15b617a4cd2423174adb2d1`，构建并安装MoE与可选Dense `.so`；脚本不是运行时GEMM dispatch。`marlin_utils.py`的`_sm70_marlin_v100_available`、`_sm70_marlin_v100_repack_ops`、`_sm70_marlin_v100_gemm_op`提供探测、共享库装载和op查找。检查实际引用点可见helper的dense GEMM调用用于`marlin_utils_fp8.py`，不是GPTQ-Marlin线性apply。`gptq_kernels.py`会借helper覆盖`gptq_marlin_repack`，但GPTQ Marlin linear的apply仍调用in-tree `gptq_marlin_gemm`；SGLang源码明确stock Marlin的repack/GEMM在SM70是空stub，故“donor repack可用”不等同“Donor Dense GPTQ完整dispatch已接通”。现有可见SM70 donor路径主要服务MoE WNA16、FP8/NVFP4等范围。
+
+**G017**：已接受split-K GPTQ Candidate的代码提交`5fac74206b...`可在历史中查看，后来由`5c5dda7a29`整合。其分支代码将opt-in候选加在基础`gptq_gemm`小M路由中，默认保持S1；它不是Marlin Dense，也没有启用`setup_v100_marlin.sh`的Dense kernel。G017 final extension SHA `02f923ea7329912a4413f179f292acb444a5e001caebf110b24f531cabf70d8b`、strict pre-cast FP32 oracle/ID/service证据详见G017计划和`experiments/E026-local-v100-s4-m3c/results.md`历史材料。它能供G022复用为比较基线，但本次没有重新生成或验证该binary。
+
+> 当前main不含G022控制树和E026/E028工作文件；它们存在于main可达历史提交。本报告及T002 task是本次加入main的首个G022/T002本地控制记录。
+
+## 2. 每轮工作与可前移预处理
+
+真实热路径不是每轮完整解包/重排权重：qweight/qzeros/scales/g_idx在device侧常驻；当前`gptq_gemm`及G017候选在每个Forward都读取打包Q4，并做必要的group/zero/scale索引、activation布局/gather和乘累加。G017候选把若干工作改成与M相关的activation gather和split-K partial/reduction；其性能和数学边界已有历史测量，但不是Donor。
+
+加载期已做：参数读取/TP shard、packed tensor装载、weight参数登记；Marlin分支会再做排序、qweight repack、scale permute、zero-point变换及workspace分配。基础S1具体是否改变qweight，必须由其kernel配置`use_shuffle`语义与实测loader状态共同判定，不能只按通用注释称“每轮shuffle”。本报告没有Falcon GPTQ checkpoint或在线对象，故**不声称当前Falcon权重确实在每轮被全量重排**。
+
+若为新压缩Q4 kernel预打包，加载期候选映射：
+- 不展开FP16矩阵；原始逻辑`Q[K,N]`保留每元素4-bit，物理每字节两个code。构造目标tile顺序的紧凑Q4 bytes，layout约`[K_tile,N_tile,packed-nibble]`或能让连续lane联合取相邻N值的等价布局；pad尺寸/尾区只加code padding，不生成全精度权重。
+- 按真实GPTQ `g_idx[k]`建立稳定`perm[k]`使group连续，预排qweight K轴为`Q[perm[k],n]`。同时保存inverse permutation或明确其不需要；forward激活必须做`x_perm[k]=x[perm[k]]`，保证内积仍是`sum_k x[perm[k]]*Q[perm[k],n]`。如果不重排activation，则不能单独重排权重K轴。对于desc_act=false且group本已连续，identity映射应避免多余g_idx gather。
+- qzeros的逻辑维度是group×N，先按GPTQ-v1 unpack `stored_zero+1`获得真实zero，再把zero和scales按**相同N tile**排列；scale/zero仍按原group映射，不因对称标志压成常数。若K reorder跨组，packed code、g_idx、scale group与zero group必须一致地置换或转成连续group-id查表。
+- Falcon fused gate_up是concatenated N维输出。先按原始checkpoint列界分别解码gate和up；布局打包可在物理上共享N tile，但不能让一侧的scale/zero索引或column offset跨越另一侧错误复用。要求映射等式逐列成立，且split位置/TP partition与真实layer loader完全一致。
+
+未知/必须先核实：真实Falcon checkpoint SHA/量化config及目标层qweight/qzeros/scales/g_idx的有限分块tensor摘要、每组实际zero直方图、desc_act分布、融合gate_up实际shard边界。当前工作站没有可读checkpoint或marlin_v100 checkout；仅靠sym配置不能填充这些事实。
+
+## 3. 数值合同与具体风险
+
+冻结数学语义是GPTQ-v1 Q4 group128：`q=(packed_qweight >> nibble_shift)&15`，zero按GPTQ-v1解包后`zero=stored_zero+1`，scale由真实group与输出列定位，dequant值`(q-zero)*scale`；activation按同一个K置换映射；Oracle对FP64 reference逐元素要求`abs(err)<=1e-4+5e-5*abs(reference)`，不允许修改。参考路径必须保留**cast前FP32 accumulator**，FP16输出与FP32 oracle满足该极严绝对/相对界在数学上可能不可能，不能拿FP16接近当PASS。G017历史oracle结果只支持其精确候选和指定FP32 accumulator边界，不自动证明Marlin donor。
+
+检查的donor调用约定/代码已覆盖Marlin `uint4b8` implicit symmetric权重类型、packed weight、scales、workspace、M/N/K；Zero point通常是空/隐式中心语义。`GPTQMarlinLinearKernel`当前普通SM80路径支持`zero_points=False`的uint4b8，恰好不能代表Falcon普通GPTQ `qzeros`逐列数据；将checkpoint实际zero压成8有语义风险。SM70使用donor Dense时，还必须对照其Q4 dequant舍入、输入乘法、累加器类型、split-K partial dtype/atomic或确定性归约、最后的输出cast。当前公开安装脚本和SGLang helper源码不足以证明这些细节与Frozen FP32 oracle一致，且zero point接口已形成明确不兼容，故不把该donor判为可直接接受。
+
+**最小离线判别用例**（仅建议下阶段实现后运行；本阶段未执行）：从真实checkpoint选1个普通QKV/MLP矩阵与融合gate_up两段，按真实shape/分片导出小范围完整K与足够N列的Q4/qzero/scale/g_idx/x；包含至少一个实际zero非8 group（若检查checkpoint确有）、g_idx非identity/跨组样例，以及gate/up边界两侧列。分别对原始GPTQ解码、候选预打包decode作逐元素整数code/zero/scale映射等式比较；随后以FP64构造dequant reference，FP32 accumulator对冻结阈值逐元素核验，并单独记录输出cast。Donor若接口不能表达qzeros，应在这一步即判定不适用，不以GPU输出“看起来接近”继续。
+
+## 4. 显存/资源与M1/M2/M4成本
+
+没有真实Falcon模型tensor shape/checkpoint bytes在本目录可读；所以不给虚构逐层MiB合计。精确预算公式如下，统计时按各实际量化矩阵`K_i,N_i,G_i=ceil(K_i/128)`求和，TP shard优先使用本地partition shape：
+
+- 原始Q4：`ceil(K_i*N_i/2)` bytes；qzeros 4-bit存储约`ceil(G_i*N_i/2)` bytes（具体checkpoint packing/block padding须读取tensor shape）；scales约`G_i*N_i*scale_dtype_bytes`；g_idx若int32约`4*K_i`。以上是张量payload静态预算，不含对象/allocator对齐。
+- 紧凑目标Q4预打包：有效code仍约`ceil(K_i*N_i/2)` bytes，tile/N/K pad开销按`Kpad*Npad/(K*N)-1`乘payload；scale+zero映射元数据应尽量复用或以group/N tile压缩，`perm`/inverse perm若各用int32则至多`4*K_i` bytes/份。若同时保留原始及packed权重，静态驻留峰值至少是两份Q4加各自元数据；允许在成功检查点后释放旧Q4/可重建临时副本，不能默认双份永久驻留。
+- FP32 partial workspace：对M行、N列、S个K-split，若partial为FP32，则`4*M*N*S` bytes；若另有reduction/output临时区，另计`4*M*N`或按实际dtype计。不得把此run workspace误算为每层常驻权重。实际G017 split数/确切每geometry临时tensor应按已接受源码和manifest重新计算。
+- 工作集峰值需分列：checkpoint/load CPU RAM；load期原始+packed双格式及转换临时峰值；转换完成释放旧格式后的推理常驻权重；每Forward activation gather和split-K partial/reduction；CUDA graph capture保存的输出/临时buffer；fallback原权重是否保留。无FP16完整weight materialization。
+
+M成本（静态路径分析，非新测）：M1每CTA可复用activation一次但模型持续存在固定launch/metadata开销；M2/M4增加CTA内activation reuse机会，也相应增大partial/临时结果与reduce工作。`g_idx`非连续时activation gather的读访问可能不合并；若预打包已稳定排序，可降低动态索引但仍需加载/构造`x_perm`，该收益须计入额外launch或融合gather成本。K/N tile padding导致inactive lane/CTA工作；M不足tile时M=1/2/4可能存在输出行或SM CTA分布浪费。拆分K改善CTA并行度却增加partial写流量、workspace与reduction成本。T002历史M1/M2/M4 NCU表明G017 GPTQ candidate在对应fixture减少long-scoreboard、增加DRAM写和math/not-selected pressure，但那些是kernel scope，不提供Donor的CTA浪费或全Forward收益。
+
+已有证据只允许有边界地预算：E028记录G017候选在1K GPU Event c1/c2/c4分别减少2.177/2.363/2.405ms，服务TPS增益和精确SHA在该归档中；c4 GPTQ gate_up/down owner duration sums约18.7ms属于可能重叠的trace分类，不是可直接扣除的独占收益；E028同样记录4K GPU-step A/B、cache/Prefill净收益及request-ID FPM/service join缺失。不得把这些写成新Marlin收益；本阶段未做性能实验。
+
+## 5. 唯一建议与下一阶段验收
+
+**唯一建议：NO-GO-DONOR，不移植`marlin_v100` Dense GPTQ GEMM；复用G017候选的紧凑Q4/FP32 split-K技术方向，下一阶段只完成T002剩余exact-SHA比较账本与G022已授权的最小闭环，保持S1 default与Candidate opt-in。**
+
+下一阶段最小范围：不改S1 dispatcher/default，不增加新Dense donor；按已存在G017精确SHA S1/Candidate复用T002的真实c1/c2/c4数据与E028/E026记录，只补足冻结验收明确缺少的4K per-step GPU Event对照、必要的实际Batch身份/同工作负载服务关联、Prefill及Cold/Warm cache影响、memory/capacity和owner budget未知项。是否需要新增运行应由实际缺口和资源门决定；不重复T001已PASS CUPTI向量或M1/M2/M4匹配NCU。
+
+验收不变：真实Falcon checkpoint；S1/G017 extension SHA精确；Q4/g128/qzero+1/g_idx与融合映射通过静态整数code核对；cast前FP32 oracle逐元素遵守原阈值；graph capture/replay和greedy token/state正确性；各测点记录actual GPU batch、CUDA Event、service TPS/TTFT/ITL、Prefill/cache、VRAM/KV/Mamba capacity、rollback；S1 default不变。单算子更快或旧ACK均不能替代全路径证据。
+
+## 路径、检查与交付身份
+
+- 本报告：`control/G022-falcon-v100-c4-performance/T002-SM70-GPTQ-PREPACK-REPORT.md`
+- 同目录task：`control/G022-falcon-v100-c4-performance/tasks/T002-sm70-gptq-prepack-investigation.md`
+- 关键源：`python/sglang/srt/layers/quantization/gptq/gptq.py`、`.../gptq/schemes/gptq_linear.py`、`.../gptq/schemes/gptq_marlin.py`、`python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py`、`python/sglang/srt/layers/quantization/marlin_utils.py`、`.../marlin_utils_fp8.py`、`scripts/setup_v100_marlin.sh`、`patches/marlin-v100-sm70.patch`。
+- Donor固定revision：`6d72a49939701d26b15b617a4cd2423174adb2d1`（仅核对安装脚本固定值；本机无checkout，无远端源码/扩展SHA可核）。
+- 静态源码复核：GPTQ scheme→Kernel apply与Marlin helper引用路径；stock `gptq_marlin_repack.cuh`/`gptq_marlin.cuh`标记`__CUDA_ARCH__<800`分支。调查未调用脚本，不build、不测、不安装、不启动服务，不使用任何GPU。
+- 资源检查：主机MemAvailable约61.1GiB；无V100可访问/可用性声明。未触碰RTX3090（查询只观察到其空闲状态）。
+- 本报告不含真实checkpoint tensor读取、donor binary运行、误差PASS或性能结果。V100 repo在任务开始前main HEAD `dca488908ee4e3f1bc676c3bf5dcd26ff049cfc3`；审阅`origin/main`三个提交均仅文档后快进，最终本地/远端SHA `2d06a902aeba2d9cf38d80f1a916107d0520a2f5`。提交/push详情由Git交付身份复核；SGLang源代码无改动。
