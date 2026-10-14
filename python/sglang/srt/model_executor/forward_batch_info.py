@@ -294,6 +294,9 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
     out_cache_loc: torch.Tensor
     # The sum of all sequence lengths
     seq_lens_sum: int
+    # Scheduler iteration identity used to join asynchronous CUDA event timing.
+    # Synthetic graph captures outside a scheduled forward leave this unset.
+    forward_iter: Optional[int] = None
 
     # === Borrowed from ScheduleBatch: GPU tensors (cross-stream; clone targets for stream isolation) ===
     # FIXME(lsyin): these are currently aliased by reference from ScheduleBatch. Once
@@ -527,6 +530,7 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
         ret = cls(
             # Required core inputs
             forward_mode=batch.forward_mode,
+            forward_iter=batch.forward_iter,
             batch_size=len(batch.seq_lens),
             input_ids=batch.input_ids,
             req_pool_indices=batch.req_pool_indices,

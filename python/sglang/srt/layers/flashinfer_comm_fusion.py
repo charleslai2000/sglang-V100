@@ -102,7 +102,12 @@ def _flashinfer_posix_fd_transport_override_if_needed():
         flashinfer_mnnvl.is_mnnvl_fabric_supported = original_checker
 
 
-if is_flashinfer_available():
+# FlashInfer's unified communication module loads cudaDeviceReset from its
+# bundled CUDA runtime. On SM70 the CUDA 12 runtime is supplied by the toolkit,
+# while the environment may also contain an incompatible CUDA 13 stub. This
+# path is only an optional allreduce-fusion optimization; don't import it on
+# V100, and retain SGLang's standard allreduce implementation.
+if is_flashinfer_available() and torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8:
     try:
         import flashinfer.comm as comm
 

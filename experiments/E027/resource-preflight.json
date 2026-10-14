@@ -1,0 +1,22 @@
+{
+  "timestamp_local": "2026-10-10T20:56:41+08:00",
+  "base_commit": "149c70f10b49ff1d1fe28ac5a7016526157a04a9",
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "device": "Tesla V100-SXM2-16GB (GV100)",
+  "driver": "580.178.04",
+  "dcgm": {"dcgmi_present": false, "systemd_service_state": "inactive", "action": "not started"},
+  "initial_measurements": {
+    "fpm_s1": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-s1-fpm-v2.json",
+    "service_s1_instrumented": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-s1-fpm-v2-service.json",
+    "telemetry_s1": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-s1-fpm-v2-telemetry.csv",
+    "fpm_candidate": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-candidate-fpm.json",
+    "service_candidate_instrumented": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-candidate-fpm-v2-service.json",
+    "telemetry_candidate": "/mnt/data/pc01/sglang-v100-migration/experiments/E026/g018-candidate-fpm-telemetry.csv",
+    "telemetry_csv_note": "Original CSV contains 14 fields per row under 13-field header due duplicate timestamps; analysis used fixed positional columns. Sampler fix validated in separate 3-row smoke capture; originals retained unchanged.",
+    "limitations": ["Service data are instrumented and not uninstrumented A/B", "No matched 4K/request FPM for c2/c4", "Detached allocator endpoint zero snapshots invalid", "No owner-level timing/invocation ledger"]
+  },
+  "nvidia_smi_idle_sample": {"memory_total_mib": 16384, "memory_used_mib": 7, "gpu_util_percent": 0, "memory_util_percent": 0, "sm_clock_mhz": 135, "memory_clock_mhz": 877, "power_w": 25.61, "temperature_c": 42, "pstate": "P0", "supported_throttle_reason_mask": "0x1ff", "active_reason": "GPU idle only; software power cap, HW slowdown, thermal, HW power brake, software thermal all inactive"},
+  "ncu": {"present": true, "version": "query --chip GV100 succeeds", "metric_database": ["sm__cycles_active", "sm__issue_active", "sm__pipe_tensor_cycles_active", "sm__inst_executed_pipe_tensor", "sm__ops_path_tensor_src_fp16_dst_fp16", "dram__cycles_active", "dram__bytes_read", "dram__bytes_write", "lts__t_bytes", "smsp__warps_active", "smsp__warps_eligible", "smsp__warps_issue_stalled_long_scoreboard", "smsp__warps_issue_stalled_math_pipe_throttle", "smsp__warps_issue_stalled_not_selected"], "permission_smoke": "DENIED: ERR_NVGPUCTRPERM on a single 128x128 FP16 GEMM process pinned to target UUID via CUDA_VISIBLE_DEVICES and ncu --devices 0; no service load ran", "driver_parameter": "RmProfilingAdminOnly: 1", "remediation": "requires changing global profiling counter permission; intentionally not changed because it can affect other GPU workloads and user forbids global changes"},
+  "nsys": {"present": true, "full_service_capture": "DEFERRED per authority"},
+  "RTX2060": {"profiled": false, "targeted": false}
+}

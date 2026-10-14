@@ -11,6 +11,8 @@ https://github.com/qwopqwop200/GPTQ-for-LLaMa
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 
 #include "compat.cuh"
 #include "matrix_view.cuh"
@@ -246,14 +248,9 @@ __global__ void gemm_half_q_half_gptq_4bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream before this kernel. Do not clear from
+  // z==0 here: that races with other K-split CTAs' atomicAdd partial sums.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -377,14 +374,9 @@ __global__ void gemm_half_q_half_gptq_2bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream by the dispatcher; no CTA may clear it
+  // here because the K-split partial sums are accumulated with atomicAdd.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -497,14 +489,9 @@ __global__ void gemm_half_q_half_gptq_3bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream by the dispatcher; no CTA may clear it
+  // here because the K-split partial sums are accumulated with atomicAdd.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -620,14 +607,9 @@ __global__ void gemm_half_q_half_gptq_8bit_kernel(
     }
   }
 
-  // Zero output
+  // C is zeroed on the launch stream by the dispatcher; no CTA may clear it
+  // here because the K-split partial sums are accumulated with atomicAdd.
   if (n >= size_n) return;
-
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < m_count; m++)
-      *((uint64_t*)c_.item_ptr(offset_m + m, n)) = 0;
-  }
-
   __syncthreads();
 
   // Find initial group
@@ -752,7 +734,10 @@ void gemm_half_q_half_cuda_part(
 
   fp_gemm_half_q_half_gptq_kernel kernel = pick_gemm_half_q_half_gptq_kernel(true, m_count, bit);
 
+  // Initialize the output slice on the launch stream. The kernel accumulates
+  // its K-split partial sums with atomicAdd, so no CTA may clear C.
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaMemsetAsync(c, 0, size_m * size_n * sizeof(half), stream);
   kernel<<<gridDim, blockDim, 0, stream>>>(
       a, b_q_weight, b_gptq_qzeros, b_gptq_scales, c, size_m, size_n, size_k, groups, b_q_perm);
 }
@@ -1275,10 +1260,8 @@ __global__ void gemm_half_q_half_alt_4bit_kernel(
     deq2[val][off] = __halves2half2(__int2half_rn(val & 0xF), __int2half_rn(val >> 4));
   }
 
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < b_end; m++)
-      mul[(b + m) * width + w] = __int2half_rn(0);
-  }
+  // Output is zeroed on the launch stream by the dispatcher; the K-split
+  // partial sums are accumulated with atomicAdd, so no CTA may clear it.
   __syncthreads();
 
   int i = width * h + w;
@@ -1357,10 +1340,8 @@ __global__ void gemm_half_q_half_alt_8bit_kernel(
     }
   }
 
-  if (blockIdx.z == 0) {
-    for (int m = 0; m < b_end; m++)
-      mul[(b + m) * width + w] = __int2half_rn(0);
-  }
+  // Output is zeroed on the launch stream by the dispatcher; the K-split
+  // partial sums are accumulated with atomicAdd, so no CTA may clear it.
   __syncthreads();
 
   int i = width * h + w;
@@ -1438,6 +1419,8 @@ void gemm_half_q_half_alt(
   }
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  // Initialize the whole output before the K-split kernel accumulates into it.
+  cudaMemsetAsync(c, 0, (size_t)size_m * size_n * sizeof(half), stream);
   kernel<<<gridDim, blockDim, 0, stream>>>(
       (const half2*)a, b_q_weight, c, b_gptq_scales, b_gptq_qzeros, b_g_idx, size_m, size_k / 32 * bit, size_n);
 }
@@ -1908,6 +1891,12 @@ void shuffle_exllama_weight(uint32_t* q_weight, int* q_perm, int height, int wid
 }  // namespace gptq
 }  // namespace sglang
 
+#ifdef SGL_KERNEL_GPTQ_CANDIDATE
+torch::Tensor packed_q4_fp32_candidate(
+    torch::Tensor x, torch::Tensor qw, torch::Tensor qz,
+    torch::Tensor scales, torch::Tensor gidx, bool return_fp32);
+#endif
+
 torch::Tensor gptq_gemm(
     torch::Tensor a,
     torch::Tensor b_q_weight,
@@ -1920,6 +1909,16 @@ torch::Tensor gptq_gemm(
   auto options = torch::TensorOptions().dtype(a.dtype()).device(a.device());
   at::Tensor c = torch::empty({a.size(0), b_q_weight.size(1)}, options);
   at::Tensor temp_dq = torch::empty({b_q_weight.size(0) * 32 / bit, b_q_weight.size(1)}, options);
+
+#ifdef SGL_KERNEL_GPTQ_CANDIDATE
+  if (a.is_cuda() && bit == 4 && !use_shuffle && a.size(0) >= 1 && a.size(0) <= 4 &&
+      std::getenv("SGLANG_G017_Q4_FP32_CANDIDATE") &&
+      std::string(std::getenv("SGLANG_G017_Q4_FP32_CANDIDATE")) == "1") {
+    return packed_q4_fp32_candidate(
+        a, b_q_weight.to(at::kInt), b_gptq_qzeros.to(at::kInt),
+        b_gptq_scales, b_g_idx, false);
+  }
+#endif
 
   sglang::gptq::gemm_half_q_half_cuda(
       at::cuda::getCurrentCUDABlasHandle(),

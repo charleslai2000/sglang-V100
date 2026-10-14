@@ -1715,6 +1715,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             )
         ):
             self.init_device_graphs()
+            # Graph runner is rebuilt in-place; preserve scheduler-installed
+            # timer identity on this ModelRunner (graph replay reads this field).
+            self.device_timer = getattr(self, "device_timer", None)
 
         logger.info("Update weights end.")
         return True, "Succeeded to update model weights."
@@ -3285,7 +3288,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
         # Launch forward
         ctx = (
-            self.device_timer.wrap(metadata={"category": "decode"})
+            self.device_timer.wrap(
+                metadata={"category": "decode", "forward_iter": forward_batch.forward_iter}
+            )
             if self.device_timer
             else contextlib.nullcontext()
         )
@@ -3344,7 +3349,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             # replay_prepare time. Move timing into the piecewise cuda graph
             # runner to capture only the model.forward part.
             ctx = (
-                self.device_timer.wrap(metadata={"category": "extend"})
+                self.device_timer.wrap(
+                    metadata={"category": "extend", "forward_iter": forward_batch.forward_iter}
+                )
                 if self.device_timer
                 else contextlib.nullcontext()
             )
@@ -3361,7 +3368,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             self.attn_backend.init_forward_metadata(forward_batch)
 
         ctx = (
-            self.device_timer.wrap(metadata={"category": "extend"})
+            self.device_timer.wrap(
+                metadata={"category": "extend", "forward_iter": forward_batch.forward_iter}
+            )
             if self.device_timer
             else contextlib.nullcontext()
         )
@@ -3393,7 +3402,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         if self.support_pp:
             kwargs["pp_proxy_tensors"] = pp_proxy_tensors
         ctx = (
-            self.device_timer.wrap(metadata={"category": "idle"})
+            self.device_timer.wrap(
+                metadata={"category": "idle", "forward_iter": forward_batch.forward_iter}
+            )
             if self.device_timer
             else contextlib.nullcontext()
         )
@@ -3418,7 +3429,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             self.model_config.num_hidden_layers,
         )
         ctx = (
-            self.device_timer.wrap(metadata={"category": "split_prefill"})
+            self.device_timer.wrap(
+                metadata={"category": "split_prefill", "forward_iter": forward_batch.forward_iter}
+            )
             if self.device_timer
             else contextlib.nullcontext()
         )
@@ -3825,13 +3838,15 @@ def _unwrap_tensor(tensor, tp_rank, device):
 
 
 def _build_step_span_name(forward_batch: ForwardBatch) -> str:
-    """Build a profile-trace span name for one forward step."""
+    """Build a profile-trace span with the scheduler identity for sidecar joins."""
     mode = forward_batch.forward_mode
     bs = forward_batch.batch_size
+    req_ids = ",".join(getattr(forward_batch, "rids", None) or [])
+    identity = f" iter={forward_batch.forward_iter} rids={req_ids}"
     if mode == ForwardMode.EXTEND:
         ext_toks = forward_batch.extend_num_tokens or 0
-        return f"step[EXTEND bs={bs} toks={ext_toks}]"
-    return f"step[{mode.name} bs={bs}]"
+        return f"step[EXTEND bs={bs} toks={ext_toks}{identity}]"
+    return f"step[{mode.name} bs={bs}{identity}]"
 
 
 @dataclass

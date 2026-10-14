@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/G021/r17-result-schema.json",
+  "title": "G021 R17 V100 measurement row",
+  "type": "object",
+  "required": ["run_id", "timestamp_start", "timestamp_end", "condition", "boundary", "target_uuid", "metrics", "status"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "timestamp_start": {"type": "string", "format": "date-time"},
+    "timestamp_end": {"type": "string", "format": "date-time"},
+    "condition": {"type": "object", "required": ["input_tokens", "concurrency", "repeat"], "properties": {"input_tokens": {"enum": [1024,4096]}, "concurrency": {"enum": [1,4]}, "repeat": {"type": "integer", "minimum": 1}}},
+    "boundary": {"enum": ["whole_device_NVML_window", "NCU_graph_aggregate", "NCU_kernel_node", "service_request"]},
+    "target_uuid": {"const": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189"},
+    "runtime": {"type": "object", "properties": {"commit": {"type": "string"}, "module_path": {"type": "string"}, "module_sha256": {"type": "string"}, "pytorch": {"type": "string"}, "cuda_runtime": {"type": "string"}, "model_revision": {"type": "string"}}},
+    "metrics": {"type": "object", "description": "Every numeric value requires units and explicit sample/window/boundary; unavailable values must include a concrete reason, never zero-fill", "additionalProperties": {"oneOf": [{"type": "object", "required": ["value", "unit", "window", "source"], "properties": {"value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "window": {"type": "string"}, "source": {"type": "string"}, "reason_unavailable": {"type": "string"}}}, {"type": "object", "required": ["value", "unit", "start", "end", "source"], "properties": {"value": {"type": ["number", "null"]}, "unit": {"type": "string"}, "start": {"type": "string", "format": "date-time"}, "end": {"type": "string", "format": "date-time"}, "source": {"type": "string"}, "reason_unavailable": {"type": "string"}}}]}},
+    "artifacts": {"type": "array", "items": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}},
+    "status": {"enum": ["OBSERVED", "UNAVAILABLE", "ABORTED"]},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

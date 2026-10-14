@@ -57,7 +57,11 @@ FetchContent_Declare(
     GIT_TAG        57e3cfb47a2d9e0d46eb6335c3dc411498efa198
     GIT_SHALLOW    OFF
 )
-FetchContent_Populate(repo-cutlass)
+if(SGL_KERNEL_V100_ONLY AND FETCHCONTENT_SOURCE_DIR_REPO_CUTLASS)
+    set(repo-cutlass_SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_REPO_CUTLASS}")
+else()
+    FetchContent_Populate(repo-cutlass)
+endif()
 
 # fmt
 FetchContent_Declare(
@@ -66,7 +70,12 @@ FetchContent_Declare(
     GIT_TAG        553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28
     GIT_SHALLOW    OFF
 )
-FetchContent_Populate(repo-fmt)
+if(SGL_KERNEL_V100_ONLY AND FETCHCONTENT_SOURCE_DIR_REPO_FMT)
+    set(repo-fmt_SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_REPO_FMT}")
+    add_subdirectory(${repo-fmt_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/repo-fmt-build EXCLUDE_FROM_ALL)
+else()
+    FetchContent_Populate(repo-fmt)
+endif()
 
 # Triton kernel
 FetchContent_Declare(
@@ -75,7 +84,11 @@ FetchContent_Declare(
     GIT_TAG        v3.6.0
     GIT_SHALLOW    OFF
 )
-FetchContent_Populate(repo-triton)
+if(SGL_KERNEL_V100_ONLY AND FETCHCONTENT_SOURCE_DIR_REPO_TRITON)
+    set(repo-triton_SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_REPO_TRITON}")
+else()
+    FetchContent_Populate(repo-triton)
+endif()
 
 # flashinfer
 FetchContent_Declare(
@@ -84,7 +97,12 @@ FetchContent_Declare(
     GIT_TAG        bc29697ba20b7e6bdb728ded98f04788e16ee021
     GIT_SHALLOW    OFF
 )
-FetchContent_Populate(repo-flashinfer)
+if(SGL_KERNEL_V100_ONLY AND FETCHCONTENT_SOURCE_DIR_REPO_FLASHINFER)
+    set(repo-flashinfer_SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_REPO_FLASHINFER}")
+    FetchContent_SetPopulated(repo-flashinfer SOURCE_DIR "${repo-flashinfer_SOURCE_DIR}")
+else()
+    FetchContent_Populate(repo-flashinfer)
+endif()
 
 # flash-attention
 FetchContent_Declare(
@@ -93,7 +111,11 @@ FetchContent_Declare(
     GIT_TAG        bcf72ccc6816b36a5fae2c5a3c027604629785e0
     GIT_SHALLOW    OFF
 )
-FetchContent_Populate(repo-flash-attention)
+if(SGL_KERNEL_V100_ONLY AND FETCHCONTENT_SOURCE_DIR_REPO_FLASH_ATTENTION)
+    set(repo-flash-attention_SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_REPO_FLASH_ATTENTION}")
+else()
+    FetchContent_Populate(repo-flash-attention)
+endif()
 
 # mscclpp
 FetchContent_Declare(
@@ -102,7 +124,11 @@ FetchContent_Declare(
     GIT_TAG        51eca89d20f0cfb3764ccd764338d7b22cd486a6
     GIT_SHALLOW    OFF
 )
-FetchContent_Populate(repo-mscclpp)
+if(SGL_KERNEL_V100_ONLY)
+    set(repo-mscclpp_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/cmake/empty-repo")
+else()
+    FetchContent_Populate(repo-mscclpp)
+endif()
 
 # ccache option
 option(ENABLE_CCACHE "Whether to use ccache" ON)
@@ -193,6 +219,7 @@ option(SGL_KERNEL_ENABLE_FA3              "Enable FA3"              OFF)
 option(SGL_KERNEL_ENABLE_SM90A            "Enable SM90A"            OFF)
 option(SGL_KERNEL_ENABLE_SM100A           "Enable SM100A"           OFF)
 option(SGL_KERNEL_V100_ONLY               "Build only for V100 sm70, skip all sm80/sm89/sm90/sm100 targets"  OFF)
+option(SGL_KERNEL_GPTQ_CANDIDATE "Build isolated GPTQ candidate dispatch" OFF)
 
 if (SGL_KERNEL_ENABLE_BF16)
     list(APPEND SGL_KERNEL_CUDA_FLAGS
@@ -374,6 +401,13 @@ endif()
 # =========================== Common SM100+ / SM70 Build ============================= #
 # Build SM100+ library with precise math (same namespace, different directory)
 # When SGL_KERNEL_V100_ONLY: only sm70, skip sm90/sm100 targets
+if(SGL_KERNEL_GPTQ_CANDIDATE AND NOT SGL_KERNEL_V100_ONLY)
+    message(FATAL_ERROR "SGL_KERNEL_GPTQ_CANDIDATE requires an isolated V100-only build")
+endif()
+if(SGL_KERNEL_GPTQ_CANDIDATE)
+    list(APPEND SOURCES "csrc/gemm/gptq/gptq_candidate_v8.cu")
+    add_compile_definitions(SGL_KERNEL_GPTQ_CANDIDATE)
+endif()
 Python_add_library(common_ops_sm100_build MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI ${SOURCES})
 
 target_compile_options(common_ops_sm100_build PRIVATE

@@ -66,6 +66,13 @@ fi
 
 for SM70_PATCH in "${SM70_PATCHES[@]}"; do
   [[ -f "$SM70_PATCH" ]] || die "missing SM70 compatibility patch: $SM70_PATCH"
+  if [[ "$(basename "$SM70_PATCH")" == "marlin-v100-qwen-sm70-tuning.patch" ]] &&
+    [[ -n "$(git -C "$REPO" diff -- csrc/moe/marlin_moe_wna16/sm70_marlin_gemm.cuh)" ]]; then
+    # Preserve the established local tuning edits in this shared checkout; this
+    # patch targets the same function body and must not be forced over them.
+    log "preserving existing sm70_marlin_gemm.cuh tuning; skipping overlapping optional patch"
+    continue
+  fi
   if git -C "$REPO" apply --reverse --check "$SM70_PATCH" >/dev/null 2>&1; then
     log "already applied: $(basename "$SM70_PATCH")"
   elif git -C "$REPO" apply --check "$SM70_PATCH"; then
@@ -151,15 +158,7 @@ if [[ -n "${MARLIN_V100_INSTALL_DIR:-}" ]]; then
   PKG_DIR="$MARLIN_V100_INSTALL_DIR"
   mkdir -p "$PKG_DIR"
 else
-  PKG_DIR="$("$PYTHON" - <<'PY' || die "could not locate sglang.jit_kernel package dir."
-import os
-try:
-    import sglang.jit_kernel as jk
-except Exception as e:
-    raise SystemExit(f"cannot import sglang.jit_kernel: {e}")
-print(os.path.dirname(os.path.abspath(jk.__file__)))
-PY
-)"
+  PKG_DIR="${MARLIN_V100_SOURCE_PACKAGE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../python/sglang/jit_kernel" && pwd)}"
 fi
 DEST="$PKG_DIR/_sm70_marlin_v100_moe.abi3.so"
 cp -f "$SO_MOE" "$DEST"

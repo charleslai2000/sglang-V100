@@ -92,6 +92,8 @@ extension = load(
         str(lmdeploy),
         str(source_root / "csrc"),
         str(source_root / "csrc/moe"),
+        str(repo / "sgl-kernel/csrc/allreduce"),
+        str(repo / "sgl-kernel/include"),
         str(cutlass_root / "include"),
         str(cutlass_root / "tools" / "util" / "include"),
     ],

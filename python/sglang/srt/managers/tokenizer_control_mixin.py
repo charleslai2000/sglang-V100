@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import hashlib
 import logging
@@ -327,6 +326,7 @@ class TokenizerControlMixin:
         merge_profiles: bool = False,
         profile_prefix: Optional[str] = None,
         profile_stages: Optional[List[str]] = None,
+        profile_range: Optional[str] = None,
     ):
         self.auto_create_handle_loop()
         env_with_stack: bool = get_bool_env_var("SGLANG_PROFILE_WITH_STACK", "true")
@@ -348,6 +348,7 @@ class TokenizerControlMixin:
             merge_profiles=merge_profiles,
             profile_prefix=profile_prefix,
             profile_stages=profile_stages,
+            profile_range=profile_range,
         )
         return await self._execute_profile(req)
 
@@ -793,6 +794,17 @@ class TokenizerControlMixin:
         )
         # Many DP ranks
         return [res.internal_state for res in responses]
+
+    async def request_scheduler_fpm_shutdown(self: TokenizerManager) -> List[bool]:
+        self.auto_create_handle_loop()
+        loop = asyncio.get_running_loop()
+        self._fpm_shutdown_ack_future = loop.create_future()
+        self.send_to_scheduler.send_pyobj(GetInternalStateReq(action="fpm_shutdown"))
+        try:
+            response = await asyncio.wait_for(self._fpm_shutdown_ack_future, timeout=10.0)
+            return [bool(response.get("shutdown_requested"))]
+        except asyncio.TimeoutError:
+            return [False]
 
     async def set_internal_state(
         self: TokenizerManager, obj: SetInternalStateReq

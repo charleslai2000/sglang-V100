@@ -2991,9 +2991,17 @@ class Scheduler(
         """Run a batch."""
         self.forward_ct += 1
         batch.forward_iter = self.forward_ct
-
+        batch.actual_input_token_count = (
+            sum(batch.extend_lens)
+            if batch.forward_mode.is_extend() and batch.extend_lens is not None
+            else batch.batch_size()
+        )
+        if self.enable_fpm and self._fpm_uses_device_timer:
+            self.metrics_reporter._snapshot_forward_pass_metrics(batch)
         # Whether to run the profiler
         self.profiler_manager._profile_batch_predicate(batch)
+        batch.profiling_trace_active = self.profiler_manager.profile_in_progress
+        batch.actual_input_token_count = 0
         if self.forward_sleep_time is not None:
             logger.info(f"Scheduler.run_batch sleep {self.forward_sleep_time}s")
             time.sleep(self.forward_sleep_time)
@@ -3223,6 +3231,7 @@ class Scheduler(
             self.batch_result_processor.process_batch_result_idle(batch, result)
 
         self.metrics_reporter.log_batch_result_stats(batch, result)
+        self.profiler_manager._profile_forward_completed(batch)
 
         # Emit forward pass metrics (every iteration when enabled)
         if self.enable_fpm:

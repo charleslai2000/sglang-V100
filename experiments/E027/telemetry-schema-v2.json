@@ -1,0 +1,10 @@
+{
+  "schema": "g018-nvidia-smi-telemetry-v2",
+  "description": "Header-aligned 13-column CSV written by experiments/E027/gpu_sampler.py after G018 fix. One script Unix timestamp followed by twelve nvidia-smi fields; nvidia-smi timestamp is intentionally not queried.",
+  "sampler_sha256": "abcbd0c0d7244e5d7ff410865412738f6412a2074911a0396d6d717e6ceb55c4",
+  "columns": ["timestamp_unix_s", "uuid", "utilization.gpu", "utilization.memory", "clocks.current.sm", "clocks.current.memory", "pstate", "power.draw", "temperature.gpu", "memory.total", "memory.used", "clocks_throttle_reasons.supported", "clocks_throttle_reasons.active"],
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "sample_period_s": 1,
+  "legacy_v1_note": "Existing g018-s1-fpm-v2-telemetry.csv and g018-candidate-fpm-telemetry.csv predate v2 and contain an extra nvidia-smi timestamp field (14 data columns under old 13-column header). Parse them positionally using legacy layout; do not silently relabel or rewrite as v2.",
+  "smoke_test": {"path": "/tmp/g018-telemetry-csv-smoke.csv", "rows": 3, "header_columns": 13, "data_column_widths": [13], "uuid_checked": true, "sha256": "d656ba8d9d987c8e1eb13e21bc8b8e3c066bf1e6f08f123473e211ab9a595aa9"}
+}

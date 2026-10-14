@@ -102,9 +102,10 @@ class ForwardPassMetrics(
     """Per-iteration metrics emitted by the scheduler.
 
     One message per scheduler iteration (one per forward pass).
-    ``wall_time`` is the iteration duration in seconds.
-    An idle heartbeat (all zeros, wall_time=0) is emitted when the
-    engine transitions from active to idle.
+    ``wall_time`` is the scheduler iteration duration in seconds, using the
+    existing v1 contract. GPU event duration is not substituted into this field.
+    An idle heartbeat (all zeros, wall_time=0) is emitted when the engine
+    transitions from active to idle.
 
     Field order must match Dynamo's ``ForwardPassMetrics`` in
     ``dynamo.common.forward_pass_metrics`` — msgspec uses positional
@@ -154,6 +155,14 @@ class _FpmPublisherThread:
             maxsize=max_queue_size
         )
         self._seq = count()
+        self._stats_lock = threading.Lock()
+        self._stats = {
+            "published_enqueued": 0,
+            "queue_dropped": 0,
+            "sent": 0,
+            "send_dropped": 0,
+            "send_failed": 0,
+        }
         self._worker_id = worker_id
         self._dp_rank = dp_rank
 
@@ -168,13 +177,24 @@ class _FpmPublisherThread:
         )
         self._thread.start()
 
-    def publish(self, metrics: ForwardPassMetrics) -> None:
+    def publish(self, metrics: ForwardPassMetrics) -> bool:
         if not self._running:
-            return
+            with self._stats_lock:
+                self._stats["queue_dropped"] += 1
+            return False
         try:
             self._queue.put_nowait(metrics)
         except queue.Full:
-            pass
+            with self._stats_lock:
+                self._stats["queue_dropped"] += 1
+            return False
+        with self._stats_lock:
+            self._stats["published_enqueued"] += 1
+        return True
+
+    def stats_snapshot(self) -> dict[str, int]:
+        with self._stats_lock:
+            return dict(self._stats)
 
     def shutdown(self) -> None:
         self._running = False
@@ -183,6 +203,14 @@ class _FpmPublisherThread:
         except queue.Full:
             pass
         self._thread.join(timeout=self.SHUTDOWN_TIMEOUT)
+        if self._thread.is_alive():
+            with self._stats_lock:
+                self._stats["queue_dropped"] += self._queue.qsize()
+            logger.error("FPM publisher thread did not stop before timeout")
+            return
+        with self._stats_lock:
+            logger.info("FPM publisher shutdown stats: %s", self._stats)
+            logger.info("FPM publisher shutdown queue_depth=%d", self._queue.qsize())
         try:
             self._pub.close(linger=0)
             self._ctx.term()
@@ -215,7 +243,12 @@ class _FpmPublisherThread:
                 seq_bytes = seq.to_bytes(8, "big")
                 self._pub.send_multipart((topic, seq_bytes, payload), flags=zmq.NOBLOCK)
                 last_publish = time.monotonic()
+                with self._stats_lock:
+                    self._stats["sent"] += 1
             except zmq.Again:
-                pass
+                with self._stats_lock:
+                    self._stats["send_dropped"] += 1
             except Exception:
+                with self._stats_lock:
+                    self._stats["send_failed"] += 1
                 logger.warning("FPM publisher send failed", exc_info=True)

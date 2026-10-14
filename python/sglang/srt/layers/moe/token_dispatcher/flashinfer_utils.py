@@ -1,8 +1,9 @@
+import torch
 import torch.distributed as dist
 
 from sglang.srt.utils import is_flashinfer_available
 
-if is_flashinfer_available():
+if is_flashinfer_available() and torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8:
     from flashinfer.comm.mnnvl import CommBackend
 else:
 

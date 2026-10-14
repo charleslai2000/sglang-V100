@@ -60,6 +60,7 @@ from sglang.srt.managers.io_struct import (
     BatchTokenizedEmbeddingReqInput,
     BatchTokenizedGenerateReqInput,
     ConfigureLoggingReq,
+    GetInternalStateReqOutput,
     ContinueGenerationReqInput,
     EmbeddingReqInput,
     FreezeGCReq,
@@ -530,6 +531,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     self._handle_update_weights_from_disk_req_output,
                 ),
                 (FreezeGCReq, lambda x: None),
+                (GetInternalStateReqOutput, self._handle_fpm_shutdown_ack),
                 # For handling case when scheduler skips detokenizer and forwards back to the tokenizer manager, we ignore it.
                 (HealthCheckOutput, lambda x: None),
                 (ActiveRanksOutput, self.update_active_ranks),
@@ -1704,6 +1706,11 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             loop.create_task(print_exception_wrapper(self.sigterm_watchdog))
         )
 
+    def _handle_fpm_shutdown_ack(self, response):
+        future = getattr(self, "_fpm_shutdown_ack_future", None)
+        if future is not None and not future.done():
+            future.set_result(response.internal_state)
+
     async def handle_loop(self):
         """The event loop that handles requests"""
         while True:
@@ -2481,6 +2488,11 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                 await asyncio.sleep(5)
             else:
                 self.dump_requests_before_crash()
+                if self.server_args.enable_forward_pass_metrics:
+                    acknowledgements = await self.request_scheduler_fpm_shutdown()
+                    logger.info(
+                        "FPM scheduler shutdown handshake: %s", acknowledgements
+                    )
                 break
 
         kill_process_tree(os.getpid(), include_parent=True)

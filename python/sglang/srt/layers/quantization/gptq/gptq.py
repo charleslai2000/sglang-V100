@@ -346,6 +346,18 @@ class GPTQMarlinConfig(QuantizationConfig):
 
     @classmethod
     def override_quantization_method(cls, hf_quant_cfg, user_quant) -> Optional[str]:
+        # The dense marlin_v100 V100 backend cannot execute activation-order
+        # checkpoints, so keep desc_act GPTQ on the legacy GPTQLinearKernel path
+        # (gptq_shuffle + gptq_gemm), which handles the checkpoint's g_idx.
+        if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8:
+            if hf_quant_cfg.get("desc_act", False):
+                if user_quant == "gptq_marlin":
+                    raise ValueError(
+                        "SM70 GPTQ desc_act requires the legacy GPTQ kernel; the "
+                        "marlin_v100 dense operator does not support activation order."
+                    )
+                return None
+
         is_marlin_format = check_marlin_format(hf_quant_cfg)
 
         can_convert = cls.is_gptq_marlin_compatible(hf_quant_cfg)
