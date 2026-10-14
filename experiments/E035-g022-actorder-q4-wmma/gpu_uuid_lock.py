@@ -59,6 +59,6 @@ def assert_target_idle(uuid: str):
     if out.strip():raise RuntimeError(f'target GPU has unrelated/current compute owner(s); refusing without termination: {out.strip()}')
 
 def release(fd: Optional[int]):
+    """Close this process's fd; inherited child fds keep the flock held until last close."""
     if fd is not None:
-        try: fcntl.flock(fd,fcntl.LOCK_UN)
-        finally: os.close(fd)
+        os.close(fd)

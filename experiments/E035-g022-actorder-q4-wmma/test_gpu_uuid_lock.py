@@ -20,17 +20,22 @@ def main():
   os.environ['E035_GPU_LOCK_DIR']=d
   # The test launcher takes its lock before invoking a fake workload hook.
   parent_fd=acquire(UUID);marker=Path(d)/'workload.started'
+  gate_r,gate_w=os.pipe()
+  code="import os; os.read(%d,1)"%gate_r
+  survivor=subprocess.Popen([sys.executable,'-c',code],env=env,pass_fds=(parent_fd,gate_r))
+  os.close(gate_r)
   fake="from gpu_uuid_lock import acquire; acquire(%r); open(%r,'w').write('started')"%(UUID,str(marker))
   cmd=[sys.executable,'-c',fake]
-  child=subprocess.run(cmd,env=env,capture_output=True,text=True)
-  assert child.returncode!=0 and 'locked by another' in child.stderr and not marker.exists(),(child.returncode,child.stderr)
-  # Child inherited lock remains held after abrupt owner-fd close.
-  code="import os,time; time.sleep(.4); os.fstat(int(os.environ['TEST_LOCK_FD']))"
-  inherited_env={**env,'TEST_LOCK_FD':str(parent_fd)}
-  survivor=subprocess.Popen([sys.executable,'-c',code],env=inherited_env,pass_fds=(parent_fd,))
-  os.close(parent_fd)
+  try:
+   duplicate=subprocess.run(cmd,env=env,capture_output=True,text=True)
+   assert duplicate.returncode!=0 and 'locked by another' in duplicate.stderr and not marker.exists(),(duplicate.returncode,duplicate.stderr)
+   assert survivor.poll() is None,'fake workload child exited before launcher cleanup'
+  finally:
+   # Exact launcher finally cleanup: it must close its fd without unlocking the child.
+   release(parent_fd)
   duplicate=subprocess.run(cmd,env=env,capture_output=True,text=True)
   assert duplicate.returncode!=0 and 'locked by another' in duplicate.stderr,duplicate.stderr
+  os.write(gate_w,b'x');os.close(gate_w)
   assert survivor.wait(timeout=3)==0
   fd=acquire(UUID);release(fd)
  assert_cuda_uuid(FakeTorch(UUID.removeprefix('GPU-')),UUID)
