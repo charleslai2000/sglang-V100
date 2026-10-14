@@ -71,4 +71,4 @@ M成本（静态路径分析，非新测）：M1每CTA可复用activation一次�
 - Donor固定revision：`6d72a49939701d26b15b617a4cd2423174adb2d1`（仅核对安装脚本固定值；本机无checkout，无远端源码/扩展SHA可核）。
 - 静态源码复核：GPTQ scheme→Kernel apply与Marlin helper引用路径；stock `gptq_marlin_repack.cuh`/`gptq_marlin.cuh`标记`__CUDA_ARCH__<800`分支。调查未调用脚本，不build、不测、不安装、不启动服务，不使用任何GPU。
 - 资源检查：主机MemAvailable约61.1GiB；无V100可访问/可用性声明。未触碰RTX3090（查询只观察到其空闲状态）。
-- 本报告不含真实checkpoint tensor读取、donor binary运行、误差PASS或性能结果。V100 repo在任务开始前main HEAD `dca488908ee4e3f1bc676c3bf5dcd26ff049cfc3`；审阅`origin/main`三个提交均仅文档后快进，最终本地/远端SHA `2d06a902aeba2d9cf38d80f1a916107d0520a2f5`。提交/push详情由Git交付身份复核；SGLang源代码无改动。
+- 本报告不含真实checkpoint tensor读取、donor binary运行、误差PASS或性能结果。V100 repo在任务开始前main HEAD `dca488908ee4e3f1bc676c3bf5dcd26ff049cfc3`；审阅`origin/main`三个提交均仅文档后快进，调查代码基线`2d06a902aeba2d9cf38d80f1a916107d0520a2f5`。报告/task首次提交`cfc51ce934e2f048322ce5da3a3faa152c9a75a9`，尚未推送：origin/main拒绝当前凭据(403)；personal/main在推送时前进且含同期G022变更，当前需精确整合报告到最新有权限main后再推，未强推。现状/剩余见同目录task文件。SGLang production/kernel源码无改动。
