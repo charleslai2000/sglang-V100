@@ -2,9 +2,11 @@
 import argparse,importlib.util,json,torch,hashlib
 from pathlib import Path
 from torch.utils.cpp_extension import load
-p=argparse.ArgumentParser();p.add_argument('--fixture',required=True);p.add_argument('--build',required=True);p.add_argument('--c57',required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--fixture',required=True);p.add_argument('--build',required=True);p.add_argument('--c57',required=True);p.add_argument('--module');a=p.parse_args()
 s=importlib.util.spec_from_file_location('common_ops',a.c57);cm=importlib.util.module_from_spec(s);s.loader.exec_module(cm)
-mod=load(name='e035_grouped_q4_sm70',sources=[str(Path(__file__).with_name('grouped_q4_sm70.cu'))],extra_cuda_cflags=['-O3','-lineinfo','-gencode=arch=compute_70,code=sm_70'],extra_cflags=['-O2'],build_directory=a.build,verbose=False)
+if a.module:
+ s=importlib.util.spec_from_file_location('e035_grouped_q4_sm70',a.module);mod=importlib.util.module_from_spec(s);s.loader.exec_module(mod)
+else:mod=load(name='e035_grouped_q4_sm70',sources=[str(Path(__file__).with_name('grouped_q4_sm70.cu'))],extra_cuda_cflags=['-O3','-lineinfo','-gencode=arch=compute_70,code=sm_70'],extra_cflags=['-O2'],build_directory=a.build,verbose=False)
 r=Path(a.fixture);m=json.loads((r/'manifest.json').read_text());t=m['tensors']
 def ld(n,d):
  f=r/(n+'.bin');return torch.from_file(str(f),shared=False,size=f.stat().st_size//torch.empty((),dtype=d).element_size(),dtype=d).view(t[n]['shape']).cuda()
