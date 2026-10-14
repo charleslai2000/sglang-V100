@@ -1,6 +1,21 @@
 # E035-R2 — down group-parallel result
 
 ## OBSERVED
+
+### Background-task completion and post-overlap clean repeats
+The original `r2-paired-down-full.jsonl` run contained duplicate keys because two invocations overlapped; preserve that raw file and its reconciled selection (`r2-paired-down-reconciled.jsonl`) rather than treating duplicates as extra repeats. After the six user-notified background tasks completed, performed a serial clean 18-row supplemental matrix for the cells whose earlier rows overlapped: L0/down and L22/down × M1/M2/M4 × 3 cyclic pairs, 20 event iterations/arm. Artifact `/mnt/data/pc01/sglang-v100-migration/experiments/E035/r2-paired-down-clean-repeats.jsonl`, SHA256 `b19558730cc89b4ab645e2e2c54e1819c428cdda8edc2c7864c767c689f86ea7`. All R1 and parallel arms passed frozen strict FP32 oracle; actual FP32 Graph go was finite/strict-bad 0; final graph output equaled `go.half()`; Eager/Graph match; c57 SHA and PIDs recorded.
+
+Clean-repeat median-of-pair-medians, µs:
+| Fixture | M | Eager R1 / parallel / c57 | Graph R1 / parallel / c57 |
+|---|---:|---:|---:|
+| L0 down | 1 | 1716.2 / 205.8 / 146.4 | 1714.2 / 207.9 / 143.4 |
+| L0 down | 2 | 1504.3 / 181.2 / 132.1 | 1500.2 / 183.3 / 131.1 |
+| L0 down | 4 | 1631.2 / 184.3 / 145.4 | 1628.2 / 187.4 / 148.5 |
+| L22 down | 1 | 1499.1 / 180.2 / 147.5 | 1498.1 / 186.4 / 144.4 |
+| L22 down | 2 | 1504.3 / 180.2 / 132.1 | 1498.1 / 183.3 / 124.9 |
+| L22 down | 4 | 1634.3 / 186.4 / 145.4 | 1628.2 / 188.4 / 149.5 |
+
+These independent serial measurements confirm the direction and no c57 win in the overlapped cells. L43/down pair results were never overlapped: M4 has two complete triplets (the explicit causal set plus the full run); M1/M2 have three each. Original E035/R1 parallel/c57 binaries are unchanged.
 - **Source/symbol/path:** experiment-only `grouped_q4_sm70_parallel.cu`, public entry `grouped_q4_sm70_parallel`, internal `group_wmma_partial` + `reduce_groups_ordered`; no production dispatcher change. Source SHA `75cd105c7ed82de68d5810417e99f2237bf4cda8edfe58b772c3c224886ce521`. Binary SHA `23ea9c87cbea6d6f6d491a94a5ef2446c363c7367d573d0807ee2358aa26bbcd`. Same R1 `f72b764654de643384166f44acf7924fd8199a6512f9573bb921224394b2392d`, exact c57 `c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9`.
 - **Mechanism:** R1 serial grid for M4/down was `[192,1,1]` single warp CTA and group loop iterated 96 groups. Candidate launches `[192,1,96]` = 18,432 independent single-warp CTAs, each does one group dot result; stores unscaled FP32 group result for the actual M rows only; reducer per output executes g=0..G−1 `fmaf(partial[g], scale[g], acc)`. Same gather, group Q4 prepack, g_idx, zeros/scales, within-group WMMA and output cast. No FP16 partial, atomic, tree/parallel reduction or tolerance modification. Only down projection measured/touched in experimental entry point.
 - **Baseline NCU evidence:** new R1 matched one-launch report, exact down M4 L43 fixture, exact binary. R1 group kernel grid `[192,1,1]`, block `[32,1,1]`, 48 regs/thread; SASS resource output from cubin STACK0/LOCAL0; 1.879ms, DRAM R/W 19.590/0.363 MB, cumulative active warps field 1.477M, issue 172,101 cycles, long scoreboard 47.34%, Tensor warp instructions 4,718,592. Raw report SHA `4fab9fa2a98d3d1eee2b03d5ce6c03d6461019b07e15604abb91e88af0c95a33`; NCU log SHA `4787ec22cc3860799b5cefe8c1a922ef2e8c0970b98668befef5c9a2680c16e5`.
