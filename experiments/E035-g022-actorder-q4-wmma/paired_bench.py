@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Alternating complete-call timings for E035 and exact accepted c57."""
+"""INVALID/SUPERSEDED legacy benchmark; do not use for old-vs-R1 comparison.
+
+Both E035 extensions have the same pybind module name. importlib's extension
+loader reuses the first native module, so path/SHA labels do not prove that
+both functions ran. Use paired_isolated.py, which starts a fresh process for
+one arm at a time and records loaded-file identity.
+"""
 import argparse,hashlib,importlib.util,json,torch
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--fixtures',required=True);p.add_argument('--prototype',required=True);p.add_argument('--old');p.add_argument('--c57',required=True);p.add_argument('--only-prefix');p.add_argument('--only-M',type=int,choices=(1,2,4));p.add_argument('--iters',type=int,default=40);p.add_argument('--pairs',type=int,default=3);p.add_argument('--out',required=True);a=p.parse_args()

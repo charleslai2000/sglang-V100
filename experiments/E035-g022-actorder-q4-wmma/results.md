@@ -1,4 +1,27 @@
-# E035-R1 results — local accumulator access diagnosis and minimal fix
+# E035-R2 results — isolated A/B loading and complete-Linear comparison
+
+## R2 measurement disposition
+`paired_bench.py` loaded old and R1 by explicit paths but requested the same pybind module name `e035_grouped_q4_sm70`. Actual Python 3.12/PyTorch 2.9.1 vendored pybind11 headers are version 3.0.1. Direct tests confirmed same-process old→R1 reused the same module and function object; both `__file__` values pointed to old. Reversed R1→old reused the R1 module/function instead. This is pybind/CPython extension initialization-name reuse, not a normal `sys.modules` entry. The module's native owner is the same init name. Old raw JSON is preserved with SHA `22c1e0f68462d4b8bf861c8c0091288c7e2ec1c9df4fd79d6010e6eeaccae6de`; its adjacent status file marks **INVALID/SUPERSEDED for old-vs-R1 timing**. Revoke only the old conclusion that full Linear was unchanged; independent old/R1 correctness, cubin/SASS and single-binary matched NCU evidence remain valid.
+
+R2 replacement `paired_isolated.py` launches one fresh interpreter per arm/cell and rotates sequential order. Each child loads just one E035 version, records actual module path, binary SHA, Python PID and native function owner, checks output correctness before timing, warms up outside event timing, and measures complete eager call and same-call CUDA Graph replay separately. No binary was rebuilt or renamed. Fixture/shape, input, M, buffers, output cast and input cache-warm process are matched. c57 remains its exact accepted binary and native call. Every E035 execution ran frozen strict cast-before FP32 oracle with bad=0; final FP16 finite; eager and Graph outputs agree and Graph strict check is zero. c57 uses its native FP16 contract and finite/eager-Graph checks; no claim that its internal pre-cast FP32 value is exposed.
+
+Full artifact `/mnt/data/pc01/sglang-v100-migration/experiments/E035/r2-all-fixtures-3pairs.jsonl`, SHA256 `747571cf2b9b99015f8ffd5a80aa8cb0aa7fde3f6846e3911c9a149b82abfa3c`; 54 paired rows (six fixture matrices × M1/M2/M4 × three rotations), 20 event iterations per route/pair. Each row carries all 3 arm binary SHA/path/PID/correctness flags and separate eager/Graph replay timing. Exact binaries: old `51cb9b32...`, R1 `f72b7646...`, c57 `c57e50dc...`.
+
+| Projection | M | Eager old/R1/c57 (µs) | old→R1 | R1/c57 | Graph replay old/R1/c57 (µs) |
+|---|---:|---:|---:|---:|---:|
+| down | 1 | 2086.9 / 1499.1 / 129.0 | -28.2% | 11.62× | 2084.9 / 1499.1 / 126.0 |
+| down | 2 | 2097.2 / 1507.3 / 133.1 | -28.1% | 11.32× | 2089.0 / 1501.2 / 127.0 |
+| down | 4 | 2180.1 / 1632.3 / 144.4 | -25.1% | 11.30× | 2176.0 / 1628.2 / 148.5 |
+| gate_up | 1 | 2681.9 / 448.5 / 204.8 | -83.3% | 2.19× | 2736.1 / 461.8 / 202.8 |
+| gate_up | 2 | 2693.1 / 449.5 / 214.0 | -83.3% | 2.10× | 2736.1 / 463.9 / 211.0 |
+| gate_up | 4 | 2689.0 / 465.9 / 230.4 | -82.7% | 2.02× | 2745.3 / 479.2 / 229.4 |
+
+The table is median across the three layer fixtures and three pair medians per corresponding operator/M. Layer-by-layer cells are in `report.md`; the raw file is authoritative. M4 causal files: `r2-causal-m4.jsonl` for L43 gate_up and `r2-causal-down-m4.jsonl` for L43 down.
+
+**Decision:** genuine R1 repair does improve complete Linear versus old, especially gate_up; the formerly reported unchanged full-call timing is withdrawn as polluted. Yet R1 remains slower than exact c57 in every projection/M: gate_up about 2.0–2.2× and down about 11.3–11.6×. Thus still **NO-GO for production integration**, with S1 default, c57 opt-in/rollback and dispatcher unchanged. Only next step is separately authorized kernel candidate work that must first beat exact c57 under the same strict oracle. Forward-wide adoption requires separate existing whole-model Prefill→multi-step Decode/logits/token/Graph/request-state checks; R2 did not run Forward/service/cache.
+
+
+# E035-R1 results — local accumulator access diagnosis and minimal fix (historical evidence)
 
 ## OBSERVED
 - Actual original binaries matched to source/flags: final timing extension `51cb9b32a77ee6af5c7e940acb46b812c7950fe598cc6a764a07ee49d50736b8`; final NCU extension `6971b0c1dc8a0614ab16d1b2864bb16ca7d1d982ea990915e605249cb3029200`. Both are `grouped_q4_sm70.cu` pre-R1, PyTorch 2.9.1+cu128/CUDA12.8, `nvcc -O3 -lineinfo -gencode=arch=compute_70,code=sm_70`, MAX_JOBS=1. Existing code sources and artifacts are under the same E035 directory and `/mnt/data/.../experiments/E035/`.
