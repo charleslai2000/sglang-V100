@@ -1,0 +1,10 @@
+{
+  "original_fp32_fma_reduce32.bin": "4a0800c14d8c49750c1582e99c546908ce9284c8ef01decf3dd23d7252a61ff8",
+  "fp64_partial_rounded_fp32_reduce32.bin": "1e4cb129ecf5ff8e46b5e2411e889ae5537acf8d813ccd5fed6245c1e091917f",
+  "eight_point_decomposition.csv": "9e194397117592c9102dce2118061ebc56d935ed532cfe892a90afc74cfe7615",
+  "audit_results.json": "622f1680a75a5e6d241ef83fc4e4258d7ae7bffded835b413c4f8df5c576bbae",
+  "l43_down_cpu_audit.md": "6cc9a3a69439ba9ec9294daf46235cc5f60f8f700632d7925c336ae20bd4c4bd",
+  "dot2_fp32_partial_kahan.bin": "e684922af532c9928dca4e7b97a5756d46e380fa5473b42f125234e6147cfa08",
+  "audit.py": "61580485c88c5e976a0c10a02899e07bbb6b2c6f06ed06b347208fc3cb11e62c",
+  "reproduce.cpp": "4bdf6789e61f36d601dc67ccf9827ecf2257d4ae2d960bb58f653a10569e4e0c"
+}
