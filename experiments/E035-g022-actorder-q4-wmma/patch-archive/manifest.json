@@ -1,0 +1,69 @@
+{
+  "archive_baseline_commit": "8d2a01455f6e9804b85e906535839962cb2be812",
+  "patches": {
+    "fp64-E026-build-argument.patch": {
+      "sha256": "190847d68791763ee0edf147891b7c316e5e3a8ef144ed43513e39e90af1e2a4",
+      "bytes": 1127
+    },
+    "fp64-shared-integration.patch": {
+      "sha256": "16fa3b09b0f75e0586b49c69eb361013ece1a6096a42da96eaa7f084ac4b81e1",
+      "bytes": 10245
+    }
+  },
+  "baseline_source_snapshots": {
+    "python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py": {
+      "path": "source-snapshots/python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py",
+      "sha256": "ed3f13d2cd4b356c0046381957f6f1abd40c9fbeac4147b1d09c87b0c2a53528"
+    },
+    "sgl-kernel/python/sgl_kernel/load_utils.py": {
+      "path": "source-snapshots/sgl-kernel/python/sgl_kernel/load_utils.py",
+      "sha256": "2af97879bcb9864f3cd3aee2588633466b77224b82d10b567872617e8fc6e8b3"
+    },
+    "sgl-kernel/CMakeLists.txt": {
+      "path": "source-snapshots/sgl-kernel/CMakeLists.txt",
+      "sha256": "090e631251daa6dd145af717d4096198c381818debe5471763c772b321d1c120"
+    },
+    "sgl-kernel/csrc/common_extension.cc": {
+      "path": "source-snapshots/sgl-kernel/csrc/common_extension.cc",
+      "sha256": "74b6e76858a390a63e20eafaf6e81dbaa50920e3cc9ff00572286edbaba1b80f"
+    },
+    "experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh": {
+      "path": "source-snapshots/experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh",
+      "sha256": "47d3f48fa355c3610f2e8e6e2795779643080650955e0c00c0384053c4afd6e3"
+    }
+  },
+  "modified_source_sha256_before_revert": {
+    "python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py": "c473317b77673e7185f7592000b8e28881ade83ffa33d26d95f07e2ade35b1a3",
+    "sgl-kernel/python/sgl_kernel/load_utils.py": "99794697679ef01397ae43b287f60dcb9fe923f98b4bc6f2bfb5290c35a8f11f",
+    "sgl-kernel/CMakeLists.txt": "09d094acd21cf3a75cf9a92728ca83c7e54f956af86595820524b0fb3271d9c9",
+    "sgl-kernel/csrc/common_extension.cc": "e82be9ecabf3fdc6bdef6777ce45ac3c35ac646f62e31de088018aa951bae692",
+    "experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh": "53bbe59b6ba42667096fcb7a21d403bd0d848a8e3aa83742075b22f01a52f763"
+  },
+  "candidate": {
+    "cuda_source": "gptq_candidate_v8_fp64.cu",
+    "cuda_source_sha256": "6523388864bd2d8331d90c3a20149692f94d27a8b4cfd9bc5c9252c5d8602cbf",
+    "registration_sha256": "b577b49836c18b04a787573e0721d50e0a01451cf686217ee1b6cab162166fcf",
+    "binary": "/mnt/data/pc01/sglang-v100-migration/experiments/E035/numerical-fix-fp64-optin-build/g022_fp64_optin.so",
+    "binary_sha256": "35998ff295f0a4fe27417886ff2fd86bc9a1c1030975435e8b34aa42fb26b5f6",
+    "s1_common_ops_sha256": "fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842",
+    "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+    "model_config_sha256": "ca8c91f8a18a4917f9580ce1cbcb015a6f7cee2b24022cf6c3e8c94d6943a7f7",
+    "cuda": "12.8",
+    "pytorch": "2.9.1+cu128",
+    "gpu_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+    "launcher": "run_fp64_final_qualified_server.sh",
+    "service_order": "full c57 matrix followed by full FP64 matrix; three repeats/cell, not alternating pairs"
+  },
+  "limitations": [
+    "No hermetic environment lock, complete server binary/log hash set or exact service event transcript is archived.",
+    "Launcher and process-local runtime shim are evidence, not sufficient to guarantee bit-for-bit replay.",
+    "Exact modified shared source files were not snapshotted before rollback; patch plus baseline snapshots preserve the hunk but not unrelated concurrent file context.",
+    "Service results are fixed-order descriptive observations, not a paired causal estimate."
+  ],
+  "external_artifacts": {
+    "c57_service_json_sha256": "b67e1ddae9cb551dc11189eee039d399fce9b70e76efb5036624293ed2e203d7",
+    "fp64_service_json_sha256": "c000b623d7da32bdef0dc432d10f23812bdab4740dc4d4378bd69a8af63e1617",
+    "strict_matrix_sha256": "163c2e0a4bbe7d630e8942ba88df00f481ad6cc944d54ebcf6b454034ae38cb8",
+    "state_isolation_sha256": "3af1a6a85f25e2d16ff7611cb4ac3e6b279fefaf1fdde9e13fb56ea3467469a7"
+  }
+}

@@ -1,0 +1,12 @@
+diff --git a/experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh b/experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh
+index fd3d3959a..74acf3de2 100755
+--- a/experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh
++++ b/experiments/E026-local-v100-s4-m3c/scripts/build_candidate_extension.sh
+@@ -16,6 +16,7 @@ python -m pip wheel --no-deps --no-build-isolation -w "$WHEELS" "$ROOT/sgl-kerne
+   -Cbuild-dir="$BUILD" -Cbuild.targets=common_ops_sm100_build -Cbuild.tool-args=-j1 \
+   -Ccmake.define.SGL_KERNEL_V100_ONLY=ON -Ccmake.define.SGL_KERNEL_GPTQ_CANDIDATE=ON \
+   -Ccmake.define.SGL_KERNEL_COMPILE_THREADS=1 -Ccmake.define.CMAKE_CUDA_ARCHITECTURES=70 \
++  ${SGL_KERNEL_GPTQ_NUMERICAL_FIX_SOURCE:+-Ccmake.define.SGL_KERNEL_GPTQ_NUMERICAL_FIX_SOURCE=$SGL_KERNEL_GPTQ_NUMERICAL_FIX_SOURCE} \
+   -Ccmake.define.FETCHCONTENT_SOURCE_DIR_REPO_CUTLASS="$DEPS/cutlass-turbomind-sglang-v100-57e3cfb47a2d" \
+   -Ccmake.define.FETCHCONTENT_SOURCE_DIR_REPO_FMT="$DEPS/sgl-kernel-repo-fmt" \
+   -Ccmake.define.FETCHCONTENT_SOURCE_DIR_REPO_TRITON="$DEPS/sgl-kernel-repo-triton" \

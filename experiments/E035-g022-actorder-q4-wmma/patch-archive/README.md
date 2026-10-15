@@ -1,0 +1,12 @@
+# E035 FP64 numerical repair — execution patch archive
+
+Archive commit base: `8d2a01455f6e9804b85e906535839962cb2be812` (the pushed report/control commit immediately before archival).
+Final baseline commit: `$(git rev-parse HEAD)` is recorded by the archival commit itself; source baseline for the compared repo implementation: S1 common_ops SHA `fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842`; exact-c57 common_ops SHA `c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9`.
+
+The original integration patches are preserved verbatim in `../patches/fp64-shared-integration.patch` and `../patches/fp64-E026-build-argument.patch`; these are generated with `git diff` against the above baseline and are evidence only, not intended for replay in production. `../manifest.json` binds those patches to source snapshots and binaries.
+
+Runtime launch configuration: `../run_fp64_final_qualified_server.sh`; process-local runtime selector: `../sitecustomize.py` and `../e035-runtime-sitecustomize.py`; expected extension `/mnt/data/pc01/sglang-v100-migration/experiments/E035/numerical-fix-fp64-optin-build/g022_fp64_optin.so`, SHA256 `35998ff295f0a4fe27417886ff2fd86bc9a1c1030975435e8b34aa42fb26b5f6`. Isolated build recipes: `../build_numerical_fix.py`, `../numerical_fix_registration.cpp`, CUDA source `../gptq_candidate_v8_fp64.cu`.
+
+Service ordering: c57 full matrix first, then FP64 full matrix, three repeats per cell; this is not alternating paired service data and must not be described as three paired runs. Operator comparison was alternating, separate scope. Raw service data remains outside the repository at `/mnt/data/pc01/sglang-v100-migration/experiments/E035/{c57-exact-service-matched3.json,fp64-service-matched3.json}`. Final strict FP64 operator raw and `.run.jsonl` remain outside repo at `/mnt/data/pc01/sglang-v100-migration/experiments/E035/fp64-finalsha-correctness-sixfixture-m1m4.cad052d8-cda9-4218-a9eb-0f2fa7dc17bf{,.run.jsonl}`.
+
+Unresolved/uncertain: no hermetic executable transcript of the entire service environment was captured; launcher and runtime shim are source snapshots, not sufficient to recreate the exact machine state. GPU driver, environment package lock, service binary/log full hashes, server-ready/warmup exact event order and uninstrumented resource traces were not all committed. Do not claim bit-for-bit reproducibility beyond exact recorded extension/base SHA and preserved client/operator raw files. No additional measurement authorized.

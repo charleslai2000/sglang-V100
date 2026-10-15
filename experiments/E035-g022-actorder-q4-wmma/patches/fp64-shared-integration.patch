@@ -1,0 +1,171 @@
+diff --git a/python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py b/python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py
+index 38f67e877..2f28b72b1 100644
+--- a/python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py
++++ b/python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py
+@@ -134,8 +134,21 @@ class GPTQLinearKernel:
+
+         candidate_expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
+         candidate_extension_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
++        numerical_fix_mode = os.environ.get("SGLANG_G022_GPTQ_NUMERICAL_FIX")
++        if numerical_fix_mode not in (None, "", "fp64"):
++            raise RuntimeError(f"Unsupported G022 numerical-fix mode: {numerical_fix_mode}")
++        numerical_fix_enabled = os.environ.get("SGLANG_G022_GPTQ_NUMERICAL_FIX") == "fp64"
++        numerical_fix_enabled = (
++            numerical_fix_enabled and not self.use_shuffle
++            and 1 <= reshaped_x.shape[0] <= 4
++            and layer.quant_config.weight_bits == 4
++            and reshaped_x.dtype == torch.float16
++            and torch.cuda.is_available()
++            and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
++        )
+         candidate_enabled = (
+-            not self.use_shuffle
++            not numerical_fix_enabled
++            and not self.use_shuffle
+             and 1 <= reshaped_x.shape[0] <= 4
+             and layer.quant_config.weight_bits == 4
+             and reshaped_x.dtype == torch.float16
+@@ -143,6 +156,32 @@ class GPTQLinearKernel:
+             and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
+             and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
+         )
++        numerical_fix_path = os.environ.get("SGLANG_KERNEL_G022_NUMERICAL_FIX_PATH")
++        numerical_fix_sha = os.environ.get("SGLANG_G022_NUMERICAL_FIX_SHA256")
++        if numerical_fix_enabled:
++            if not numerical_fix_path or not numerical_fix_sha:
++                raise RuntimeError("G022 FP64 numerical fix requires explicit extension path and SHA256")
++            loaded_path = os.path.realpath(numerical_fix_path)
++            if not os.path.isfile(loaded_path):
++                raise RuntimeError(f"G022 numerical-fix extension does not exist: {loaded_path}")
++            with open(loaded_path, "rb") as module_file:
++                loaded_sha = hashlib.sha256(module_file.read()).hexdigest()
++            if loaded_sha != numerical_fix_sha:
++                raise RuntimeError(f"G022 numerical-fix extension SHA mismatch: expected {numerical_fix_sha}, got {loaded_sha}")
++            extension_module = getattr(self, "_g022_numerical_fix_module", None)
++            if extension_module is None:
++                import importlib.util
++
++                module_spec = importlib.util.spec_from_file_location("g022_fp64_optin", loaded_path)
++                if module_spec is None or module_spec.loader is None:
++                    raise RuntimeError(f"Cannot import G022 numerical-fix extension: {loaded_path}")
++                extension_module = importlib.util.module_from_spec(module_spec)
++                module_spec.loader.exec_module(extension_module)
++                self._g022_numerical_fix_module = extension_module
++            if not hasattr(torch.ops.sgl_kernel, "gptq_q4_fp32_m4_numerical_fix"):
++                raise RuntimeError("Loaded G022 numerical-fix extension lacks the FP64 GPTQ op")
++            logging.getLogger(__name__).warning("G022 GPTQ FP64 numerical-fix dispatch active path=%s sha256=%s M=%d K=%d N=%d", loaded_path, loaded_sha, reshaped_x.shape[0], reshaped_x.shape[1], layer.qweight.shape[-1])
++            torch.cuda.nvtx.range_push("G022_GPTQ_FP64_NUMERICAL_FIX")
+         if candidate_enabled:
+             # Both exact extension identity and bytes are required before dispatch.
+             if not candidate_extension_path:
+@@ -178,7 +217,12 @@ class GPTQLinearKernel:
+                 )
+                 _g017_dispatch_logged = True
+             torch.cuda.nvtx.range_push("G017_CANDIDATE_GPTQ_FP32")
+-        if candidate_enabled:
++        if numerical_fix_enabled:
++            output = torch.ops.sgl_kernel.gptq_q4_fp32_m4_numerical_fix(
++                reshaped_x, layer.qweight.to(torch.int32), layer.qzeros.to(torch.int32),
++                layer.scales, layer.g_idx, False,
++            )
++        elif candidate_enabled:
+             # Call the registered candidate op directly: the generic sgl_kernel
+             # editable loader can otherwise bind gptq_gemm from another module.
+             output = torch.ops.sgl_kernel.gptq_q4_fp32_m4_candidate(
+@@ -205,7 +249,7 @@ class GPTQLinearKernel:
+                 self.use_shuffle,
+                 self.quant_config.weight_bits,
+             )
+-        if candidate_enabled:
++        if numerical_fix_enabled or candidate_enabled:
+             torch.cuda.nvtx.range_pop()
+         if output.dtype != reshaped_x.dtype:
+             output = output.to(reshaped_x.dtype)
+diff --git a/sgl-kernel/CMakeLists.txt b/sgl-kernel/CMakeLists.txt
+index 6ac35e9a3..2295cefcd 100644
+--- a/sgl-kernel/CMakeLists.txt
++++ b/sgl-kernel/CMakeLists.txt
+@@ -401,13 +401,17 @@ endif()
+ # =========================== Common SM100+ / SM70 Build ============================= #
+ # Build SM100+ library with precise math (same namespace, different directory)
+ # When SGL_KERNEL_V100_ONLY: only sm70, skip sm90/sm100 targets
+-if(SGL_KERNEL_GPTQ_CANDIDATE AND NOT SGL_KERNEL_V100_ONLY)
+-    message(FATAL_ERROR "SGL_KERNEL_GPTQ_CANDIDATE requires an isolated V100-only build")
++if((SGL_KERNEL_GPTQ_CANDIDATE OR SGL_KERNEL_GPTQ_NUMERICAL_FIX_SOURCE) AND NOT SGL_KERNEL_V100_ONLY)
++    message(FATAL_ERROR "SM70 GPTQ experimental ops require an isolated V100-only build")
+ endif()
+ if(SGL_KERNEL_GPTQ_CANDIDATE)
+     list(APPEND SOURCES "csrc/gemm/gptq/gptq_candidate_v8.cu")
+     add_compile_definitions(SGL_KERNEL_GPTQ_CANDIDATE)
+ endif()
++if(SGL_KERNEL_GPTQ_NUMERICAL_FIX_SOURCE)
++    list(APPEND SOURCES "${SGL_KERNEL_GPTQ_NUMERICAL_FIX_SOURCE}")
++    add_compile_definitions(SGL_KERNEL_GPTQ_NUMERICAL_FIX)
++endif()
+ Python_add_library(common_ops_sm100_build MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI ${SOURCES})
+
+ target_compile_options(common_ops_sm100_build PRIVATE
+diff --git a/sgl-kernel/csrc/common_extension.cc b/sgl-kernel/csrc/common_extension.cc
+index aca068dd8..06fecb3ce 100644
+--- a/sgl-kernel/csrc/common_extension.cc
++++ b/sgl-kernel/csrc/common_extension.cc
+@@ -23,6 +23,11 @@ at::Tensor packed_q4_fp32_candidate(
+     at::Tensor x, at::Tensor qw, at::Tensor qz,
+     at::Tensor scales, at::Tensor gidx, bool return_fp32);
+ #endif
++#ifdef SGL_KERNEL_GPTQ_NUMERICAL_FIX
++at::Tensor packed_q4_fp32_numerical_fix(
++    at::Tensor x, at::Tensor qw, at::Tensor qz,
++    at::Tensor scales, at::Tensor gidx, bool return_fp32);
++#endif
+
+ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
+   /*
+@@ -168,6 +173,10 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
+   m.def("gptq_q4_fp32_m4_candidate(Tensor a, Tensor b_q_weight, Tensor b_gptq_qzeros, Tensor b_gptq_scales, Tensor b_g_idx, bool return_fp32=False) -> Tensor");
+   m.impl("gptq_q4_fp32_m4_candidate", torch::kCUDA, &packed_q4_fp32_candidate);
+ #endif
++#ifdef SGL_KERNEL_GPTQ_NUMERICAL_FIX
++  m.def("gptq_q4_fp32_m4_numerical_fix(Tensor a, Tensor b_q_weight, Tensor b_gptq_qzeros, Tensor b_gptq_scales, Tensor b_g_idx, bool return_fp32=False) -> Tensor");
++  m.impl("gptq_q4_fp32_m4_numerical_fix", torch::kCUDA, &packed_q4_fp32_numerical_fix);
++#endif
+
+   m.def("gptq_shuffle(Tensor! q_weight, Tensor q_perm, int bit) -> ()");
+   m.impl("gptq_shuffle", torch::kCUDA, &gptq_shuffle);
+diff --git a/sgl-kernel/python/sgl_kernel/load_utils.py b/sgl-kernel/python/sgl_kernel/load_utils.py
+index 6af0e9b05..a02e19b5f 100644
+--- a/sgl-kernel/python/sgl_kernel/load_utils.py
++++ b/sgl-kernel/python/sgl_kernel/load_utils.py
+@@ -77,8 +77,32 @@ def _load_architecture_specific_ops():
+
+     # Explicit path is only for the isolated, opt-in G017 candidate runtime.
+     # It avoids editable-install/package-finder ambiguity while leaving S1 default.
++    numerical_fix_enabled = os.environ.get("SGLANG_G022_GPTQ_NUMERICAL_FIX") == "fp64"
++    numerical_fix_path = os.environ.get("SGLANG_KERNEL_G022_NUMERICAL_FIX_PATH")
+     candidate_enabled = os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
+     candidate_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
++    if numerical_fix_enabled:
++        if candidate_enabled:
++            raise ImportError("G022 numerical-fix and G017 candidate opt-ins are mutually exclusive")
++        if not numerical_fix_path:
++            raise ImportError("G022 numerical fix enabled but SGLANG_KERNEL_G022_NUMERICAL_FIX_PATH is unset")
++        numerical_fix_path = Path(numerical_fix_path).resolve()
++        if not numerical_fix_path.is_file():
++            raise ImportError(f"G022 numerical-fix extension does not exist: {numerical_fix_path}")
++        sha = hashlib.sha256(numerical_fix_path.read_bytes()).hexdigest()
++        expected_sha = os.environ.get("SGLANG_G022_NUMERICAL_FIX_SHA256")
++        if not expected_sha or sha != expected_sha:
++            raise ImportError(f"G022 numerical-fix extension SHA mismatch: expected {expected_sha}, got {sha}")
++        spec = importlib.util.spec_from_file_location("g022_fp64_optin", str(numerical_fix_path))
++        if spec is None or spec.loader is None:
++            raise ImportError(f"Cannot load G022 numerical-fix extension: {numerical_fix_path}")
++        numerical_fix_module = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(numerical_fix_module)
++        if not hasattr(torch.ops.sgl_kernel, "gptq_q4_fp32_m4_numerical_fix"):
++            raise ImportError("G022 numerical-fix extension lacks registered FP64 GPTQ op")
++        logger.warning("G022 numerical-fix op loaded path=%s sha256=%s; retaining normal common_ops", numerical_fix_module.__file__, sha)
++    if candidate_enabled and numerical_fix_enabled:
++        raise ImportError("G022 numerical-fix and G017 candidate opt-ins are mutually exclusive")
+     if candidate_enabled:
+         if not candidate_path:
+             raise ImportError(
