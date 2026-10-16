@@ -2,7 +2,7 @@
 
 ## G022-falcon-v100-c4-performance
 - T003 — short-context batch scaling diagnosis — ACTIVE
-  - frontier: Owner withdrew invalid host-RAM/GPU-VRAM conflation in 181d88a; preserve that history and proceed with host ≥8GiB MemAvailable independently of measured V100 NVML/CUDA allocation.
+  - frontier: Three independent Graph Event and CUPTI vectors/cell are complete. Still open: exact request→Mamba/KV slot audit, counter-byte semantics, and a safely bounded Graph Forward owner ledger before defensible c1/c2/c4 recoverable-time ranking.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T003-short-context-batch-scaling-diagnosis.md`
   - unblock/reopen: Target V100 UUID only, MemAvailable >=8 GiB, independent Mamba state per request, preserve all existing dirty files and E035 dispositions. Cache remains paused.
 

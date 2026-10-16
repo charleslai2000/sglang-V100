@@ -1,0 +1,615 @@
+{
+  "device_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "eager_instrumented_traces": [
+    {
+      "activity_coverage_pct": 15.760360687005981,
+      "activity_interval_gaps_ms": 148.85243332421877,
+      "annotation_ms": 176.701176,
+      "batch": 1,
+      "gptq_kernel_calls_by_symbol": {
+        "sglang::gptq::gemm_half_q_half_alt_4bit_kernel": 88
+      },
+      "gpu_activity_union_ms": 27.84874267578125,
+      "owner_calls": {
+        "Attention": 176,
+        "GPTQ gate_up/down": 88,
+        "Mamba": 88,
+        "Norm/elementwise": 754,
+        "UNKNOWN": 50,
+        "memcpy/memset": 132,
+        "nonquant GEMV (E031 source-mapped QKV at M1; otherwise UNKNOWN)": 177
+      },
+      "owner_exclusive_ms": {
+        "Attention": 1.749332275390625,
+        "GPTQ gate_up/down": 16.473021728515626,
+        "Mamba": 0.540093994140625,
+        "Norm/elementwise": 1.5641259765625,
+        "UNKNOWN": 0.1865908203125,
+        "memcpy/memset": 0.187908935546875,
+        "nonquant GEMV (E031 source-mapped QKV at M1; otherwise UNKNOWN)": 7.1476689453125
+      },
+      "owner_interval_union_ms": {
+        "Attention": 1.749332275390625,
+        "GPTQ gate_up/down": 16.473021728515626,
+        "Mamba": 0.540093994140625,
+        "Norm/elementwise": 1.5641259765625,
+        "UNKNOWN": 0.1865908203125,
+        "memcpy/memset": 0.187908935546875,
+        "nonquant GEMV (E031 source-mapped QKV at M1; otherwise UNKNOWN)": 7.1476689453125
+      },
+      "owner_kernel_duration_sum_ms": {
+        "Attention": 1.7493360000000002,
+        "GPTQ gate_up/down": 16.473021999999997,
+        "Mamba": 0.5400940000000002,
+        "Norm/elementwise": 1.5641209999999979,
+        "UNKNOWN": 0.186591,
+        "memcpy/memset": 0.18790499999999982,
+        "nonquant GEMV (E031 source-mapped QKV at M1; otherwise UNKNOWN)": 7.147668999999996
+      },
+      "trace_sha256": "21cad2273d0fc54856f9f51f2be03405b4db033ca24cb0d99b47c907608db14c"
+    },
+    {
+      "activity_coverage_pct": 15.899702600915731,
+      "activity_interval_gaps_ms": 159.08352208398438,
+      "annotation_ms": 189.15928599999998,
+      "batch": 2,
+      "gptq_kernel_calls_by_symbol": {
+        "sglang::gptq::gemm_half_q_half_alt_4bit_kernel": 88
+      },
+      "gpu_activity_union_ms": 30.075763916015624,
+      "owner_calls": {
+        "Attention": 176,
+        "GPTQ gate_up/down": 88,
+        "Mamba": 88,
+        "Norm/elementwise": 754,
+        "UNKNOWN": 50,
+        "lm_head FP32 GEMV": 1,
+        "memcpy/memset": 132,
+        "nonquant GEMM/CUTLASS": 352
+      },
+      "owner_exclusive_ms": {
+        "Attention": 1.749949462890625,
+        "GPTQ gate_up/down": 16.755293701171876,
+        "Mamba": 0.914749267578125,
+        "Norm/elementwise": 1.996329833984375,
+        "UNKNOWN": 0.213279296875,
+        "lm_head FP32 GEMV": 1.86389990234375,
+        "memcpy/memset": 0.200353271484375,
+        "nonquant GEMM/CUTLASS": 6.3819091796875
+      },
+      "owner_interval_union_ms": {
+        "Attention": 1.749949462890625,
+        "GPTQ gate_up/down": 16.755293701171876,
+        "Mamba": 0.914749267578125,
+        "Norm/elementwise": 1.996329833984375,
+        "UNKNOWN": 0.213279296875,
+        "lm_head FP32 GEMV": 1.86389990234375,
+        "memcpy/memset": 0.200353271484375,
+        "nonquant GEMM/CUTLASS": 6.3819091796875
+      },
+      "owner_kernel_duration_sum_ms": {
+        "Attention": 1.7499489999999995,
+        "GPTQ gate_up/down": 16.755294000000003,
+        "Mamba": 0.9147470000000001,
+        "Norm/elementwise": 1.9963329999999981,
+        "UNKNOWN": 0.21327800000000008,
+        "lm_head FP32 GEMV": 1.8639000000000001,
+        "memcpy/memset": 0.20034899999999994,
+        "nonquant GEMM/CUTLASS": 6.381908999999997
+      },
+      "trace_sha256": "0893b7fedd1d27b488d848651337ad99ce4ad63c5e3ba9df412b7c33cff5e349"
+    },
+    {
+      "activity_coverage_pct": 16.06430065958091,
+      "activity_interval_gaps_ms": 169.39518667187502,
+      "annotation_ms": 201.815423,
+      "batch": 4,
+      "gptq_kernel_calls_by_symbol": {
+        "sglang::gptq::gemm_half_q_half_alt_4bit_kernel": 88
+      },
+      "gpu_activity_union_ms": 32.420236328125,
+      "owner_calls": {
+        "Attention": 176,
+        "GPTQ gate_up/down": 88,
+        "Mamba": 88,
+        "Norm/elementwise": 754,
+        "UNKNOWN": 50,
+        "lm_head FP32 GEMV": 1,
+        "memcpy/memset": 132,
+        "nonquant GEMM/CUTLASS": 352
+      },
+      "owner_exclusive_ms": {
+        "Attention": 1.719095947265625,
+        "GPTQ gate_up/down": 18.317523681640626,
+        "Mamba": 1.651039794921875,
+        "Norm/elementwise": 2.009951171875,
+        "UNKNOWN": 0.233153564453125,
+        "lm_head FP32 GEMV": 1.90306689453125,
+        "memcpy/memset": 0.18732666015625,
+        "nonquant GEMM/CUTLASS": 6.39907861328125
+      },
+      "owner_interval_union_ms": {
+        "Attention": 1.719095947265625,
+        "GPTQ gate_up/down": 18.317523681640626,
+        "Mamba": 1.651039794921875,
+        "Norm/elementwise": 2.009951171875,
+        "UNKNOWN": 0.233153564453125,
+        "lm_head FP32 GEMV": 1.90306689453125,
+        "memcpy/memset": 0.18732666015625,
+        "nonquant GEMM/CUTLASS": 6.39907861328125
+      },
+      "owner_kernel_duration_sum_ms": {
+        "Attention": 1.7190969999999988,
+        "GPTQ gate_up/down": 18.317523999999995,
+        "Mamba": 1.6510389999999997,
+        "Norm/elementwise": 2.0099399999999945,
+        "UNKNOWN": 0.23315300000000003,
+        "lm_head FP32 GEMV": 1.903067,
+        "memcpy/memset": 0.187326,
+        "nonquant GEMM/CUTLASS": 6.399084
+      },
+      "trace_sha256": "6c319b4733bb1087a4c1bd6e6664dced7b05b15ac3867b09fa59f14797e97386"
+    },
+    {
+      "activity_coverage_pct": 19.67945085039596,
+      "activity_interval_gaps_ms": 155.41404740039061,
+      "annotation_ms": 193.49226199999998,
+      "batch": 8,
+      "gptq_kernel_calls_by_symbol": {
+        "sglang::gptq::gemm_half_q_half_alt_4bit_kernel": 88
+      },
+      "gpu_activity_union_ms": 38.078214599609375,
+      "owner_calls": {
+        "Attention": 176,
+        "GPTQ gate_up/down": 88,
+        "Mamba": 88,
+        "Norm/elementwise": 754,
+        "UNKNOWN": 50,
+        "lm_head FP32 GEMV": 1,
+        "memcpy/memset": 132,
+        "nonquant GEMM/CUTLASS": 352
+      },
+      "owner_exclusive_ms": {
+        "Attention": 1.79073193359375,
+        "GPTQ gate_up/down": 21.937115478515626,
+        "Mamba": 3.223855224609375,
+        "Norm/elementwise": 2.0687197265625,
+        "UNKNOWN": 0.242943359375,
+        "lm_head FP32 GEMV": 2.0804990234375,
+        "memcpy/memset": 0.207361328125,
+        "nonquant GEMM/CUTLASS": 6.526988525390625
+      },
+      "owner_interval_union_ms": {
+        "Attention": 1.79073193359375,
+        "GPTQ gate_up/down": 21.937115478515626,
+        "Mamba": 3.223855224609375,
+        "Norm/elementwise": 2.0687197265625,
+        "UNKNOWN": 0.242943359375,
+        "lm_head FP32 GEMV": 2.0804990234375,
+        "memcpy/memset": 0.207361328125,
+        "nonquant GEMM/CUTLASS": 6.526988525390625
+      },
+      "owner_kernel_duration_sum_ms": {
+        "Attention": 1.7907390000000012,
+        "GPTQ gate_up/down": 21.937114999999995,
+        "Mamba": 3.223853999999999,
+        "Norm/elementwise": 2.0687140000000017,
+        "UNKNOWN": 0.24294400000000005,
+        "lm_head FP32 GEMV": 2.0804989999999997,
+        "memcpy/memset": 0.20735699999999999,
+        "nonquant GEMM/CUTLASS": 6.526989999999999
+      },
+      "trace_sha256": "fb9de6ef063e57bba6a0671cc22f68c036cb8e6e33f8839212a6cfeeeed47f4a"
+    },
+    {
+      "activity_coverage_pct": 26.69008693274929,
+      "activity_interval_gaps_ms": 138.18111324414065,
+      "annotation_ms": 188.488988,
+      "batch": 16,
+      "gptq_kernel_calls_by_symbol": {
+        "void sglang::gptq::reconstruct_gptq_kernel<sglang::gptq::MatrixView_q4_row, 4>": 88,
+        "volta_h884gemm_128x64_ldg8_nn": 88
+      },
+      "gpu_activity_union_ms": 50.30787475585937,
+      "owner_calls": {
+        "Attention": 176,
+        "GPTQ gate_up/down": 176,
+        "Mamba": 88,
+        "Norm/elementwise": 754,
+        "UNKNOWN": 51,
+        "memcpy/memset": 44,
+        "nonquant GEMM/CUTLASS": 396
+      },
+      "owner_exclusive_ms": {
+        "Attention": 1.890142578125,
+        "GPTQ gate_up/down": 30.01607666015625,
+        "Mamba": 6.380380859375,
+        "Norm/elementwise": 2.275833984375,
+        "UNKNOWN": 2.65500830078125,
+        "memcpy/memset": 0.076259033203125,
+        "nonquant GEMM/CUTLASS": 7.01417333984375
+      },
+      "owner_interval_union_ms": {
+        "Attention": 1.890142578125,
+        "GPTQ gate_up/down": 30.01607666015625,
+        "Mamba": 6.380380859375,
+        "Norm/elementwise": 2.275833984375,
+        "UNKNOWN": 2.65500830078125,
+        "memcpy/memset": 0.076259033203125,
+        "nonquant GEMM/CUTLASS": 7.01417333984375
+      },
+      "owner_kernel_duration_sum_ms": {
+        "Attention": 1.890143999999998,
+        "GPTQ gate_up/down": 30.016077000000013,
+        "Mamba": 6.380380999999995,
+        "Norm/elementwise": 2.2758370000000014,
+        "UNKNOWN": 2.655007,
+        "memcpy/memset": 0.07625799999999999,
+        "nonquant GEMM/CUTLASS": 7.014178000000006
+      },
+      "trace_sha256": "1fe2172097bc41a8ddf51988ed31f6bd1cb42af88d8b12eb1c49814d648f612b"
+    },
+    {
+      "activity_coverage_pct": 31.719936571131644,
+      "activity_interval_gaps_ms": 128.01854560742186,
+      "annotation_ms": 187.490373,
+      "batch": 32,
+      "gptq_kernel_calls_by_symbol": {
+        "void sglang::gptq::reconstruct_gptq_kernel<sglang::gptq::MatrixView_q4_row, 4>": 88,
+        "volta_h884gemm_128x64_ldg8_nn": 44,
+        "volta_h884gemm_256x64_ldg8_nn": 44
+      },
+      "gpu_activity_union_ms": 59.47182739257813,
+      "owner_calls": {
+        "Attention": 176,
+        "GPTQ gate_up/down": 176,
+        "Mamba": 88,
+        "Norm/elementwise": 754,
+        "UNKNOWN": 51,
+        "memcpy/memset": 88,
+        "nonquant GEMM/CUTLASS": 220
+      },
+      "owner_exclusive_ms": {
+        "Attention": 2.601588623046875,
+        "GPTQ gate_up/down": 30.48174560546875,
+        "Mamba": 12.986455322265625,
+        "Norm/elementwise": 2.4035771484375,
+        "UNKNOWN": 2.70927099609375,
+        "memcpy/memset": 0.12303955078125,
+        "nonquant GEMM/CUTLASS": 8.166150146484375
+      },
+      "owner_interval_union_ms": {
+        "Attention": 2.601588623046875,
+        "GPTQ gate_up/down": 30.48174560546875,
+        "Mamba": 12.986455322265625,
+        "Norm/elementwise": 2.4035771484375,
+        "UNKNOWN": 2.70927099609375,
+        "memcpy/memset": 0.12303955078125,
+        "nonquant GEMM/CUTLASS": 8.166150146484375
+      },
+      "owner_kernel_duration_sum_ms": {
+        "Attention": 2.601587999999997,
+        "GPTQ gate_up/down": 30.481745000000004,
+        "Mamba": 12.986454999999998,
+        "Norm/elementwise": 2.4035720000000036,
+        "UNKNOWN": 2.70927,
+        "memcpy/memset": 0.12304000000000005,
+        "nonquant GEMM/CUTLASS": 8.166151
+      },
+      "trace_sha256": "00941b756c24832fb8c1bdda28a46b4752c82564c35910b6bd41d62b3c0e4b87"
+    }
+  ],
+  "existing_graph_node_b4": {
+    "activity_coverage_pct": 84.75368907717613,
+    "activity_interval_gaps_ms": 6.238024607421874,
+    "annotation_ms": 40.914977,
+    "batch": 4,
+    "gptq_kernel_calls_by_symbol": {
+      "sglang::gptq::gemm_half_q_half_alt_4bit_kernel": 88
+    },
+    "gpu_activity_union_ms": 34.67695239257812,
+    "owner_calls": {
+      "Attention": 176,
+      "GPTQ gate_up/down": 88,
+      "Mamba": 88,
+      "Norm/elementwise": 756,
+      "UNKNOWN": 51,
+      "lm_head FP32 GEMV": 1,
+      "memcpy/memset": 134,
+      "nonquant GEMM/CUTLASS": 352
+    },
+    "owner_exclusive_ms": {
+      "Attention": 1.9653349609375,
+      "GPTQ gate_up/down": 18.536093994140625,
+      "Mamba": 1.79707958984375,
+      "Norm/elementwise": 2.79258056640625,
+      "UNKNOWN": 0.27721435546875,
+      "lm_head FP32 GEMV": 1.902613037109375,
+      "memcpy/memset": 0.271334228515625,
+      "nonquant GEMM/CUTLASS": 7.13470166015625
+    },
+    "owner_interval_union_ms": {
+      "Attention": 1.9653349609375,
+      "GPTQ gate_up/down": 18.536093994140625,
+      "Mamba": 1.79707958984375,
+      "Norm/elementwise": 2.79258056640625,
+      "UNKNOWN": 0.27721435546875,
+      "lm_head FP32 GEMV": 1.902613037109375,
+      "memcpy/memset": 0.271334228515625,
+      "nonquant GEMM/CUTLASS": 7.13470166015625
+    },
+    "owner_kernel_duration_sum_ms": {
+      "Attention": 1.9653340000000017,
+      "GPTQ gate_up/down": 18.536094000000002,
+      "Mamba": 1.7970800000000007,
+      "Norm/elementwise": 2.7925689999999967,
+      "UNKNOWN": 0.27721400000000007,
+      "lm_head FP32 GEMV": 1.902613,
+      "memcpy/memset": 0.27133199999999996,
+      "nonquant GEMM/CUTLASS": 7.134706000000006
+    },
+    "trace_sha256": "a586c19868f1cf45258e1e1b6954e69492256624cf2200ce0937cb5dd1d48313"
+  },
+  "graph_cuda_events": [
+    {
+      "across_repeat_mad_ms": 0.0010242462158203125,
+      "batch": 1,
+      "pooled_median_ms": 28.31923198699951,
+      "repeats": [
+        {
+          "gpu_tok_s": 35.31041498230348,
+          "graph_key": 1,
+          "log_sha256": "afc7d36ec72ac834588fac80bb83b11348a3be3d4318995559de67c1af6f8301",
+          "mad_ms": 0.015359878540039062,
+          "max_ms": 28.36787223815918,
+          "median_ms": 28.320256233215332,
+          "min_ms": 27.843584060668945,
+          "p90_ms": 28.33919906616211,
+          "repeat": 1,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 35.311692084695984,
+          "graph_key": 1,
+          "log_sha256": "dee5331fae864ab1eced78873505f1fa78fb538e3d6699b06b0d3126b15bf5ce",
+          "mad_ms": 0.02355194091796875,
+          "max_ms": 28.829696655273438,
+          "median_ms": 28.31923198699951,
+          "min_ms": 28.294143676757812,
+          "p90_ms": 28.784639358520508,
+          "repeat": 2,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 35.33405038678124,
+          "graph_key": 1,
+          "log_sha256": "0fe8ef6072ed0a439c127db922b15a075e3052b6e8cb6f724333728641c8c4e2",
+          "mad_ms": 0.01587200164794922,
+          "max_ms": 28.370943069458008,
+          "median_ms": 28.30131244659424,
+          "min_ms": 27.859968185424805,
+          "p90_ms": 28.320768356323242,
+          "repeat": 3,
+          "steady_events_n": 8
+        }
+      ]
+    },
+    {
+      "across_repeat_mad_ms": 0.008192062377929688,
+      "batch": 2,
+      "pooled_median_ms": 31.52076816558838,
+      "repeats": [
+        {
+          "gpu_tok_s": 63.45023032095472,
+          "graph_key": 2,
+          "log_sha256": "1116df44ca41a57edd8d2422002b08f3328311b2e110053d6d450473c790032d",
+          "mad_ms": 0.03430461883544744,
+          "max_ms": 31.67334365844727,
+          "median_ms": 31.52076816558838,
+          "min_ms": 31.461376190185547,
+          "p90_ms": 31.651840209960938,
+          "repeat": 1,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 63.35144231595602,
+          "graph_key": 2,
+          "log_sha256": "64bc1e07fa94f2e987c5af3a0fbc618f2cbb1de8d3ed455c75b4c9b8f06882e6",
+          "mad_ms": 0.08499145507812322,
+          "max_ms": 31.745023727416992,
+          "median_ms": 31.569920539855957,
+          "min_ms": 30.937088012695312,
+          "p90_ms": 31.696895599365234,
+          "repeat": 2,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 63.46672494973343,
+          "graph_key": 2,
+          "log_sha256": "f84bf78cf9d351470c3a35f78cc3fbe4cbab733763fcac28589a5df64bffd49a",
+          "mad_ms": 0.2027521133422816,
+          "max_ms": 31.823871612548828,
+          "median_ms": 31.51257610321045,
+          "min_ms": 30.921728134155273,
+          "p90_ms": 31.787008285522457,
+          "repeat": 3,
+          "steady_events_n": 8
+        }
+      ]
+    },
+    {
+      "across_repeat_mad_ms": 0.0030727386474609375,
+      "batch": 4,
+      "pooled_median_ms": 34.061824798583984,
+      "repeats": [
+        {
+          "gpu_tok_s": 117.44411518545388,
+          "graph_key": 4,
+          "log_sha256": "64769b158eb5f58aaf4a24a9608da802a300019d9cafad06f378cd9fbc8992cd",
+          "mad_ms": 0.21555137634277344,
+          "max_ms": 34.665470123291016,
+          "median_ms": 34.05875205993652,
+          "min_ms": 33.5359992980957,
+          "p90_ms": 34.4719352722168,
+          "repeat": 1,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 117.43352047792484,
+          "graph_key": 4,
+          "log_sha256": "b4400c1851768f984eb2c6cfe482829030318fe3b421526d09896a039f92c17a",
+          "mad_ms": 0.5391349792480469,
+          "max_ms": 34.77299118041992,
+          "median_ms": 34.061824798583984,
+          "min_ms": 33.44076919555664,
+          "p90_ms": 34.66854476928711,
+          "repeat": 2,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 116.34747125421585,
+          "graph_key": 4,
+          "log_sha256": "a223b0588ed439d3107b69745aad72faf87642411feeee80b9ab5f2aeb7d5820",
+          "mad_ms": 0.5022716522216797,
+          "max_ms": 34.897918701171875,
+          "median_ms": 34.37977600097656,
+          "min_ms": 33.379329681396484,
+          "p90_ms": 34.8856315612793,
+          "repeat": 3,
+          "steady_events_n": 8
+        }
+      ]
+    },
+    {
+      "across_repeat_mad_ms": 0.035839080810546875,
+      "batch": 8,
+      "pooled_median_ms": 39.95596885681152,
+      "repeats": [
+        {
+          "gpu_tok_s": 200.0409687023438,
+          "graph_key": 8,
+          "log_sha256": "15fe1468464a9584d223a6e608aacc9a54d492115c2410e291a0e2530bdab40d",
+          "mad_ms": 0.2263031005859375,
+          "max_ms": 41.14227294921875,
+          "median_ms": 39.99180793762207,
+          "min_ms": 39.07788848876953,
+          "p90_ms": 40.08755111694336,
+          "repeat": 1,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 201.2467566066671,
+          "graph_key": 8,
+          "log_sha256": "0983b70a631308857d80e5d1aabcd99d89a4a15fee19844f872386c166e4b97a",
+          "mad_ms": 0.6517772674560547,
+          "max_ms": 41.06854248046875,
+          "median_ms": 39.752193450927734,
+          "min_ms": 39.09836959838867,
+          "p90_ms": 40.992767333984375,
+          "repeat": 2,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 200.2203983256983,
+          "graph_key": 8,
+          "log_sha256": "0e3458b6cdb183bd071bcebaeb725c7601ecf548329eb51159f94c4fdd7e2f49",
+          "mad_ms": 0.23654556274414062,
+          "max_ms": 40.9958381652832,
+          "median_ms": 39.95596885681152,
+          "min_ms": 39.08095932006836,
+          "p90_ms": 40.1448974609375,
+          "repeat": 3,
+          "steady_events_n": 8
+        }
+      ]
+    },
+    {
+      "across_repeat_mad_ms": 0.05171394348144531,
+      "batch": 16,
+      "pooled_median_ms": 52.268545150756836,
+      "repeats": [
+        {
+          "gpu_tok_s": 306.41461057810636,
+          "graph_key": 16,
+          "log_sha256": "c81cfacdb8356179ee514f1d09805aa22ff104fafffa8e2af68456203bce90f5",
+          "mad_ms": 0.8693752288818359,
+          "max_ms": 53.10566329956055,
+          "median_ms": 52.21683120727539,
+          "min_ms": 50.97062301635742,
+          "p90_ms": 53.08723068237305,
+          "repeat": 1,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 306.1114472165163,
+          "graph_key": 16,
+          "log_sha256": "559bb7739eb6a6c0144304efdb3b41e6832f1513ad15ce7e90728ea3e5c4fb78",
+          "mad_ms": 0.1663990020751953,
+          "max_ms": 52.92646408081055,
+          "median_ms": 52.268545150756836,
+          "min_ms": 50.921470642089844,
+          "p90_ms": 52.43904113769531,
+          "repeat": 2,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 305.7939339590573,
+          "graph_key": 16,
+          "log_sha256": "61c99b39c6e459557d3440aa5804d9a371e539ea4ed6f66a1593aa76cc17603c",
+          "mad_ms": 0.16486358642578125,
+          "max_ms": 52.89369583129883,
+          "median_ms": 52.32281684875488,
+          "min_ms": 50.95935821533203,
+          "p90_ms": 52.510719299316406,
+          "repeat": 3,
+          "steady_events_n": 8
+        }
+      ]
+    },
+    {
+      "across_repeat_mad_ms": 0.0,
+      "batch": 32,
+      "pooled_median_ms": 60.09036827087402,
+      "repeats": [
+        {
+          "gpu_tok_s": 532.4223993315879,
+          "graph_key": 32,
+          "log_sha256": "957c2b95c6a21f3cbcfb6e878a5c671ee4630ff7ff2699ddbb75660c842cc568",
+          "mad_ms": 0.0563201904296875,
+          "max_ms": 60.821502685546875,
+          "median_ms": 60.1026554107666,
+          "min_ms": 60.040191650390625,
+          "p90_ms": 60.307456970214844,
+          "repeat": 1,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 532.5312678356556,
+          "graph_key": 32,
+          "log_sha256": "ca3b43a0fc5c511487ac7a7dc600effab047fc4e333216e792e2295ef182f259",
+          "mad_ms": 0.05068778991699219,
+          "max_ms": 60.291072845458984,
+          "median_ms": 60.09036827087402,
+          "min_ms": 60.01356887817383,
+          "p90_ms": 60.28492736816406,
+          "repeat": 2,
+          "steady_events_n": 8
+        },
+        {
+          "gpu_tok_s": 532.5312678356556,
+          "graph_key": 32,
+          "log_sha256": "41b32516199666d62e7b0a97c688a3c7eb406422702f7ed25fa6ac4854fb3d43",
+          "mad_ms": 0.016897201538085938,
+          "max_ms": 60.1446418762207,
+          "median_ms": 60.09036827087402,
+          "min_ms": 60.06681442260742,
+          "p90_ms": 60.12313461303711,
+          "repeat": 3,
+          "steady_events_n": 8
+        }
+      ]
+    }
+  ],
+  "interpretation": "kineto GPU interval scope only; annotation duration is not production Graph Event latency; kernel sums are not additive wall time",
+  "schema": "E037-offline-attribution-v1"
+}
