@@ -1,0 +1,19 @@
+# G023 plan
+
+Status: BLOCKED — explicit `extra_buffer` enables real 768-token hits while leaving overlap disabled flag false, but same-prompt cache-hit output differs from identical-config server-side force-miss at output token 0/1. A single chunk=768 diagnostic did not resolve it; chunk partition also changed one force-miss branch output at token 24. No performance matrix until correctness and state boundary are explained/fixed.
+
+## Established
+- Current main baseline at task start: `3b4393c63d943cf890beba38ac9d7c7bfde47d24`, equal to origin/main.
+- Previous G022 E035 FP64 production REJECTED; no reopen. Existing worktree has an unrelated unowned dirty packed-word file; preserve it. G022 remains active for its separate GPU decode/prefill objectives; this G023 cache work does not satisfy or supersede those goals.
+- `FalconH1Config.full_attention_layer_ids` and `.linear_layer_ids` both cover all layers; `mamba2_cache_params` constructs Mamba2 state shape/config.
+- `kv_cache_builder.py` detects hybrid SSM from model runner config and creates HybridReqToTokenPool. `registry.py` selects MambaRadixCache for hybrid SSM, unless radix disabled.
+- `server_args._handle_mamba_radix_cache` is called for FalconH1. Default mamba scheduler `auto` resolves to `no_buffer`; with no-buffer and radix enabled, overlap scheduling is disabled, page size is constrained to 1. Explicit `extra_buffer` is available for supported CUDA models and uses stream-deferred COW plus ping-pong checkpoint slots. Falcon Mamba2 track interval defaults to 256; model `mamba_chunk_size=256`, conv kernel=4. Extra-buffer Mamba2 backend asserts track interval >= Mamba chunk size. Need test all boundary cases and safe mode.
+- **Adoption constraint:** no-buffer radix mode explicitly disables overlap on non-speculative Falcon and is excluded from final ON comparisons. CPU `ServerArgs` construction with `extra_buffer`, radix ON, requested overlap ON, page 1 and graph keys [1,2,4] resulted in `disable_overlap_schedule=False`, `disable_radix_cache=False`, track interval=256 and chunk=256. This is a candidate legal config; service still must prove actual scheduler operation/throughput.
+- MambaRadixCache caches KV plus a cloned/donated Mamba slot. MambaPool state shape includes conv `[conv_dim, conv_kernel-1]` and temporal SSM `[heads, head_dim, state_size]`, per Mamba layer. Extend checkpoint code gathers conv windows and selects aligned/intermediate SSM state; decode tracker copies conv+temporal. Match computes branch boundary, COW deferred via `mamba_cow_src_index` into a newly allocated request slot; HybridLinearAttnBackend performs copy on the forward stream. Source evidence is plausible but no exact GPU byte-equality or execution proof yet.
+
+## Decision frontier
+1. Locate first divergent logit/token boundary for exact same prompt: cache input prefill chunk boundaries, 768 Mamba checkpoint source/destination, conv/SSM snapshot, Attention KV match and deferred COW stream order. Keep force-miss and hit raw immutable. The one predicted chunk768 diagnostic already failed to resolve output parity; do not repeat without a specific source-backed predicted fix.
+2. No fixed performance matrix until same-input cache hit matches force-miss for per-request logits and 256 greedy IDs, and actual scheduler capability remains intact. If architecture's native chunk/checkpoint semantics make these conditions incompatible, record bounded NO-GO; do not change arithmetic, precision or scheduler defaults to mask.
+3. Cache service, c57 extension/baseline unchanged; clean experiment service is stopped. All GPU actions already complete are limited to this diagnosis; no more performance/cache sweeps until correctness is explained.
+
+Evidence/report: `experiments/E036-g023-falcon-l1-cache/` (created; investigation and outcomes recorded in experiment/results); task/control files updated in same transitions.

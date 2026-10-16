@@ -1,0 +1,74 @@
+{
+  "model_revision": "52036ae497a2c0c253e17f98cc8652f2f7082ae3",
+  "model_config_sha256": "ca8c91f8a18a4917f9580ce1cbcb015a6f7cee2b24022cf6c3e8c94d6943a7f7",
+  "compute_binary_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+  "service_mode": "MambaRadixCache; mamba_scheduler_strategy=extra_buffer; mamba_track_interval=256; page_size=1; exact c57; GPU eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "raw": {
+    "cache-state-correctness-first.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-correctness-first.json",
+      "sha256": "5b38954c6eef42d0696770d40859696f257fd61b9a37337c931481fd3a9a94d0"
+    },
+    "cache-state-correctness-forcemiss.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-correctness-forcemiss.json",
+      "sha256": "b5258030773d41b171748db51679d96bd87e199f3d43a97ed472f4bbff38b101"
+    },
+    "cache-state-correctness-hit.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-correctness-hit.json",
+      "sha256": "28d5a32361e501aa8227efee7147af90daf7f46dfb55e4d913264cac080eadc3"
+    },
+    "cache-state-correctness-server-forcemiss.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-correctness-server-forcemiss.json",
+      "sha256": "1e1de1b9c009964f9f3faccb47ebd8a941ddbd59695a6fff2fa349ba4e52496a"
+    },
+    "cache-state-serial-hit.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-serial-hit.json",
+      "sha256": "5d14c5deafd8eb2e136823181e0af10e696acb9713cbe3597ea3763228243e8d"
+    },
+    "cache-state-serial-forcemiss.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-serial-forcemiss.json",
+      "sha256": "42b0fe5c6ef2ecb5e70841a045178c831561f08872ede967beb090fb037c03c2"
+    },
+    "cache-state-serial-hit2.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-serial-hit2.json",
+      "sha256": "5443b5b832a032f5e757ce88a229bd200a6fb7ae6ab85edf15307ba95d0e32c0"
+    },
+    "cache-state-serial-chunk768-hit.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-serial-chunk768-hit.json",
+      "sha256": "269a2093ce3b9fa13a0245224b45ac64bda1aeaefa4b009e1077f97d607faa1e"
+    },
+    "cache-state-serial-chunk768-hit2.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-serial-chunk768-hit2.json",
+      "sha256": "70cc1b984091fa9cf7613821da388ee50664257adc8287e5045e604b3f9d0e2a"
+    },
+    "cache-state-serial-chunk768-forcemiss.json": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/experiments/E036/cache-state-serial-chunk768-forcemiss.json",
+      "sha256": "36d00e11ff6571f2c68536cecaeaa13d939317b23675ebdcb6f77c38856960c0"
+    }
+  },
+  "logs": {
+    "g023-c57-extra-buffer-server2.log": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g023-c57-extra-buffer-server2.log",
+      "sha256": "e67a39521bed81af9f8b8441ec10a83dbb9d20db9f664661ee0cacde96ed2596"
+    },
+    "g023-c57-extra-buffer-force-miss-server.log": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g023-c57-extra-buffer-force-miss-server.log",
+      "sha256": "2fee8bf262c9b9b4d9d54a221f15508382b3925ce1e8e0dac0ec9c32fec13769"
+    },
+    "g023-c57-extra-buffer-server3.log": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g023-c57-extra-buffer-server3.log",
+      "sha256": "a4759c6b91b43e46def3b7fcd9967442a487a775cf382ff22779b9b3f345a1a8"
+    },
+    "g023-c57-extra-buffer-chunk768-v2.log": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g023-c57-extra-buffer-chunk768-v2.log",
+      "sha256": "d8ede3c90d1a8bbcbbf78496f0bd0266d4246f7480bd526b6e89925986880ea8"
+    },
+    "g023-c57-extra-buffer-chunk768-forcemiss.log": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g023-c57-extra-buffer-chunk768-forcemiss.log",
+      "sha256": "7ff7e01ef5d80ef9c3270bf571220ade4d14ce87f445d27533f0269364f64313"
+    },
+    "g023-c57-extra-buffer-chunk768-hit2.log": {
+      "path": "/mnt/data/pc01/sglang-v100-migration/logs/g023-c57-extra-buffer-chunk768-hit2.log",
+      "sha256": "9a7e8526da7147e02d297a1f924284878ba9ca629f54a7f79075825b57c9c09b"
+    }
+  }
+}
