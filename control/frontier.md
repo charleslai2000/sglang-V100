@@ -1,8 +1,8 @@
 # Current frontier
 
 ## G022-falcon-v100-c4-performance
-- T003 — short-context batch scaling diagnosis — BLOCKED
-  - frontier: No GPU workload admitted: 16GiB host with required ≥8GiB MemAvailable cannot fit 7.29GiB weights plus independent Mamba state and runtime/KV overhead. Await authorized larger-memory host or Owner-approved change to reserve.
+- T003 — short-context batch scaling diagnosis — ACTIVE
+  - frontier: Owner withdrew invalid host-RAM/GPU-VRAM conflation in 181d88a; preserve that history and proceed with host ≥8GiB MemAvailable independently of measured V100 NVML/CUDA allocation.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T003-short-context-batch-scaling-diagnosis.md`
   - unblock/reopen: Target V100 UUID only, MemAvailable >=8 GiB, independent Mamba state per request, preserve all existing dirty files and E035 dispositions. Cache remains paused.
 
