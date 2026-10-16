@@ -1,8 +1,8 @@
 # Current frontier
 
 ## G022-falcon-v100-c4-performance
-- T003 — short-context batch scaling diagnosis — ACTIVE
-  - frontier: Begin with current identity/dirty audit, exact S1/c57 dispatch source and safe Mamba/KV/Graph memory accounting; then isolate actual b1/2/4/8/16/32 real-prefill Decode cells and reuse G022 CUPTI replay.
+- T003 — short-context batch scaling diagnosis — BLOCKED
+  - frontier: No GPU workload admitted: 16GiB host with required ≥8GiB MemAvailable cannot fit 7.29GiB weights plus independent Mamba state and runtime/KV overhead. Await authorized larger-memory host or Owner-approved change to reserve.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T003-short-context-batch-scaling-diagnosis.md`
   - unblock/reopen: Target V100 UUID only, MemAvailable >=8 GiB, independent Mamba state per request, preserve all existing dirty files and E035 dispositions. Cache remains paused.
 
