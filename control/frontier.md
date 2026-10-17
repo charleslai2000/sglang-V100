@@ -7,10 +7,10 @@
   - unblock/reopen: Source-backed explanation/fix then ordinary requests prove KV+conv/temporal same boundary, COW/stream ownership and same-input logits/256 IDs match force-miss while scheduler capability remains. Chunk-boundary hypothesis already tested once; no repeated sweeps absent new predicted fix. Preserve raw/dirty file; target V100 and >=8GiB. E035 stays closed.
 
 ## G022-falcon-v100-c4-performance
-- T002 — evidence-driven optimization loop — READY
-  - frontier: Resume only within existing T002 authority; T004–T008 are closed, with E042 bounded prefetch architecture NO-GO. No new GPTQ design without explicit authorization.
-  - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
-  - unblock/reopen: Existing T002 authorization; preserve S1/default/exact-c57, protected E035 dirty file and G023 ON_HOLD.
+- T009 — c57 Q4 vector-load optimization — ACTIVE
+  - frontier: Bind exact-c57 binary to source/build identity; establish real load widths/alignment and inspect existing SASS before any candidate edit or timing.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T009-c57-q4-vector-loads.md`
+  - unblock/reopen: Explicit T009 authorization; V100-only, MemAvailable>=8GiB; preserve exact-c57/S1/default, protected E035 file and G023 ON_HOLD.
 
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
