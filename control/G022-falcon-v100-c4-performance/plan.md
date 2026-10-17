@@ -12,7 +12,11 @@ One conditional future architecture is recorded at `experiments/E037-g022-short-
 
 ## T004 — isolated act-order group-major SIMT candidate PERFORMANCE-NO-GO
 
-`experiments/E038-g022-sm70-gptq-simt/results.md` records all evidence. CPU layout/oracle passed six real L0/L22/L43 fixtures; isolated CUDA extension passed 24 fixture×M eager/Graph strict checks and L43/down M4×4 stress, but complete Linear A/B (three cyclic pairs, exact L43 M4 gate_up/down, including runtime activation gather/reduction/cast) was decisively slower: 2.7–3.25× versus exact S1 and 3.5–3.84× versus exact-c57. No NCU/model/service stage followed. S1/default, c57 and production dispatch unchanged; no ACCEPTED result. T004 done; no further tuning under this scope.
+`experiments/E038-g022-sm70-gptq-simt/results.md` records all evidence. CPU layout/oracle passed six real L0/L22/L43 fixtures; isolated CUDA extension passed 24 fixture×M eager/Graph strict checks and L43/down M4×4 stress, but complete Linear A/B (three cyclic pairs, exact L43 M4 gate_up/down, including runtime activation gather/reduction but omitting candidate FP16 cast) was decisively slower: 2.7–3.25× versus exact S1 and 3.5–3.84× versus exact-c57. No NCU/model/service stage followed. S1/default, c57 and production dispatch unchanged; no ACCEPTED result. T004 done; no further tuning under this scope.
+
+## T005 — c57-preserving group-major metadata reuse PERFORMANCE-NO-GO
+
+User-authorized E039 implementation preserves exact-c57 N-contiguous `[K/8,N]` layout, 32-thread/4-N-per-thread CTA and 128-K split geometry; exact c57 SASS verified per-K gidx/qzero/scale global loads remain. E038 record errors were corrected without rerunning raw: its candidate latency closure omitted FP16 cast; c57 reducer is ascending sequential FP32 sum, not Kahan. Final isolated E039 binary passed six-fixture×M1–4 plus L43/down M4×4 strict oracle/Graph/cast/repeat checks, but required FP32 product residual and compensated partial summation. Three alternating full Linear/Graph pairs per cell show M4 E039 slowdown: 1.76× gate_up and 1.78× down Graph, before one-time prepack. **PERFORMANCE-NO-GO** at the operator gate. No NCU/model/service work followed. S1/default/exact-c57 and production dispatch unchanged; no Owner ACCEPTED. Full binary/raw hashes and limitations in `experiments/E039-g022-c57-group-major-metadata/results.md`.
 
 ## Established inputs
 

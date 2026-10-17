@@ -8,9 +8,9 @@
 
 ## G022-falcon-v100-c4-performance
 - T002 — continue G022 completion qualification — READY
-  - frontier: T004 group-major SIMT candidate is PERFORMANCE-NO-GO; identify the next owner within the existing G022 scope, reusing existing evidence, before proposing any new implementation.
+  - frontier: T005 group-major candidate is PERFORMANCE-NO-GO at complete-Linear gate; identify next evidence-backed owner within G022 before any new implementation.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
-  - unblock/reopen: No implementation authorization implied; preserve S1/c57/default, G023 ON_HOLD, and unowned E035 file. Any materially new design requires explicit user authorization.
+  - unblock/reopen: No new implementation authorization implied. Preserve S1/default/c57, G023 ON_HOLD and unowned E035 file; target-only V100 and host MemAvailable≥8GiB.
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
   - frontier: Keep the frozen V1 contract open: cache restore, safe higher concurrency/P99 dispositions, remaining owner/3090 comparability and full-Graph aggregate remain unresolved. Do not re-open bounded FPM qualification.
