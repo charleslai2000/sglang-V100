@@ -7,10 +7,10 @@
   - unblock/reopen: Source-backed explanation/fix then ordinary requests prove KV+conv/temporal same boundary, COW/stream ownership and same-input logits/256 IDs match force-miss while scheduler capability remains. Chunk-boundary hypothesis already tested once; no repeated sweeps absent new predicted fix. Preserve raw/dirty file; target V100 and >=8GiB. E035 stays closed.
 
 ## G022-falcon-v100-c4-performance
-- T002 — continue G022 completion qualification — READY
-  - frontier: T005 group-major candidate is PERFORMANCE-NO-GO at complete-Linear gate; identify next evidence-backed owner within G022 before any new implementation.
+- T002 — evidence-driven low-batch optimization — READY
+  - frontier: Resume the independent T002 c4 Decode/Prefill/cache frontier; no continuation of T006 warp-sliced candidate.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T002-evidence-driven-low-batch-optimization.md`
-  - unblock/reopen: No new implementation authorization implied. Preserve S1/default/c57, G023 ON_HOLD and unowned E035 file; target-only V100 and host MemAvailable≥8GiB.
+  - unblock/reopen: T006 closed PERFORMANCE-NO-GO; any materially different GPTQ architecture requires new explicit authorization. Preserve S1/default/c57, E035 unowned dirty file and G023 ON_HOLD; target only authorized V100.
 ## G021-v100-hardware-utilization
 - T001 R17 Inference Performance Metrics V1 — ACTIVE
   - frontier: Keep the frozen V1 contract open: cache restore, safe higher concurrency/P99 dispositions, remaining owner/3090 comparability and full-Graph aggregate remain unresolved. Do not re-open bounded FPM qualification.
