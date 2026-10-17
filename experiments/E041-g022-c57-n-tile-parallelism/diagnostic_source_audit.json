@@ -1,0 +1,8 @@
+{
+  "status": "superseded diagnostic finding; source-level audit pending exact-c57 pre-cast check",
+  "initial_reported_strict_bad": 19295,
+  "initial_error": "test_ntile.py set candidate fn to the native FP16-returning NTile op, then treated that already-rounded half tensor as if it were pre-cast FP32. dtype was torch.float16; y.half().float()==y for all elements; oracle was FP64 mathematical.",
+  "original_native_c57_comparison": "The script also used the native FP16 c57 output for strict_vs_c57, not a pre-cast reference. That check is not independent oracle evidence.",
+  "corrected_diagnostic": "Candidate has explicit *_fp32 binding returning FP32 reducer output; the FP16 binding used only for complete-Linear timing. Same partial kernel/arithmetic and build flags; final source/build SHA recorded in results.",
+  "corrected_l43_gate_up_m1": {"strict_bad": 0, "elements": 24576, "max_abs": 0.000030517578125, "max_error_over_tolerance": 0.05908729508519173, "fp16_roundtrip_equal_elements": 11, "repeat_equal": true, "graph_equal": true}
+}

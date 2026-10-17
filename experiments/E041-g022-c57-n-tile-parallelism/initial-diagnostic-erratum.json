@@ -1,0 +1,18 @@
+{
+  "status": "SUPERSEDED_INVALID_AS_PRECAST_NUMERICAL_EVIDENCE",
+  "initial_source_sha256": "4ebeb76448fb413df386b2da3c25752e39b1d06a9f4165895f47a0fe83f8beb1",
+  "initial_binary_sha256": "32e891cda96fe7cd1342ca3b375747497c44ada185f41a149f30be119099a13a",
+  "arm": "ntile128 / ntile64 / ntile32",
+  "fixture": "43-mlp-gate_up_proj-call0000",
+  "M": 1,
+  "initial_reported_strict_bad": 19295,
+  "initial_reported_max_abs": 0.03104400634765625,
+  "initial_reported_max_error_over_tolerance": 9.149948120117188,
+  "root_cause": "The original test harness invoked the FP16-returning operator, then passed its already-rounded torch.float16 output to the frozen pre-cast FP32 oracle. The output equaled y.half().float() elementwise. The failure count therefore cannot evidence FP32 arithmetic error.",
+  "preserved_initial_output_sha256": "cb171535a16de53c447063d2013c29e343a6a12deee1423273455c7543c66e55",
+  "corrected_fp32_output_sha256": "4a9aa1f650d445eee965041f9c02d792fbee782fa624157954f0717e343761c6",
+  "corrected_fp32_strict_bad": 0,
+  "corrected_fp32_max_abs": 0.000030517578125,
+  "corrected_fp32_max_error_over_tolerance": 0.05908729508519173,
+  "limitations": "Original full subprocess JSON stdout was not retained as a standalone artifact before correction. This erratum preserves the recorded initial metrics and output hash without fabricating omitted fields. Corrected result comes from the explicitly typed FP32 API and independent mathematical oracle."
+}
