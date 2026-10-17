@@ -1,0 +1,25 @@
+# E038 results — isolated SM70 act-order/group-major SIMT experiment
+
+## OBSERVED
+- Repository base `2c9a5dfd8e04b638466de24f1029bcb54170ded7`, branch `main`. No production dispatch, S1 default or c57 binary was changed. Pre-existing unowned E035 dirty CUDA file was not edited or staged.
+- Active S1 SM70 `common_ops.abi3.so` SHA `fea05241f2d588bf5a54f03a898360a49fbe0f256e25f59abbd9fd10b9257842`; exact-c57 SHA `c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9`. Falcon SM70 sets `use_shuffle=False`, so actual S1 does not loader-sort/repack activation-order g_idx. Existing alt4 already reuses M rows in a CTA and packed Q4 lookup, but uses FP16 math/partial atomic merge; c57 uses FP32 128-K partials and deterministic ascending-partition Kahan reducer.
+- CPU-only `reference_group_major.py` verifies all six real L0/L22/L43 gate_up/down fixtures: exact packed-Q4 codes, stable 128-K group membership, consistent activation permutation, qzero+1 and original group scales; independent FP64 output equals original-layout FP64 bit-for-bit (max abs diff 0 for every fixture). Raw `/mnt/data/pc01/sglang-v100-migration/experiments/E037/e038-cpu-reference-sixfixtures.json`, SHA256 `27e37312ab9883153c00472e3d21c29867bbf68abf7d0e9b4ea50e261be165d6`.
+- Compiled isolated SM70 extension with PyTorch 2.9.1+cu128 / CUDA 12.8; source SHA `204c0537896b4fa49a6f31848e26ee3890aa0a421d7cea9bf8655559d3a038e4`; binary `/mnt/data/pc01/sglang-v100-migration/experiments/E038/build/e038_group_major_simt.so`, SHA256 `98842caab1ca09db1843d9d00a372a17589ebadab6ca7e38457bf18ea60b8fcb`. Both block barriers are unconditional. Candidate uses a four-K-warp/32-N-lane SIMT tile, four deterministic group-range partial planes and ascending-plane FP32 final reduction. It remains isolated, non-production code.
+- Target UUID-locked six-fixture × M1/2/3/4 matrix: eager and captured Graph FP32 oracle strict_bad=0 for every cell; repeat, independent scratch, graph/eager, cast checks passed. L43/down M4×4 strict stress bad=0. Maximum observed eager tolerance ratio 0.1353. Raw `/mnt/data/pc01/sglang-v100-migration/experiments/E037/e038-gpu-strict-results.jsonl`, SHA256 `7961ac064af5e70b42f0dd2297e95a9ba56decae3dd8aaee474cb81571be93a1`. The file has 25 rows because the stress cell was recorded twice; all 24 matrix cells plus both stress runs pass. Early kernel-only timings in these rows exclude activation gather and are not performance evidence.
+- **Complete Linear performance gate, three cyclic fresh-process triads**, L43 M4 real gate_up/down, 50 CUDA event samples per arm per pair. Candidate timing includes per-call activation gather, candidate kernel, deterministic reduction and output cast; one-time loader repack is excluded (thus favorable to candidate). Baselines are exact S1 and c57 binaries, no approximate identity.
+  - Gate_up (µs): E038 892.928 / 846.848 / 827.392; S1 274.432 / 286.720 / 288.768; c57 241.664 / 240.640 / 230.400. Median E038 slowdown: 2.95× S1 and 3.59× c57.
+  - Down (µs): E038 556.032 / 561.152 / 558.080; S1 185.344 / 184.320 / 206.848; c57 145.408 / 149.504 / 145.408. Median E038 slowdown: 3.00× S1 and 3.82× c57.
+  - Raw `/mnt/data/pc01/sglang-v100-migration/experiments/E037/e038-operator-full-ab.jsonl`, SHA256 `ba40a33ca1ca16671f76bf70951b74694c959f311951efc7e70246721de9051a`. Exact baseline SHAs embedded in rows: S1 `fea05241…7842`, c57 `c57e50dc…acb9`; candidate `98842caa…b8fcb`.
+- Resource gates satisfied throughout; final V100 idle at 7 MiB, host MemAvailable ~16 GiB. RTX2060 not targeted.
+
+## INFERRED
+- CPU layout equivalence and strict GPU oracle prove the proposed group-major transform is numerically sound for the tested six fixtures and explicit L43/down ×4 input. This does not establish full-checkpoint loader coverage or model lifecycle/state qualification.
+- The prototype serially loops groups within each of four group partitions (6 groups/CTA for gate_up, 24 for down) and uses scalar Q4 extraction. This is consistent with its observed poor result and does not justify tuning or sweeping the same design.
+
+## UNRESOLVED / NOT RUN BY DESIGN
+- No NCU/SASS, model dispatch/Graph1/2/4 service, Prefill/Decode, state isolation, service TPS, or loader high-water qualification after decisive performance NO-GO.
+- Fixed checkpoint loader repack allocation and host/device memory peak were not measured. This omitted cost cannot rescue the several-fold per-call regression.
+- No production modification, default change, or ACCEPTED claim. This task is completed as a bounded experimental PERFORMANCE-NO-GO only.
+
+## Bounded answer
+**PERFORMANCE-NO-GO.** Strict numerical checks passed for the six tested fixture families and the specified L43/down M4×4 input, but three cyclic complete-Linear comparisons were 2.7–3.25× slower than exact S1 and 3.5–3.84× slower than exact-c57, even before loader prepack cost. The declared operator gate failed, so no NCU or model/service qualification followed. No production path/default changed.
