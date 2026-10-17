@@ -67,3 +67,8 @@ Raw `results/paired-linear.fd5b1132-fb5c-478e-b9af-19eccd229fbf.jsonl`, SHA256 `
 ## Closeout
 
 T010 is an evidence-backed **PERFORMANCE-NO-GO** for this QPN2-derived organization. Preserve all correctness/artifact evidence; do not claim owner acceptance. Update control and artifact hashes, commit/push only scoped T010 source/evidence/control while protecting E035 dirty source and unrelated workspace modifications, then verify origin/main SHA.
+
+
+## T011 multiwarp follow-on
+
+See `experiment-t011.md` for the authorized QPN2 SPLITK8/16/32 continuation. This is a distinct group128-aligned multiwarp CTA design, not a reopening of T010's serial single-warp result or E035. The 51-row strict correctness matrix is clean, and preliminary corrected-median M4 alternating graph comparisons on L43 gate_up/down are promising; owner-level performance disposition remains open because NCU hardware-counter access is blocked (`ERR_NVGPUCTRPERM`) and the requested alternative split/full component coverage and E044 timing-boundary errata comparison are incomplete. No model/service run or production opt-in has occurred.

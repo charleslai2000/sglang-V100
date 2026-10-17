@@ -1,5 +1,11 @@
 # Current frontier
 
+## G022-falcon-v100-c4-performance
+- T011 — QPN2 multiwarp group-aligned execution — ACTIVE
+  - frontier: Finish alternating complete-Linear split coverage and E044 timing-boundary errata; NCU hardware-counter access blocked by `ERR_NVGPUCTRPERM`, requiring an explicit evidence-limit disposition before performance decision.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T011-qpn2-multiwarp-group-reduction.md`
+  - unblock/reopen: User authorized continuous execution; target V100 only, host MemAvailable >=8GiB, preserve E035 and unowned dirty files, S1/default/exact-c57 unchanged; G023 ON_HOLD.
+
 ## G023-falcon-gpu-l1-prefix-cache
 - T001 — qualify Falcon GPU prefix reuse — BLOCKED
   - frontier: Actual `extra_buffer` radix hit reports 768 tokens; same-input cache hit differs from same-config force-miss at output token 0/1. One chunk=768 diagnostic did not fix it; changing no-cache chunk size also changes one branch at token24. Locate state boundary before any performance matrix.
