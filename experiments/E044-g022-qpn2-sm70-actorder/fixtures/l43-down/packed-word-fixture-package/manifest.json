@@ -1,0 +1,77 @@
+{
+  "prefix": "43.mlp.down_proj",
+  "call_index": 0,
+  "tensors": {
+    "x": {
+      "dtype": "torch.float16",
+      "shape": [
+        4,
+        12288
+      ],
+      "stride": [
+        12288,
+        1
+      ],
+      "sha256": "9420c07cfd4580fa9f8c11a79a105ecc51aeb698de7edca7f9d14365dca8fe45"
+    },
+    "qweight": {
+      "dtype": "torch.int32",
+      "shape": [
+        1536,
+        3072
+      ],
+      "stride": [
+        3072,
+        1
+      ],
+      "sha256": "ce831dc900296442a7124fa22e4a7fa6513603808fab2dcbf7cc0775b2c617ea"
+    },
+    "qzeros": {
+      "dtype": "torch.int32",
+      "shape": [
+        96,
+        384
+      ],
+      "stride": [
+        384,
+        1
+      ],
+      "sha256": "046483e4f97265dec7c5fc95ddea8e1c1cd358c6143f2c28edb2dc1ed2ec4926"
+    },
+    "scales": {
+      "dtype": "torch.float16",
+      "shape": [
+        96,
+        3072
+      ],
+      "stride": [
+        3072,
+        1
+      ],
+      "sha256": "6b17faac6346a88524beaff1c4f631cae524c3b2f2ab77317cdf9fc89886a64c"
+    },
+    "g_idx": {
+      "dtype": "torch.int32",
+      "shape": [
+        12288
+      ],
+      "stride": [
+        1
+      ],
+      "sha256": "e156c9e1bb57e8f4a165ec831ff2aa22e6db5eb9ea8ae6019fc53075471fba71"
+    }
+  },
+  "s1_output": {
+    "dtype": "torch.float16",
+    "shape": [
+      4,
+      3072
+    ],
+    "sha256": "8eed2bbe360da6f6ae219f17650d4363903a3b01ddca1ad053e377213e9d0d69"
+  },
+  "runtime": {
+    "source": "S1 disposable extraction 07343bd165",
+    "route": "use_shuffle=false original g_idx",
+    "capture": "immediately before and after production GPTQLinearKernel.apply GEMM; first M4 layer/projection encounter"
+  }
+}

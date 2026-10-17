@@ -1,0 +1,211 @@
+{
+  "fixture": "43.mlp.down_proj",
+  "manifest_sha256": "7c0057edb888d0b4c3730c717a6c3359ff48e07ea439714f39653d4149c48271",
+  "method": "FP64 oracle vs stable-group QPN-style FP16 (q-8), FP16 activation, FP32 exact dot partial, FP32 independent scale and ascending FP32 group sum; no GPU MMA rounding/order",
+  "cases": [
+    {
+      "input": "ordinary",
+      "strict_bad": 0,
+      "total_outputs": 12288,
+      "max_abs_error": 0.0,
+      "max_tolerance_ratio": 0.0,
+      "ref_absmax": 5165.2236328125,
+      "x_absmax": 2420.0,
+      "signed_integer_fp16_exact": true,
+      "top10": [
+        {
+          "m": 3,
+          "n": 3071,
+          "actual": -358.40936279296875,
+          "reference": -358.40936279296875,
+          "error": 0.0,
+          "allowed": 0.018020468139648436,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3070,
+          "actual": -276.8231201171875,
+          "reference": -276.8231201171875,
+          "error": 0.0,
+          "allowed": 0.013941156005859375,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3069,
+          "actual": 1.6566258668899536,
+          "reference": 1.6566258668899536,
+          "error": 0.0,
+          "allowed": 0.00018283129334449767,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3068,
+          "actual": -40.558746337890625,
+          "reference": -40.558746337890625,
+          "error": 0.0,
+          "allowed": 0.0021279373168945313,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3067,
+          "actual": -130.94082641601562,
+          "reference": -130.94082641601562,
+          "error": 0.0,
+          "allowed": 0.006647041320800782,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3066,
+          "actual": -182.69044494628906,
+          "reference": -182.69044494628906,
+          "error": 0.0,
+          "allowed": 0.009234522247314452,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3065,
+          "actual": 259.6797790527344,
+          "reference": 259.6797790527344,
+          "error": 0.0,
+          "allowed": 0.013083988952636719,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3064,
+          "actual": 197.1180877685547,
+          "reference": 197.1180877685547,
+          "error": 0.0,
+          "allowed": 0.009955904388427734,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3063,
+          "actual": 40.2043571472168,
+          "reference": 40.2043571472168,
+          "error": 0.0,
+          "allowed": 0.0021102178573608396,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3062,
+          "actual": 44.03260803222656,
+          "reference": 44.03260803222656,
+          "error": 0.0,
+          "allowed": 0.002301630401611328,
+          "ratio": 0.0
+        }
+      ]
+    },
+    {
+      "input": "4x_saved_stress",
+      "strict_bad": 0,
+      "total_outputs": 12288,
+      "max_abs_error": 0.0,
+      "max_tolerance_ratio": 0.0,
+      "ref_absmax": 20660.89453125,
+      "x_absmax": 9680.0,
+      "signed_integer_fp16_exact": true,
+      "top10": [
+        {
+          "m": 3,
+          "n": 3071,
+          "actual": -1433.637451171875,
+          "reference": -1433.637451171875,
+          "error": 0.0,
+          "allowed": 0.07178187255859375,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3070,
+          "actual": -1107.29248046875,
+          "reference": -1107.29248046875,
+          "error": 0.0,
+          "allowed": 0.055464624023437506,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3069,
+          "actual": 6.6265034675598145,
+          "reference": 6.6265034675598145,
+          "error": 0.0,
+          "allowed": 0.0004313251733779907,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3068,
+          "actual": -162.2349853515625,
+          "reference": -162.2349853515625,
+          "error": 0.0,
+          "allowed": 0.008211749267578125,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3067,
+          "actual": -523.7633056640625,
+          "reference": -523.7633056640625,
+          "error": 0.0,
+          "allowed": 0.026288165283203126,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3066,
+          "actual": -730.7617797851562,
+          "reference": -730.7617797851562,
+          "error": 0.0,
+          "allowed": 0.036638088989257814,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3065,
+          "actual": 1038.7191162109375,
+          "reference": 1038.7191162109375,
+          "error": 0.0,
+          "allowed": 0.05203595581054688,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3064,
+          "actual": 788.4723510742188,
+          "reference": 788.4723510742188,
+          "error": 0.0,
+          "allowed": 0.03952361755371094,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3063,
+          "actual": 160.8174285888672,
+          "reference": 160.8174285888672,
+          "error": 0.0,
+          "allowed": 0.008140871429443359,
+          "ratio": 0.0
+        },
+        {
+          "m": 3,
+          "n": 3062,
+          "actual": 176.13043212890625,
+          "reference": 176.13043212890625,
+          "error": 0.0,
+          "allowed": 0.008906521606445313,
+          "ratio": 0.0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "fixture": "43.mlp.down_proj",
+  "manifest_sha256": "7c0057edb888d0b4c3730c717a6c3359ff48e07ea439714f39653d4149c48271",
+  "harness_sha256": "530214b2f935a10f607d3da1442d22f92cc700897ae06c1abdb1c6cffcd4806d",
+  "source_sha256": "8c94fcf4e461e3a4d75c733b2eac15af74bf0302bad9b08520ac89921e8c126f",
+  "prepack_sha256": "2b6a8bcc339d929b67635304f69d73e167db6e6ebb5f3af8a03b289f1f4d9b9c",
+  "binary_sha256": "c5a85de210ab1a50f9943efbaaff05ebb85fbaa4daf04a596ba518ca9b1c0035",
+  "results": [
+    {
+      "input": "ordinary",
+      "strict_bad": 0,
+      "graph_strict_bad": 0,
+      "max_abs_error": 0.00048828125,
+      "max_tolerance_ratio": 0.1277114897966385,
+      "repeat_equal": true,
+      "graph_cast_equal": true,
+      "finite": true,
+      "sha256": "4a6a6dca3317f4f9a831ef6a1776d4f4e57b247cb3dbd2c0e121244c854be457"
+    },
+    {
+      "input": "4x_saved_stress",
+      "strict_bad": 0,
+      "graph_strict_bad": 0,
+      "max_abs_error": 0.001953125,
+      "max_tolerance_ratio": 0.4438062906265259,
+      "repeat_equal": true,
+      "graph_cast_equal": true,
+      "finite": true,
+      "sha256": "806921ade37cbb34f134087d01c71ef2f14e9c247b5966822364476aad8a6b01"
+    }
+  ]
+}

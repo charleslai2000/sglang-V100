@@ -1,0 +1,16 @@
+{
+  "derived_artifacts": {
+    "stress_factor": 4,
+    "stress_input": "c57_stress_x_fp16.bin",
+    "reference": "stress_fp32_reference.bin",
+    "reference_contract": "FP64 unpack/dequant/GEMM -> FP32 cast",
+    "oracle_sha256": "da7ee5fa596912cc9ec2ed61f4015b9b46427cd29acc3dd61fc42e49a0f47602",
+    "c57_binary_sha256": "c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+    "candidate_binary_sha256": "2238344028546fb9712ebcddba60f3d9659846a2dfbaad8483db77598e434b64",
+    "outputs": {
+      "c57": "c57_stress_fp32_output.bin",
+      "packed_candidate": "packed_candidate_stress_fp32_output.bin"
+    },
+    "note": "Original manifest.json is immutable. Derived tensors correspond to first four rows of fixture x multiplied by 4 and rounded to FP16; reference computed from that exact tensor."
+  }
+}
