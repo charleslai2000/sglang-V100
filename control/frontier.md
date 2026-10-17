@@ -1,11 +1,5 @@
 # Current frontier
 
-## G022-falcon-v100-c4-performance
-- T003 — short-context batch scaling diagnosis — ACTIVE
-  - frontier: Three independent Graph Event and CUPTI vectors/cell are complete. Still open: exact request→Mamba/KV slot audit, counter-byte semantics, and a safely bounded Graph Forward owner ledger before defensible c1/c2/c4 recoverable-time ranking.
-  - task: `control/G022-falcon-v100-c4-performance/tasks/T003-short-context-batch-scaling-diagnosis.md`
-  - unblock/reopen: Target V100 UUID only, MemAvailable >=8 GiB, independent Mamba state per request, preserve all existing dirty files and E035 dispositions. Cache remains paused.
-
 ## G023-falcon-gpu-l1-prefix-cache
 - T001 — qualify Falcon GPU prefix reuse — BLOCKED
   - frontier: Actual `extra_buffer` radix hit reports 768 tokens; same-input cache hit differs from same-config force-miss at output token 0/1. One chunk=768 diagnostic did not fix it; changing no-cache chunk size also changes one branch at token24. Locate state boundary before any performance matrix.
