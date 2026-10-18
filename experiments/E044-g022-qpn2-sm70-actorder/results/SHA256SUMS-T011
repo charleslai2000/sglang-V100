@@ -1,6 +1,6 @@
-b2f4c4b47e2f0ea7686b3eed99d753d6af0813dc1549fa314dfec9dc42609fb0  experiments/E044-g022-qpn2-sm70-actorder/qpn2_multiwarp.py
+affaefca85f9da88bf55083f9df542df68952cd97016b692e28ecf1aff63dac2  experiments/E044-g022-qpn2-sm70-actorder/qpn2_multiwarp.py
 0ac1c8d942d6972f9072f83abaec50bff5a70a13aeb6e9ec9f64076ada0621e2  experiments/E044-g022-qpn2-sm70-actorder/t011-paired-linear.py
-0078662435f61b06fca45d65670e37f2b93bf2fa48d38a871e6908b91b8495d1  experiments/E044-g022-qpn2-sm70-actorder/run_t011_model_server.sh
+ae69a4bc613c2238db02afa96226ebf469413d620cfe034c273216d97ded9b77  experiments/E044-g022-qpn2-sm70-actorder/run_t011_model_server.sh
 d17b46ec242cafe091bab4bd0d7472e364ee205497737004046587f5b07f791a  experiments/E044-g022-qpn2-sm70-actorder/qualify_t011_model.py
 dad97cd704fbaed37494632e522b8d518e0f5e9a0b6b0b5062e75bebf40f9240  experiments/E044-g022-qpn2-sm70-actorder/t011_ncu_target.py
 e238cb33072c7be96975b03be66786f75c9cfca4f9f8bc8b387380590481d2e5  alias-free correctness qualification generated CUDA
@@ -19,3 +19,6 @@ fbc5a2a9ff704ff0ecc7960683ab245fdb670aac15c31dfea09c459e1f43b6c6  experiments/E0
 b2cc1f03fbf38059e143d328fa14d2ed6485736cad66d6e993eeb379e7cc4a2a  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-c57.json
 b2cc1f03fbf38059e143d328fa14d2ed6485736cad66d6e993eeb379e7cc4a2a  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-c57.json
 4280b45041608039f92df24e739114d7fccf29f1adef9094b15645846b62f1b8  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-t011.json
+4d9357d2ba9318c4f03f0e5cf7de1bd2011158e69f9d8e34e02582a79b66879d  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-4kc4-repeat.json
+1c15ea9d9dd8e73cd9cc93b83b14caf9ee93c6176a9ccdac9164cb7e9519f69f  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-4kc4-repeat.json
+52f4523b5f3ec0186eda4ba53b72cb0e0c01e0a1bd11ded1af6367457b97ac0f  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-4kc4-repeat2.json
