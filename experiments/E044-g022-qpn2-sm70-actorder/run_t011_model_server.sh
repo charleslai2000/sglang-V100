@@ -21,12 +21,14 @@ else
   unset SGLANG_G017_Q4_FP32_CANDIDATE
   export SGLANG_G022_QPN2_BINDING=1
 fi
-export SGLANG_G022_QPN2_BUILD=/mnt/data/sglang-V100/t011-build
 export SGLANG_G021_FPM_SIDECAR=${T011_TIMELINE_SIDECAR:-}
 export SGLANG_G022_FPM_GPU_SIDECAR=${T011_GPU_SIDECAR:-"$ROOT/experiments/E044-g022-qpn2-sm70-actorder/results/gpu-${T011_ROUTE:-t011}-matched.jsonl"}
 export SGLANG_G021_FPM_DIAG=1
+export SGLANG_G022_QPN2_BUILD=/mnt/data/sglang-V100/t011-build
 EXT_INFO=$(NINJA_STATUS='' PYTHONPATH="$ROOT/experiments/E044-g022-qpn2-sm70-actorder:$ROOT/experiments/E035-g022-actorder-q4-wmma" /home/charles/miniconda3/envs/sglang-v100/bin/python -c 'import hashlib; from qpn2_multiwarp import load_module; _,b=load_module("/mnt/data/sglang-V100/t011-build"); print(str(b)+" "+hashlib.sha256(b.read_bytes()).hexdigest())' 2>/dev/null | tail -1)
-export SGLANG_G022_QPN2_EXTENSION=${EXT_INFO% *}
-export SGLANG_G022_QPN2_EXTENSION_SHA256=${EXT_INFO##* }
+read -r SGLANG_G022_QPN2_EXTENSION SGLANG_G022_QPN2_EXTENSION_SHA256 <<< "$EXT_INFO"
+export SGLANG_G022_QPN2_EXTENSION SGLANG_G022_QPN2_EXTENSION_SHA256
+[[ "$SGLANG_G022_QPN2_EXTENSION" == /mnt/data/sglang-V100/t011-build/frozen/qpn2_multiwarp-*.so && "${SGLANG_G022_QPN2_EXTENSION##*/}" == "qpn2_multiwarp-${SGLANG_G022_QPN2_EXTENSION_SHA256}.so" && "$SGLANG_G022_QPN2_EXTENSION_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid frozen T011 identity: $EXT_INFO" >&2; exit 1; }
+[[ "$(sha256sum "$SGLANG_G022_QPN2_EXTENSION" | awk '{print $1}')" == "$SGLANG_G022_QPN2_EXTENSION_SHA256" ]] || { echo "T011 frozen binary SHA mismatch" >&2; exit 1; }
 printf 'T011 extension %s sha256=%s\n' "$SGLANG_G022_QPN2_EXTENSION" "$SGLANG_G022_QPN2_EXTENSION_SHA256"
 exec python -m sglang.launch_server --model-path /mnt/data/models/Falcon-H1-7B-Instruct-GPTQ-Int4 --served-model-name Falcon-H1-7B-Instruct-GPTQ-Int4 --host 127.0.0.1 --port 30003 --tp-size 1 --dtype float16 --mem-fraction-static "${T011_MEM_FRACTION:-0.88}" --max-running-requests 4 --max-total-tokens "${T011_MAX_TOTAL_TOKENS:-16384}" --cuda-graph-max-bs 4 --cuda-graph-bs 1 2 3 4 --attention-backend tilelang_fa_v100 --disable-radix-cache --disable-piecewise-cuda-graph --enable-forward-pass-metrics --forward-pass-metrics-ipc-name "ipc://$ART/experiments/E044/t011-fpm-endpoint"

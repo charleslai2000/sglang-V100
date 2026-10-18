@@ -69,7 +69,15 @@ def load_module(build_dir: str | Path):
     """Build/cache the isolated SM70 extension; return module and exact loaded binary."""
     build=Path(build_dir);build.mkdir(parents=True,exist_ok=True);sf=build/'qpn2_multiwarp.cu';sf.write_text(SRC)
     mod=load(name='qpn2_multiwarp',sources=[str(sf)],extra_cuda_cflags=['-O3','-lineinfo','-gencode=arch=compute_70,code=sm_70'],extra_cflags=['-O2'],build_directory=str(build),verbose=True)
-    return mod,Path(mod.__file__).resolve()
+    binary=Path(mod.__file__).resolve()
+    # Freeze the completed build atomically so concurrent loaders cannot race over Ninja outputs.
+    identity=hashlib.sha256(binary.read_bytes()).hexdigest()
+    frozen_dir=build/'frozen';frozen_dir.mkdir(exist_ok=True)
+    frozen=frozen_dir/f'qpn2_multiwarp-{identity}.so'
+    if not frozen.exists():
+        tmp=frozen.with_suffix('.so.tmp');tmp.write_bytes(binary.read_bytes());tmp.replace(frozen)
+    if hashlib.sha256(frozen.read_bytes()).hexdigest()!=identity:raise RuntimeError('frozen T011 binary SHA mismatch')
+    return mod,frozen
 
 def main():
  p=argparse.ArgumentParser();p.add_argument('--fixtures',default='/mnt/data/pc01/sglang-v100-migration/remote-evidence/sglang-logs/s4-m3a-fixtures');p.add_argument('--build',default=str(HERE/'build-t011'));p.add_argument('--out',default=str(HERE/'results/t011-correctness.jsonl'));p.add_argument('--mode',choices=['all','eager','graph'],default='all');p.add_argument('--fixture-filter');p.add_argument('--M-filter',type=int,choices=(1,2,3,4));p.add_argument('--split-filter',type=int,choices=(8,16,32));a=p.parse_args()
