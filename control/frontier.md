@@ -2,9 +2,9 @@
 
 ## G022-falcon-v100-c4-performance
 - T011 — QPN2 multiwarp group-aligned execution — ACTIVE
-  - frontier: Finish alternating complete-Linear split coverage and E044 timing-boundary errata; NCU hardware-counter access blocked by `ERR_NVGPUCTRPERM`, requiring an explicit evidence-limit disposition before performance decision.
+  - frontier: Repeat 4K/c4 E2E under matched queues (initial candidate E2E regression conflicts with higher Output TPS); qualify multi-request Mamba/KV state isolation/slot reuse and hidden/logit boundary; record per-request TTFT/ITL plus 4K Prefill. Matched GPU event evidence shows b4 Graph-expected forward −29.5%; sidecar graph_key is null.
   - task: `control/G022-falcon-v100-c4-performance/tasks/T011-qpn2-multiwarp-group-reduction.md`
-  - unblock/reopen: User authorized continuous execution; target V100 only, host MemAvailable >=8GiB, preserve E035 and unowned dirty files, S1/default/exact-c57 unchanged; G023 ON_HOLD.
+  - unblock/reopen: Operator gate and bounded NCU passed. Continue owner authorization, target V100 only, MemAvailable≥8GiB, protect E035/unowned changes, S1/default/exact-c57 unchanged; G023 ON_HOLD.
 
 ## G023-falcon-gpu-l1-prefix-cache
 - T001 — qualify Falcon GPU prefix reuse — BLOCKED

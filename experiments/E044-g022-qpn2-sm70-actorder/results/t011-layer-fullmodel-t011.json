@@ -1,0 +1,74 @@
+[
+  {
+    "arm": "t011",
+    "layer": "gate_up_proj",
+    "M": 1,
+    "mode": "eager",
+    "median_us": 142.33599603176117,
+    "p10_us": 140.28799533843994,
+    "p90_us": 147.45600521564484,
+    "n": 80,
+    "output_sha256": "7395b2e584cfb45b4a0a3405687c4b48b98e49a267f6250146d8918f3d6a4ad0",
+    "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
+  },
+  {
+    "arm": "t011",
+    "layer": "gate_up_proj",
+    "M": 1,
+    "mode": "graph",
+    "median_us": 84.99199897050858,
+    "p10_us": 83.96799862384796,
+    "p90_us": 86.01599931716919,
+    "n": 80,
+    "output_sha256": "7395b2e584cfb45b4a0a3405687c4b48b98e49a267f6250146d8918f3d6a4ad0",
+    "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
+  },
+  {
+    "arm": "t011",
+    "layer": "gate_up_proj",
+    "M": 2,
+    "mode": "eager",
+    "median_us": 144.3839967250824,
+    "p10_us": 143.36000382900238,
+    "p90_us": 146.43199741840363,
+    "n": 80,
+    "output_sha256": "5738dfa9e15531be80ddef6dbd94cc3c19331aead16c1510a5969ec0ed41b040",
+    "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
+  },
+  {
+    "arm": "t011",
+    "layer": "gate_up_proj",
+    "M": 2,
+    "mode": "graph",
+    "median_us": 88.06400001049042,
+    "p10_us": 87.0399996638298,
+    "p90_us": 90.11200070381165,
+    "n": 80,
+    "output_sha256": "5738dfa9e15531be80ddef6dbd94cc3c19331aead16c1510a5969ec0ed41b040",
+    "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
+  },
+  {
+    "arm": "t011",
+    "layer": "gate_up_proj",
+    "M": 4,
+    "mode": "eager",
+    "median_us": 148.47999811172485,
+    "p10_us": 146.43199741840363,
+    "p90_us": 151.5520066022873,
+    "n": 80,
+    "output_sha256": "243734101cbe87cd651caac540a8f5b37e456f8d07e9a979b748f5e18d1fcf80",
+    "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
+  },
+  {
+    "arm": "t011",
+    "layer": "gate_up_proj",
+    "M": 4,
+    "mode": "graph",
+    "median_us": 92.16000139713287,
+    "p10_us": 90.11200070381165,
+    "p90_us": 93.18400174379349,
+    "n": 80,
+    "output_sha256": "243734101cbe87cd651caac540a8f5b37e456f8d07e9a979b748f5e18d1fcf80",
+    "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
+  }
+]

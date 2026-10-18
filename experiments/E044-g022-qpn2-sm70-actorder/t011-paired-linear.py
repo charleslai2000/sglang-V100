@@ -11,9 +11,16 @@ def child(a):
  fd=int(os.environ['E035_GPU_LOCK_FD']);assert_inherited(fd,UUID);assert_cuda_uuid(torch,UUID)
  if a.arm=='c57':
   spec=importlib.util.spec_from_file_location('common_ops',a.c57);mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod);fn=torch.ops.sgl_kernel.gptq_q4_fp32_m4_candidate;binary=Path(mod.__file__)
+  schema=str(fn.default._schema)
+  if 'return_fp32=False' not in schema:raise RuntimeError(f'unexpected exact-c57 API schema: {schema}')
  else:
   spec=importlib.util.spec_from_file_location('qpn2_multiwarp',a.module);mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod);binary=Path(mod.__file__)
- d=Path(a.fixture);mf=json.loads((d/'manifest.json').read_text());T=mf['tensors'];M=a.M;K=T['g_idx']['shape'][0];N=T['qweight']['shape'][1];G=T['scales']['shape'][0]
+ d=Path(a.fixture)
+ if not d.is_dir():raise RuntimeError(f'fixture path missing: {d}')
+ expected_mf_sha=a.expected_manifest_sha[0] if a.expected_manifest_sha else ''
+ actual_mf_sha=hashlib.sha256((d/'manifest.json').read_bytes()).hexdigest()
+ if expected_mf_sha and actual_mf_sha!=expected_mf_sha:raise RuntimeError(f'fixture manifest identity mismatch: {actual_mf_sha} != {expected_mf_sha}')
+ mf=json.loads((d/'manifest.json').read_text());T=mf['tensors'];M=a.M;K=T['g_idx']['shape'][0];N=T['qweight']['shape'][1];G=T['scales']['shape'][0]
  def ld(n,dtype):
   p=d/(n+'.bin');return torch.from_file(str(p),shared=False,size=p.stat().st_size//torch.empty((),dtype=dtype).element_size(),dtype=dtype).view(T[n]['shape']).cuda()
  x=ld('x',torch.float16)[:M].contiguous();qw=ld('qweight',torch.int32);qz=ld('qzeros',torch.int32);sc=ld('scales',torch.float16);g=ld('g_idx',torch.int32).reshape(-1)
@@ -28,34 +35,50 @@ def child(a):
   qt=torch.from_numpy(pn.view(np.int32).copy()).cuda();pt=torch.from_numpy(perm_cpu).cuda();gx=torch.empty_like(x);o=torch.empty((M,N),device='cuda',dtype=torch.float32)
   def compute():return mod.run(x,qt,sc,pt,gx,o,a.split)
  else:
-  def compute():return fn(x,qw,qz,sc,g,False)
+  def compute():return fn(x,qw,qz,sc,g,a.arm=='c57' and a.mode=='eager')
  # Full graph boundary: includes gather+HMMA+bounded CTA FP32 reduction+FP16 output cast.
- stream=torch.cuda.Stream();stream.wait_stream(torch.cuda.current_stream())
- with torch.cuda.stream(stream):
-  graph=torch.cuda.CUDAGraph()
-  with torch.cuda.graph(graph,stream=stream):
-   value=compute();out=value.half() if value.dtype==torch.float32 else value
-  graph.replay();torch.cuda.synchronize()
- torch.cuda.current_stream().wait_stream(stream)
- for _ in range(20):graph.replay()
- torch.cuda.synchronize();vals=[]
- for _ in range(a.iters):
-  st=torch.cuda.Event(enable_timing=True);en=torch.cuda.Event(enable_timing=True);st.record();graph.replay();en.record();en.synchronize();vals.append(st.elapsed_time(en)*1000)
- vals.sort();return {'arm':a.arm,'M':M,'split':a.split if a.arm=='qpn' else None,'fixture':str(d),'binary':str(binary),'binary_sha256':sha(binary),'graph_full_linear_cast_inclusive':True,'median_us':(vals[len(vals)//2-1]+vals[len(vals)//2])/2 if len(vals)%2==0 else vals[len(vals)//2],'p10_us':vals[int(.1*(len(vals)-1))],'p90_us':vals[int(.9*(len(vals)-1))],'n':len(vals)}
+ def full_call():
+  value=compute();return value.half() if value.dtype==torch.float32 else value
+ if a.mode=='eager':
+  def run():full_call()
+  for _ in range(20):run()
+  torch.cuda.synchronize();vals=[]
+  for _ in range(a.iters):
+   st=torch.cuda.Event(enable_timing=True);en=torch.cuda.Event(enable_timing=True);st.record();run();en.record();en.synchronize();vals.append(st.elapsed_time(en)*1000)
+ else:
+  stream=torch.cuda.Stream();stream.wait_stream(torch.cuda.current_stream())
+  with torch.cuda.stream(stream):
+   graph=torch.cuda.CUDAGraph()
+   with torch.cuda.graph(graph,stream=stream):
+    if a.arm=='c57':out=compute()
+    else:out=compute().half()
+   graph.replay();torch.cuda.synchronize()
+  torch.cuda.current_stream().wait_stream(stream)
+  for _ in range(20):graph.replay()
+  torch.cuda.synchronize();vals=[]
+  for _ in range(a.iters):
+   st=torch.cuda.Event(enable_timing=True);en=torch.cuda.Event(enable_timing=True);st.record();graph.replay();en.record();en.synchronize();vals.append(st.elapsed_time(en)*1000)
+ vals.sort();return {'arm':a.arm,'M':M,'split':a.split if a.arm=='qpn' else None,'mode':a.mode,'fixture':str(d),'binary':str(binary),'binary_sha256':sha(binary),'full_linear_cast_inclusive':True,'c57_return_fp32':a.arm=='c57' and a.mode=='eager','median_us':(vals[len(vals)//2-1]+vals[len(vals)//2])/2 if len(vals)%2==0 else vals[len(vals)//2],'p10_us':vals[int(.1*(len(vals)-1))],'p90_us':vals[int(.9*(len(vals)-1))],'n':len(vals)}
 def main(a):
- assert_target_idle(UUID);fd=acquire(UUID);rid=str(uuid.uuid4());raw=Path(a.out).with_name(Path(a.out).stem+'.'+rid+'.jsonl');env=os.environ.copy();env.update(CUDA_VISIBLE_DEVICES=UUID,CUDA_HOME='/usr/local/cuda-12.8',E035_GPU_LOCK_FD=str(fd))
+ if any(not Path(f).is_dir() for f in a.fixture):raise SystemExit(f'fixture path missing from {a.fixture}')
+ if a.expected_manifest_sha and len(a.expected_manifest_sha)!=len(a.fixture):raise SystemExit('provide one --expected-manifest-sha per fixture')
+ assert_target_idle(UUID);fd=acquire(UUID);rid=str(uuid.uuid4());raw=Path(a.out).with_name(Path(a.out).stem+'.'+rid+'.jsonl');env=os.environ.copy();env.update(CUDA_VISIBLE_DEVICES=UUID,CUDA_HOME='/usr/local/cuda-12.8',E035_GPU_LOCK_FD=str(fd),PYTHONPATH='/home/charles/miniconda3/envs/sglang-v100/lib/python3.12/site-packages')
  try:
   with raw.open('w') as f:
-   for pair in range(a.pairs):
-    order=('qpn','c57') if pair%2==0 else ('c57','qpn');r={}
-    for arm in order:
-     cmd=[sys.executable,str(Path(__file__).resolve()),'--child','--fixture',a.fixture,'--module',a.module,'--c57',a.c57,'--arm',arm,'--M',str(a.M),'--split',str(a.split),'--iters',str(a.iters),'--out',a.out]
-     cp=subprocess.run(cmd,text=True,capture_output=True,env=env,pass_fds=(fd,));
-     if cp.returncode:raise RuntimeError(cp.stderr)
-     r[arm]=json.loads(cp.stdout.strip().splitlines()[-1])
-    row={'pair':pair+1,'order':order,'arms':r};f.write(json.dumps(row)+'\n');f.flush();print(json.dumps({k:v['median_us'] for k,v in r.items()}),flush=True)
+   for fixture_index,fixture in enumerate(a.fixture):
+    for pair in range(a.pairs):
+     order=('qpn','c57') if pair%2==0 else ('c57','qpn');r={}
+     for arm in order:
+      cmd=[sys.executable,str(Path(__file__).resolve()),'--child','--fixture',fixture,'--module',a.module,'--c57',a.c57,'--arm',arm,'--M',str(a.M),'--split',str(a.split),'--mode',a.mode,'--label',a.label,'--iters',str(a.iters),'--out',a.out]
+      if a.expected_manifest_sha:cmd += ['--expected-manifest-sha',a.expected_manifest_sha[fixture_index]]
+      cp=subprocess.run(cmd,text=True,capture_output=True,env=env,pass_fds=(fd,));
+      if cp.returncode:raise RuntimeError(cp.stderr)
+      r[arm]=json.loads(cp.stdout.strip().splitlines()[-1])
+     row={'pair':pair+1,'fixture':fixture,'order':order,'label':a.label,'M':a.M,'split':a.split,'mode':a.mode,'arms':r};f.write(json.dumps(row)+'\n');f.flush();print(json.dumps({k:v['median_us'] for k,v in r.items()}),flush=True)
   print(str(raw))
  finally:release(fd)
-p=argparse.ArgumentParser();p.add_argument('--fixture',required=True);p.add_argument('--module',default='/mnt/data/sglang-V100/t011-build/qpn2_multiwarp.so');p.add_argument('--c57',default='/mnt/data/pc01/sglang-v100-migration/experiments/E026/candidate-c57-runtime/sgl_kernel/sm70/common_ops.abi3.so');p.add_argument('--arm',choices=['qpn','c57']);p.add_argument('--child',action='store_true');p.add_argument('--M',type=int,default=4);p.add_argument('--split',type=int,choices=(8,16,32),default=8);p.add_argument('--iters',type=int,default=100);p.add_argument('--pairs',type=int,default=3);p.add_argument('--out',default=str(HERE/'results/t011-paired.jsonl'));a=p.parse_args()
-if a.child:print(json.dumps(child(a)))
+p=argparse.ArgumentParser();p.add_argument('--fixture',action='append',required=True);p.add_argument('--module',default='/mnt/data/sglang-V100/t011-build/qpn2_multiwarp.so');p.add_argument('--c57',default='/mnt/data/pc01/sglang-v100-migration/experiments/E026/candidate-c57-runtime/sgl_kernel/sm70/common_ops.abi3.so');p.add_argument('--arm',choices=['qpn','c57']);p.add_argument('--child',action='store_true');p.add_argument('--M',type=int,default=4);p.add_argument('--split',type=int,choices=(8,16,32),default=8);p.add_argument('--mode',choices=['graph','eager'],default='graph');p.add_argument('--label',default='43.mlp.down_proj');p.add_argument('--expected-manifest-sha',action='append',default=[]);p.add_argument('--iters',type=int,default=100);p.add_argument('--pairs',type=int,default=3);p.add_argument('--out',default=str(HERE/'results/t011-paired.jsonl'));a=p.parse_args()
+if a.child:
+ a.fixture=a.fixture[0]
+ print(json.dumps(child(a)))
 else:main(a)

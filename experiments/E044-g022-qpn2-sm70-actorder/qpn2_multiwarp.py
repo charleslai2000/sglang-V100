@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""T011 multiwarp QPN2 experiment generator and strict fixture qualifier."""
-import argparse, hashlib, json, os, sys
+"""T011 multiwarp QPN2 experiment generator, packer and strict fixture qualifier."""
+import argparse, hashlib, json, sys
 from pathlib import Path
 import numpy as np, torch
 from torch.utils.cpp_extension import load
@@ -35,7 +35,7 @@ template<int SPLITK> __global__ void kern(const uint2*q,const half*x,const half*
   if(row<M)out[(size_t)row*N+(size_t)tile*32+col]=v;
  }
 }
-torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor s,torch::Tensor p,torch::Tensor gx,torch::Tensor o,int split){int M=x.size(0),K=x.size(1),N=s.size(1),G=s.size(0);auto st=at::cuda::getCurrentCUDAStream();gather<<<(M*K+255)/256,256,0,st>>>(reinterpret_cast<half*>(x.data_ptr<at::Half>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),p.data_ptr<int>(),M,K);
+torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor s,torch::Tensor p,torch::Tensor gx,torch::Tensor o,int split){TORCH_CHECK(x.is_cuda()&&q.is_cuda()&&s.is_cuda()&&p.is_cuda()&&gx.is_cuda()&&o.is_cuda(),"T011 tensors must be CUDA");TORCH_CHECK(x.scalar_type()==at::kHalf&&s.scalar_type()==at::kHalf&&gx.scalar_type()==at::kHalf&&o.scalar_type()==at::kFloat,"T011 requires FP16 inputs/scales and FP32 output");TORCH_CHECK(x.dim()==2&&q.dim()==4&&s.dim()==2&&p.dim()==1&&gx.sizes()==x.sizes()&&o.dim()==2,"T011 tensor ranks/shapes invalid");int M=x.size(0),K=x.size(1),N=s.size(1),G=s.size(0);TORCH_CHECK(M>=1&&M<=4&&K%128==0&&N%32==0&&G==K/128&&G%split==0,"T011 unsupported M/K/N/group/split");TORCH_CHECK(q.size(0)==N/32&&q.size(1)==K/16&&q.size(2)==32&&q.size(3)==2&&p.numel()==K,"T011 packed weight/permutation shape mismatch");auto st=at::cuda::getCurrentCUDAStream();gather<<<(M*K+255)/256,256,0,st>>>(reinterpret_cast<half*>(x.data_ptr<at::Half>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),p.data_ptr<int>(),M,K);
  #define LAUNCH(S) kern<S><<<N/32,32*S,0,st>>>(reinterpret_cast<uint2*>(q.data_ptr<int>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),reinterpret_cast<half*>(s.data_ptr<at::Half>()),o.data_ptr<float>(),M,N,K,G)
  if(split==8)LAUNCH(8);else if(split==16)LAUNCH(16);else if(split==32)LAUNCH(32);else TORCH_CHECK(false,"split must be 8,16,32");
  #undef LAUNCH
@@ -43,18 +43,45 @@ torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor s,torch::Tensor 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME,m){m.def("run",&run);}
 '''
 
+def prepack_cpu(qweight: torch.Tensor, g_idx: torch.Tensor):
+    """Return exact donor-fragment-order packed Q4 and stable group permutation."""
+    qraw=qweight.detach().contiguous().cpu().numpy().view(np.uint32)
+    K8,N=qraw.shape;K=K8*8;G=K//128
+    gi=g_idx.detach().contiguous().cpu().numpy().astype(np.int32,copy=False)
+    if K%128 or N%32 or gi.shape!=(K,) or not np.array_equal(np.sort(gi),np.repeat(np.arange(G,dtype=np.int32),128)):
+        raise ValueError(f'unsupported T011 GPTQ shape/index K={K} N={N} G={G}')
+    perm=np.argsort(gi,kind='stable').astype(np.int32)
+    q=np.empty((K,N),np.uint8)
+    for b in range(8):q[b::8]=((qraw>>(4*b))&15).astype(np.uint8)
+    col=np.array([((lane>>2)&3)*8+(lane&3)+(4 if lane&16 else 0) for lane in range(32)],dtype=np.int32)
+    ko=np.array([0,2,4,6,1,3,5,7,8,10,12,14,9,11,13,15],dtype=np.int32)
+    packed=np.empty((N//32,K//16,32,8),np.uint8)
+    ncols=np.arange(N,dtype=np.int32)
+    for tile in range(N//32):
+        cols=tile*32+col
+        for kg in range(K//16):
+            ks=perm[(kg//8)*128+(kg%8)*16+ko]
+            vals=q[ks[:,None],cols[None,:]].T
+            packed[tile,kg]=vals[:,0::2]|(vals[:,1::2]<<4)
+    return torch.from_numpy(packed.copy()),torch.from_numpy(perm)
+
+def load_module(build_dir: str | Path):
+    """Build/cache the isolated SM70 extension; return module and exact loaded binary."""
+    build=Path(build_dir);build.mkdir(parents=True,exist_ok=True);sf=build/'qpn2_multiwarp.cu';sf.write_text(SRC)
+    mod=load(name='qpn2_multiwarp',sources=[str(sf)],extra_cuda_cflags=['-O3','-lineinfo','-gencode=arch=compute_70,code=sm_70'],extra_cflags=['-O2'],build_directory=str(build),verbose=True)
+    return mod,Path(mod.__file__).resolve()
+
 def main():
- p=argparse.ArgumentParser();p.add_argument('--fixtures',default='/mnt/data/pc01/sglang-v100-migration/remote-evidence/sglang-logs/s4-m3a-fixtures');p.add_argument('--source-fixtures',default='/mnt/data/pc01/sglang-v100-migration/remote-evidence/sglang-logs/s4-m3a-fixtures');p.add_argument('--build',default=str(HERE/'build-t011'));p.add_argument('--out',default=str(HERE/'results/t011-correctness.jsonl'));a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--fixtures',default='/mnt/data/pc01/sglang-v100-migration/remote-evidence/sglang-logs/s4-m3a-fixtures');p.add_argument('--build',default=str(HERE/'build-t011'));p.add_argument('--out',default=str(HERE/'results/t011-correctness.jsonl'));p.add_argument('--mode',choices=['all','eager','graph'],default='all');p.add_argument('--fixture-filter');p.add_argument('--M-filter',type=int,choices=(1,2,3,4));p.add_argument('--split-filter',type=int,choices=(8,16,32));a=p.parse_args()
  if torch.cuda.device_count()!=1: raise SystemExit('require CUDA_VISIBLE_DEVICES set to only target UUID')
  assert_cuda_uuid(torch,'GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189')
- build=Path(a.build);build.mkdir(parents=True,exist_ok=True);sf=build/'qpn2_multiwarp.cu';sf.write_text(SRC)
- mod=load(name='qpn2_multiwarp',sources=[str(sf)],extra_cuda_cflags=['-O3','-lineinfo','-gencode=arch=compute_70,code=sm_70'],extra_cflags=['-O2'],build_directory=str(build),verbose=True)
- root=Path(a.fixtures);source=Path(a.source_fixtures);rows=[]
+ mod,binary=load_module(a.build);sf=Path(a.build)/'qpn2_multiwarp.cu';root=Path(a.fixtures);rows=[]
  for copied in sorted(root.iterdir()):
   if not copied.is_dir() or copied.name.startswith('.'):continue
-  cm=json.loads((copied/'manifest.json').read_text());froot=copied;fm=cm;T=fm['tensors'];K=T['g_idx']['shape'][0];N=T['qweight']['shape'][1];G=T['scales']['shape'][0]
+  if a.fixture_filter and a.fixture_filter not in copied.name:continue
+  cm=json.loads((copied/'manifest.json').read_text());T=cm['tensors'];K=T['g_idx']['shape'][0];N=T['qweight']['shape'][1];G=T['scales']['shape'][0]
   def raw(path,dtype,shape):return np.fromfile(path,dtype=dtype).reshape(shape)
-  def read(n,dtype):return raw(froot/(n+'.bin'),dtype,T[n]['shape'])
+  def read(n,dtype):return raw(copied/(n+'.bin'),dtype,T[n]['shape'])
   xfull=read('x','<f2');qw=read('qweight','<u4');qz=read('qzeros','<u4');sc=read('scales','<f2');g=read('g_idx','<i4')
   q=np.empty((K,N),np.uint8);z=np.empty((G,N),np.uint8)
   for b in range(8):q[b::8]=((qw>>(4*b))&15).astype(np.uint8);z[:,b::8]=((qz>>(4*b))&15).astype(np.uint8)
@@ -66,23 +93,25 @@ def main():
    for kg in range(K//16):
     sk=perm[(kg//8)*128+(kg%8)*16+ko];v=q[sk[:,None],(tile*32+col)[None,:]].T;packed[tile,kg]=v[:,0::2]|(v[:,1::2]<<4)
   qt=torch.from_numpy(packed.view(np.int32).copy()).cuda();st=torch.from_numpy(sc.copy()).cuda();pt=torch.from_numpy(perm).cuda();w64=(q.astype(np.float64)-(z[g].astype(np.float64)+1))*sc.astype(np.float64)[g]
-  for M in (1,2,3,4):
+  for M in ((a.M_filter,) if a.M_filter else (1,2,3,4)):
    tests=[('ordinary',xfull[:M])]
    if cm['prefix']=='43.mlp.down_proj' and M==4:tests.append(('4x_saved_stress',raw(Path('/mnt/data/pc01/sglang-v100-migration/experiments/E035/packed-word-fixture-package/c57_stress_x_fp16.bin'),'<f2',(4,K))))
    for label,xnp in tests:
     xt=torch.from_numpy(np.ascontiguousarray(xnp)).cuda();gx=torch.empty_like(xt);o=torch.empty((M,N),device='cuda',dtype=torch.float32);ref=torch.from_numpy((xnp.astype(np.float64)@w64).astype(np.float32)).cuda()
-    for split in (8,16,32):
+    for split in ((a.split_filter,) if a.split_filter else (8,16,32)):
      if G%split:continue
-     y=mod.run(xt,qt,st,pt,gx,o,split);torch.cuda.synchronize();tol=1e-4+5e-5*ref.abs();err=(y-ref).abs();bad=int((err>tol).sum().item());again=mod.run(xt,qt,st,pt,gx,o,split).clone();torch.cuda.synchronize()
-     fresh=torch.empty_like(o);y2=mod.run(xt,qt,st,pt,gx,fresh,split);torch.cuda.synchronize();independent=torch.equal(y,y2)
-     stream=torch.cuda.Stream();stream.wait_stream(torch.cuda.current_stream())
-     with torch.cuda.stream(stream):
-      graph=torch.cuda.CUDAGraph()
-      with torch.cuda.graph(graph,stream=stream):gy=mod.run(xt,qt,st,pt,gx,o,split)
-      graph.replay();torch.cuda.synchronize()
-     torch.cuda.current_stream().wait_stream(stream);gb=int(((o-ref).abs()>tol).sum().item());cast=torch.equal(gy.half(),y.half())
-     row={'fixture':cm['prefix'],'manifest_sha256':hashlib.sha256((froot/'manifest.json').read_bytes()).hexdigest(),'M':M,'input':label,'splitk':split,'strict_bad':bad,'graph_strict_bad':gb,'max_ratio':float((err/tol).max()),'repeat_equal':bool(torch.equal(y,again)),'independent_scratch_equal':independent,'graph_cast_equal_to_eager':cast,'binary_sha256':hashlib.sha256(Path(mod.__file__).read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(sf.read_bytes()).hexdigest()};rows.append(row);print(json.dumps(row),flush=True)
-     if bad or gb or not row['repeat_equal'] or not independent:raise RuntimeError(f'strict/state failure: {row}')
-
+     ye_view=mod.run(xt,qt,st,pt,gx,o,split);torch.cuda.synchronize();ye=ye_view.clone();tol=1e-4+5e-5*ref.abs();err=(ye-ref).abs();badmask=err>tol;bad=int(badmask.sum().item());repeat_equal=None;independent=None;go=None;graph_badmask=torch.zeros_like(badmask);gb=0;cast=None
+     if a.mode in ('all','eager'):
+      again_view=mod.run(xt,qt,st,pt,gx,o,split);torch.cuda.synchronize();again=again_view.clone();repeat_equal=torch.equal(ye,again)
+      fresh=torch.empty_like(o);y2_view=mod.run(xt,qt,st,pt,gx,fresh,split);torch.cuda.synchronize();y2=y2_view.clone();independent=torch.equal(ye,y2)
+     if a.mode in ('all','graph'):
+      stream=torch.cuda.Stream();stream.wait_stream(torch.cuda.current_stream())
+      with torch.cuda.stream(stream):
+       graph=torch.cuda.CUDAGraph()
+       with torch.cuda.graph(graph,stream=stream):gy=mod.run(xt,qt,st,pt,gx,o,split)
+       graph.replay();torch.cuda.synchronize()
+      torch.cuda.current_stream().wait_stream(stream);go=o.clone();graph_badmask=(go-ref).abs()>tol;gb=int(graph_badmask.sum().item());cast=torch.equal(go.half(),ye.half())
+     row={'fixture':cm['prefix'],'fixture_dir':copied.name,'manifest_sha256':hashlib.sha256((copied/'manifest.json').read_bytes()).hexdigest(),'M':M,'input':label,'splitk':split,'mode':a.mode,'strict_bad':bad,'bad_points':[{'m':i,'n':j,'actual':float(ye[i,j]),'reference':float(ref[i,j]),'error':float(err[i,j]),'allowed':float(tol[i,j])} for i,j in badmask.nonzero()[:50].tolist()],'graph_strict_bad':gb,'graph_bad_points':[{'m':i,'n':j,'actual':float(go[i,j]),'reference':float(ref[i,j]),'error':float((go-ref).abs()[i,j]),'allowed':float(tol[i,j])} for i,j in graph_badmask.nonzero()[:50].tolist()],'max_ratio':float((err/tol).max()),'repeat_equal':repeat_equal,'independent_scratch_equal':independent,'graph_cast_equal_to_eager':cast,'eager_sha256':hashlib.sha256(ye.cpu().numpy().tobytes()).hexdigest(),'graph_sha256':hashlib.sha256(go.cpu().numpy().tobytes()).hexdigest() if go is not None else None,'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(sf.read_bytes()).hexdigest()};rows.append(row);print(json.dumps(row),flush=True)
+     if bad or gb or (a.mode in ('all','eager') and (not repeat_equal or not independent)) or (a.mode in ('all','graph') and not cast):raise RuntimeError(f'strict/state/cast failure: {row}')
  out=Path(a.out);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(''.join(json.dumps(r)+'\n' for r in rows))
 if __name__=='__main__':main()

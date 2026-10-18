@@ -1,0 +1,13 @@
+{
+  "c57_source":"results/gpu-c57-matched.jsonl",
+  "t011_source":"results/gpu-t011-matched.jsonl",
+  "c57_sha256":"fbc5a2a9ff704ff0ecc7960683ab245fdb670aac15c31dfea09c459e1f43b6c6",
+  "t011_sha256":"1855407785f3fd55e54aa3391e9b066c8613ef415b66560b3f2eca210c2d34e8",
+  "measurement":"ForwardPassDeviceTimer CUDA events through the existing opt-in G022 sidecar; same matched 1K/4K,c1/c2/c4 three-wave service workload",
+  "decode_batch_counts_per_arm":{"b1":1032,"b2":2048,"b3":0,"b4":512},
+  "decode_gpu_forward_ms_median":{"b1":{"c57":26.396,"t011":18.532,"reduction_pct":29.80},"b2":{"c57":31.009,"t011":22.879,"reduction_pct":26.22},"b4":{"c57":31.609,"t011":22.275,"reduction_pct":29.53}},
+  "b4_graph_replay_expected_count_per_arm":512,
+  "graph_key":"null in sidecar despite graph_replay_expected=true; all graph capture keys 1/2/3/4 completed at startup",
+  "prefill_gpu_forward_ms":{"1024":{"c57_count":2,"c57_median":288.516,"t011_count":2,"t011_median":290.919,"t011_change_pct":0.83},"2048":{"c57_count":34,"c57_median":552.406,"t011_count":34,"t011_median":549.700,"t011_change_pct":-0.49},"4096":{"c57_count":0,"t011_count":0,"median":null}},
+  "limits":"GPU timer is full ModelRunner forward boundary; batch attribution comes from immutable scheduler snapshot. Sidecar aggregate covers all cells but does not carry request-cell ID. No b3 decode. GPU-active union is not inferred."
+}

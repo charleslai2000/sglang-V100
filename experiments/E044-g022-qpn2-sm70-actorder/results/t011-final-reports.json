@@ -1,0 +1,17 @@
+{
+  "target_uuid": "GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189",
+  "method": "Nsight Compute root Application Replay, strict match, transient MemoryMax=4GiB and MemorySwapMax=0; system profiling policy unchanged",
+  "note": "Reports whose kernel geometry did not match explicit fixture/M/SPLITK are preserved in external E044 archive but invalidated; only four matching fixed-target reports below are authoritative.",
+  "invalid_first_pass_reports_sha256": {
+    "t011-gateup-m1-s8-20261018T071125.ncu-rep": "051c1da0927751c17aab7ddeea599668eefb7e5bc2ada2d380a81c5b14e4c699",
+    "t011-gateup-m4-s8-20261018T070754.ncu-rep": "0a5658c5397a58503534baff34d9eb8f7b8f267c8306af4a3c8ec8c2380ac077",
+    "t011-down-m1-s16-20261018T071125.ncu-rep": "d772ed026c2371fe81e7fee7763473aeb99d940208dcf91a3f333a867ff8d9dd",
+    "t011-down-m4-s16-20261018T071125.ncu-rep": "ed1f648192a16e97a23e7646d67372503bf51e88c746b623cc9a265057e1b09c"
+  },
+  "valid_reports": [
+    {"name":"t011-gateup-m1-s8-20261018T071223.ncu-rep","sha256":"69b3ed5f22b2d4273901a108c941dae28197036428e0159450c2ba224ac8fbd0","fixture":"43.mlp.gate_up_proj","M":1,"splitk":8,"block":[256,1,1],"grid":[768,1,1]},
+    {"name":"t011-gateup-m4-s8-20261018T071244.ncu-rep","sha256":"c25a843e6ef2b78c87b22d48790735f05e5fbeca569022f7dae6aa9e95fb527f","fixture":"43.mlp.gate_up_proj","M":4,"splitk":8,"block":[256,1,1],"grid":[768,1,1]},
+    {"name":"t011-down-m1-s16-20261018T071305.ncu-rep","sha256":"c34cec44b07c5e286a3a3189c5ee04d8f141893c49a7194f724bed41f612e2dc","fixture":"43.mlp.down_proj","M":1,"splitk":16,"block":[512,1,1],"grid":[96,1,1]},
+    {"name":"t011-down-m4-s16-20261018T071321.ncu-rep","sha256":"f8b2c64808558cbfc674448b162bf9f9cd716316571c550cada11ed59eddedf7","fixture":"43.mlp.down_proj","M":4,"splitk":16,"block":[512,1,1],"grid":[96,1,1]}
+  ]
+}

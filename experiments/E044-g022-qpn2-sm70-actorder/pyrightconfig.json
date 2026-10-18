@@ -1,0 +1,13 @@
+{
+  "extends": "../../pyrightconfig.json",
+  "executionEnvironments": [
+    {
+      "root": "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/E044-g022-qpn2-sm70-actorder",
+      "extraPaths": [
+        "/home/charles/Workspaces/3rdparty/sglang-V100/python",
+        "/home/charles/Workspaces/3rdparty/sglang-V100/sgl-kernel/python",
+        "/home/charles/Workspaces/3rdparty/sglang-V100/experiments/E035-g022-actorder-q4-wmma"
+      ]
+    }
+  ]
+}

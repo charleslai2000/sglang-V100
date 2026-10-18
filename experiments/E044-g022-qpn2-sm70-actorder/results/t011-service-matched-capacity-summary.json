@@ -1,0 +1,10 @@
+{
+  "route":"exact-c57",
+  "sha256":"c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9",
+  "max_total_tokens":10864,
+  "measurements":"results/t011-service-c57-matched-smoke.json",
+  "repetitions":3,
+  "summary":{"1K":{"c1_output_tps":[36.667,36.660,36.649],"c2_output_tps":[64.228,64.215,64.236],"c4_output_tps":[111.167,111.140,111.160]},"4K":{"c1_output_tps":[31.940,31.931,31.950],"c2_output_tps":[49.563,49.551,49.543],"c4_output_tps":[49.545,49.533,49.518]}},
+  "actual_admitted_gpu_batch":"not captured in this report; use FPM/CUDA event join before final comparison",
+  "limits":"baseline only. Client completion times and output TPS measured; no full set of per-request TTFT/ITL and no matched candidate data yet"
+}

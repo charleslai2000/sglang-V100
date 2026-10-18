@@ -1,0 +1,15 @@
+{
+  "fixture": "43.mlp.down_proj",
+  "M": 4,
+  "K": 12288,
+  "N": 3072,
+  "binding": "per-layer packed bytes + stable argsort(g_idx), activation gather inside kernel",
+  "binary_sha256": "c25937f4517613c79b6fb5ce6d8c2302eed93e68bc9d505ba3ab58428d1cf472",
+  "strict_bad_fp32": 0,
+  "max_frozen_tolerance_ratio": 0.14046610891819,
+  "repeat_equal_fp16": true,
+  "graph_replay_fp16_equal": true,
+  "graph_cast_mismatch": 0,
+  "output_sha256": "84981619d822db48d22a9cbb883e4d000ba4e4edb8a878c10002859c55226b3c",
+  "scope": "one isolated fixture; not production loader, whole model or service evidence"
+}

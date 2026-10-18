@@ -1,0 +1,8 @@
+{
+  "modules": 132,
+  "total_qweight_bytes": 2491416576,
+  "mapping_checked": "all 8/4-bit packed lanes decoded then stable argsort(g_idx) applied and inverse restored bitwise; all groups contain exactly 128 K rows; qzero nibble 7",
+  "shape_counts": {"K3072_N12288": 88, "K12288_N3072": 44},
+  "permutation_rule": "activation x[:, perm] where perm=argsort(g_idx, stable), and weight Q4 K rows packed in the same perm order",
+  "status": "checkpoint raw-storage audit only; not SGLang loaded-layer/Graph/runtime dispatch evidence"
+}

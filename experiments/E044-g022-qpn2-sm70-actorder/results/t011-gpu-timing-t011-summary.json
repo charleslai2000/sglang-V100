@@ -1,0 +1,12 @@
+{
+  "source":"results/gpu-t011-matched.jsonl",
+  "source_sha256":"1855407785f3fd55e54aa3391e9b066c8613ef415b66560b3f2eca210c2d34e8",
+  "rows":3629,
+  "timing_source":"existing ForwardPassDeviceTimer CUDA events through SGLANG_G022_FPM_GPU_SIDECAR research output",
+  "decode_forwards":{"measured":3592,"counts_by_batch":{"1":1032,"2":2048,"4":512,"3":0}},
+  "decode_gpu_forward_ms":{"batch1":{"median":18.531840324401857,"mean":18.574280968008117,"p95":18.890444850921628},"batch2":{"median":22.879232406616212,"mean":22.366597490385175,"p95":22.92531204223633},"batch4":{"median":22.27507209777832,"mean":22.28790095448494,"p95":22.319820213317874}},
+  "prefill_forwards":{"16":{"count":1,"median_ms":103.180},"1024":{"count":2,"median_ms":290.919},"2048":{"count":34,"median_ms":549.700},"4096":{"count":0,"median_ms":null}},
+  "graph_replay_expected":true,
+  "graph_key_recorded":false,
+  "limitations":"Candidate-only, over a 1K/4K c1/c2/c4 service matrix; not paired by request cell with c57. FPM graph_key field is null in this sidecar; exact CUDA Graph replay boundary is not joined. b3 not observed. These are full ModelRunner forward event durations; GPU active union is not inferred."
+}

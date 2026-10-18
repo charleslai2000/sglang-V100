@@ -1,0 +1,14 @@
+{
+  "T011_status": "ACTIVE",
+  "model_loader_and_full_layer_dispatch": "qualified to runtime-load/dispatch layer shape; numerical end-to-end/model A/B still open",
+  "qpn2_layers": 132,
+  "graph_capture_bs": [1,2,3,4],
+  "model_runtime_binary_sha256": "4e2848fb0ca990ff873d696100e2f2fbd0f9f7afb2ffeb4d4879451b12cdbbfb",
+  "c57_service_smoke": "1K,c1,one trial; invalid for benchmark because old OpenAI SSE harness read cumulative output_ids from public stream and padded missing IDs with zeros; retained as invalid harness artifact",
+  "service_performance_A_B": "not yet complete",
+  "model_logits_or_greedy_comparison": "not yet complete",
+  "multirequest_state_isolation": "not yet complete",
+  "capacity": "T011 fitted at finalized 10864-token capacity; requested 16384 reduced by SGLang; Mamba 0.64GB; KV 0.46GB; after graph free 3.08GB",
+  "production_adoption": "none",
+  "owner_acceptance": "not claimed"
+}

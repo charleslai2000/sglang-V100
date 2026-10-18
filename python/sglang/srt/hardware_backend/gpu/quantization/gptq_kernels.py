@@ -5,6 +5,8 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
+from pathlib import Path
+import importlib.util
 
 import torch
 
@@ -46,6 +48,8 @@ def _unsupported_kernel(*args, **kwargs):
 gptq_gemm = _unsupported_kernel
 gptq_marlin_repack = _unsupported_kernel
 _g017_dispatch_logged = False
+_t011_logged_layers = set()
+_t011_module_cache = {}
 gptq_shuffle = _unsupported_kernel
 
 try:
@@ -106,6 +110,45 @@ class GPTQLinearKernel:
         self.use_shuffle = True
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        # Isolated T011 opt-in: attach immutable per-layer packed Q4 + matching
+        # stable activation K permutation; retain original GPTQ parameters for prefill.
+        t011_status=None
+        if os.environ.get("SGLANG_G022_QPN2_BINDING") == "1":
+            if not (self.use_shuffle is False and self.quant_config and self.quant_config.weight_bits == 4 and self.quant_config.group_size == 128 and self.quant_config.desc_act):
+                t011_status="fallback:config-ineligible"
+                logging.getLogger(__name__).warning("T011 pack fallback %s: config-ineligible", getattr(layer, 'prefix', layer.__class__.__name__))
+            else:
+                ext_path=os.environ.get("SGLANG_G022_QPN2_EXTENSION");expected=os.environ.get("SGLANG_G022_QPN2_EXTENSION_SHA256")
+                if not ext_path or not expected:raise RuntimeError("T011 binding requires extension path and SHA256")
+                ext_path=os.path.realpath(ext_path);actual=hashlib.sha256(Path(ext_path).read_bytes()).hexdigest()
+                if actual!=expected:raise RuntimeError(f"T011 extension SHA mismatch {actual} != {expected}")
+                key=(ext_path,actual);qpn_mod=_t011_module_cache.get(key)
+                if qpn_mod is None:
+                    spec=importlib.util.spec_from_file_location("qpn2_multiwarp",ext_path)
+                    if spec is None or spec.loader is None:raise RuntimeError("T011 extension import failed")
+                    qpn_mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(qpn_mod);_t011_module_cache[key]=qpn_mod
+                qw=layer.qweight.data;gidx=layer.g_idx.data;qz=layer.qzeros.data;sc=layer.scales.data;K=gidx.numel();N=qw.shape[1];G=sc.shape[0]
+                reason=None
+                if qw.device.type!="cuda" or torch.cuda.get_device_capability(qw.device)[0]!=7:reason="non-sm70-cuda"
+                elif qw.dtype!=torch.int32 or sc.dtype!=torch.float16:reason="dtype-mismatch"
+                elif K not in (3072,12288) or N not in (3072,12288,24576) or K%128 or N%32 or G!=K//128 or qw.shape[0]*8!=K:reason=f"shape-K{K}-N{N}-G{G}"
+                elif not bool(torch.all(torch.stack([((qz.to(torch.int64)>>(4*b))&15)==7 for b in range(8)]))):reason="effective-zero-not-8"
+                if reason:
+                    t011_status="fallback:"+reason;layer.__dict__["_t011_qpn2_status"]=t011_status;logging.getLogger(__name__).warning("T011 pack fallback layer=%s reason=%s K=%d N=%d",getattr(layer,'prefix',layer.__class__.__name__),reason,K,N)
+                else:
+                    # CPU pack decodes the source Q4 and applies stable argsort(g_idx).
+                    import numpy as np
+                    qraw=qw.detach().contiguous().cpu().numpy().view("uint32");perm_np=np.argsort(gidx.detach().cpu().numpy(),kind="stable").astype("int32");q=np.empty((K,N),dtype="uint8")
+                    for bit in range(8):q[bit::8]=((qraw>>(4*bit))&15).astype("uint8")
+                    col=__import__('numpy').array([((lane>>2)&3)*8+(lane&3)+(4 if lane&16 else 0) for lane in range(32)],dtype="int32");ko=__import__('numpy').array([0,2,4,6,1,3,5,7,8,10,12,14,9,11,13,15],dtype="int32");packed=__import__('numpy').empty((N//32,K//16,32,8),dtype="uint8")
+                    for tile in range(N//32):
+                        cols=tile*32+col
+                        for kg in range(K//16):
+                            ks=perm_np[(kg//8)*128+(kg%8)*16+ko];v=q[ks[:,None],cols[None,:]].T;packed[tile,kg]=v[:,0::2]|(v[:,1::2]<<4)
+                    layer.register_buffer("_t011_qpn2_packed",torch.from_numpy(packed.copy()).view(torch.int32).to(qw.device),persistent=False)
+                    layer.register_buffer("_t011_qpn2_perm",torch.from_numpy(perm_np).to(qw.device,dtype=torch.int32),persistent=False)
+                    layer.__dict__["_t011_qpn2_module"]=qpn_mod;layer.__dict__["_t011_qpn2_sha"]=actual;layer.__dict__["_t011_qpn2_status"]="packed";layer.__dict__["_t011_qpn2_pack_bytes"]=packed.nbytes;t011_status="packed"
+
         # for torch.compile
         layer.qzeros = torch.nn.Parameter(layer.qzeros.data, requires_grad=False)
         layer.qweight = torch.nn.Parameter(layer.qweight.data, requires_grad=False)
@@ -134,8 +177,10 @@ class GPTQLinearKernel:
 
         candidate_expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
         candidate_extension_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
+        t011_optin=os.environ.get("SGLANG_G022_QPN2_BINDING")=="1"
         candidate_enabled = (
-            not self.use_shuffle
+            not t011_optin
+            and not self.use_shuffle
             and 1 <= reshaped_x.shape[0] <= 4
             and layer.quant_config.weight_bits == 4
             and reshaped_x.dtype == torch.float16
@@ -143,7 +188,20 @@ class GPTQLinearKernel:
             and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
             and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
         )
-        if candidate_enabled:
+        if t011_optin and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE")=="1":raise RuntimeError("T011 and G017 c57 candidate opt-ins are mutually exclusive")
+        t011_enabled=(t011_optin and getattr(layer,"_t011_qpn2_status",None)=="packed" and not self.use_shuffle and 1<=reshaped_x.shape[0]<=4 and reshaped_x.dtype==torch.float16 and reshaped_x.shape[1]==layer.g_idx.numel() and torch.cuda.is_available() and torch.cuda.get_device_capability(reshaped_x.device)[0]==7)
+        if t011_enabled:
+            expected=os.environ.get("SGLANG_G022_QPN2_EXTENSION_SHA256")
+            if expected!=layer.__dict__.get("_t011_qpn2_sha"):raise RuntimeError("T011 dispatch SHA changed after load")
+            key=(os.path.realpath(os.environ["SGLANG_G022_QPN2_EXTENSION"]),expected);qpn_mod=_t011_module_cache[key]
+            layer_name=getattr(layer,"prefix",layer.__class__.__name__)
+            if layer_name not in _t011_logged_layers:
+                logging.getLogger(__name__).warning("T011 dispatch active layer=%s binary_sha256=%s M=%d K=%d N=%d packed_bytes=%d",layer_name,expected,reshaped_x.shape[0],reshaped_x.shape[1],layer.qweight.shape[1],layer._t011_qpn2_pack_bytes);_t011_logged_layers.add(layer_name)
+            # Invocation-owned scratch is retained by captured graphs and never shared across layers/calls.
+            gx=torch.empty_like(reshaped_x);fp32=torch.empty((reshaped_x.shape[0],layer.qweight.shape[1]),device=reshaped_x.device,dtype=torch.float32)
+            split=8 if reshaped_x.shape[1]==3072 else 16
+            output=qpn_mod.run(reshaped_x,layer._t011_qpn2_packed,layer.scales,layer._t011_qpn2_perm,gx,fp32,split).to(reshaped_x.dtype)
+        elif candidate_enabled:
             # Both exact extension identity and bytes are required before dispatch.
             if not candidate_extension_path:
                 raise RuntimeError(
@@ -195,7 +253,7 @@ class GPTQLinearKernel:
                     "G017 candidate probe matched dispatched op M=%d K=%d N=%d",
                     reshaped_x.shape[0], reshaped_x.shape[1], layer.qweight.shape[-1]
                 )
-        else:
+        elif not t011_enabled:
             output = gptq_gemm(
                 reshaped_x,
                 layer.qweight,
