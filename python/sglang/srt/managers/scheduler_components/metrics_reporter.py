@@ -422,9 +422,19 @@ class SchedulerMetricsReporter:
         if not path:
             return
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        def json_safe(value):
+            if isinstance(value, dict):
+                return {str(k): json_safe(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple, set)):
+                return [json_safe(v) for v in value]
+            if hasattr(value, "__dict__"):
+                return json_safe(vars(value))
+            if value is None or isinstance(value, (str, int, float, bool)):
+                return value
+            return str(value)
         with open(path, "a", encoding="utf-8") as dst:
             dst.write(
-                json.dumps(item, separators=(",", ":"), sort_keys=True) + "\n"
+                json.dumps(json_safe(item), separators=(",", ":"), sort_keys=True) + "\n"
             )
 
     def _complete_forward_timeline(self, batch: ScheduleBatch):
@@ -484,10 +494,23 @@ class SchedulerMetricsReporter:
         if not path:
             return
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        def json_safe(value):
+            if isinstance(value, dict):
+                return {str(k): json_safe(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple, set)):
+                return [json_safe(v) for v in value]
+            if hasattr(value, "__dict__"):
+                return json_safe(vars(value))
+            if value is None or isinstance(value, (str, int, float, bool)):
+                return value
+            return str(value)
         row = {
             "record_type": "fpm_forward", "forward_iter": forward_iter,
             "status": status, "invalid_reason": invalid_reason,
             "mode": item.get("mode"), "batch_size": item.get("actual_batch_size"),
+            "batch_id": item.get("batch_id"),
+            "requests": item.get("requests", []),
+            "request_completion_snapshot": item.get("request_completion_snapshot", []),
             "scheduled_decode_requests": item.get("scheduled_decode_requests"),
             "scheduled_decode_kv_tokens": item.get("scheduled_decode_kv_tokens"),
             "scheduled_prefill_tokens": item.get("scheduled_prefill_tokens"),
@@ -495,12 +518,14 @@ class SchedulerMetricsReporter:
             "graph_key": item.get("graph_key"), "trace_capture_active": item.get("trace_capture_active"),
             "gpu_interval_count": len(item.get("gpu_intervals", [])),
             "gpu_event_intervals": item.get("gpu_event_intervals", []),
+            "queued": (item.get("queued").__dict__ if hasattr(item.get("queued"), "__dict__") else item.get("queued")),
+            "scheduled": (item.get("scheduled").__dict__ if hasattr(item.get("scheduled"), "__dict__") else item.get("scheduled")),
             "scheduler_wall_s": scheduler_wall_s,
             "gpu_interval_sum_s": item.get("gpu_interval_sum_s"),
             "gpu_elapsed_s": gpu_elapsed_s, "queue_accepted": queue_accepted,
         }
         with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, separators=(",", ":"), sort_keys=True) + "\n")
+            f.write(json.dumps(json_safe(row), separators=(",", ":"), sort_keys=True) + "\n")
 
     def _build_scheduled_request_metrics(self, batch: ScheduleBatch):
         from sglang.srt.observability.forward_pass_metrics import (

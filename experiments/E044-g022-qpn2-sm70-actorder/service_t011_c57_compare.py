@@ -5,6 +5,15 @@ from pathlib import Path
 import requests
 from transformers import AutoTokenizer
 BASE=os.environ.get('T011_BASE_URL','http://127.0.0.1:30003');MODEL='/mnt/data/models/Falcon-H1-7B-Instruct-GPTQ-Int4';OUT=Path(os.environ['T011_SERVICE_OUT']);ROUTE=os.environ['T011_ROUTE'];SHA=os.environ['T011_EXPECTED_SHA']
+EXPECTED_T011=os.environ.get('T011_EXPECTED_T011_SHA')
+if ROUTE=='t011' and SHA!=EXPECTED_T011:raise RuntimeError(f'T011 service binary SHA mismatch: expected {EXPECTED_T011}, got {SHA}')
+if ROUTE=='c57' and SHA!='c57e50dc58c59773f701b8a4260140c47ba18a94db8e1b497b6496ab4a84acb9':raise RuntimeError('exact c57 SHA mismatch')
+# Gate the cohort on HTTP readiness, then warm and drain each cell before timing.
+for _ in range(600):
+ try:
+  if requests.get(BASE+'/health',timeout=2).status_code==200:break
+ except requests.RequestException:time.sleep(1)
+else:raise TimeoutError('server never reached HTTP /health readiness')
 t=AutoTokenizer.from_pretrained(MODEL,local_files_only=True,trust_remote_code=True);q=t.encode('Question: What is 6 times 7? Explain briefly and answer clearly.',add_special_tokens=False);fill=t.encode('The quick brown fox walks through a garden. ',add_special_tokens=False)
 def ids(n):
  p=[]

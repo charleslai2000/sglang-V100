@@ -1,6 +1,6 @@
 affaefca85f9da88bf55083f9df542df68952cd97016b692e28ecf1aff63dac2  experiments/E044-g022-qpn2-sm70-actorder/qpn2_multiwarp.py
 0ac1c8d942d6972f9072f83abaec50bff5a70a13aeb6e9ec9f64076ada0621e2  experiments/E044-g022-qpn2-sm70-actorder/t011-paired-linear.py
-ae69a4bc613c2238db02afa96226ebf469413d620cfe034c273216d97ded9b77  experiments/E044-g022-qpn2-sm70-actorder/run_t011_model_server.sh
+702a65b8a6ff153127468b35a00ef0047693f832e0d434541a5d5009bc3e61be  experiments/E044-g022-qpn2-sm70-actorder/run_t011_model_server.sh
 d17b46ec242cafe091bab4bd0d7472e364ee205497737004046587f5b07f791a  experiments/E044-g022-qpn2-sm70-actorder/qualify_t011_model.py
 dad97cd704fbaed37494632e522b8d518e0f5e9a0b6b0b5062e75bebf40f9240  experiments/E044-g022-qpn2-sm70-actorder/t011_ncu_target.py
 e238cb33072c7be96975b03be66786f75c9cfca4f9f8bc8b387380590481d2e5  alias-free correctness qualification generated CUDA
@@ -12,7 +12,7 @@ fbc5a2a9ff704ff0ecc7960683ab245fdb670aac15c31dfea09c459e1f43b6c6  experiments/E0
 1855407785f3fd55e54aa3391e9b066c8613ef415b66560b3f2eca210c2d34e8  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-matched.jsonl
 2e3ec7e797db90d6fbae771f4878b0f22dc97d3db2f5997fb575ebfe2d25b264  experiments/E044-g022-qpn2-sm70-actorder/qpn2_layer_binding.py
 6395d3899ce5f71afdf1ef297c0982e029a625a0f592008f2d379eea21954f72  experiments/E044-g022-qpn2-sm70-actorder/check_t011_mapping.py
-5ed6b451aa1818b7ae4c4eee6196ad63549396cd12b25853fe4e4ffdea21eaad  experiments/E044-g022-qpn2-sm70-actorder/service_t011_c57_compare.py
+3324294a7510df40f33d020e747a57ace2cfdcc77939bfef1604b7b68957b8a9  experiments/E044-g022-qpn2-sm70-actorder/service_t011_c57_compare.py
 4280b45041608039f92df24e739114d7fccf29f1adef9094b15645846b62f1b8  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-t011.json
 183dad7bbe83a5e059f188985a60a6d7fbf0d09c498659f48ee107b9c7613a40  experiments/E044-g022-qpn2-sm70-actorder/results/t011-gpu-timing-matched-summary.json
 4280b45041608039f92df24e739114d7fccf29f1adef9094b15645846b62f1b8  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-t011.json
@@ -22,3 +22,23 @@ b2cc1f03fbf38059e143d328fa14d2ed6485736cad66d6e993eeb379e7cc4a2a  experiments/E0
 4d9357d2ba9318c4f03f0e5cf7de1bd2011158e69f9d8e34e02582a79b66879d  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-4kc4-repeat.json
 1c15ea9d9dd8e73cd9cc93b83b14caf9ee93c6176a9ccdac9164cb7e9519f69f  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-4kc4-repeat.json
 52f4523b5f3ec0186eda4ba53b72cb0e0c01e0a1bd11ded1af6367457b97ac0f  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-4kc4-repeat2.json
+318008f4851e97b52e402745ff781a2ff5cf210e4735ab4fce7b7d7961c8469a  experiments/E044-g022-qpn2-sm70-actorder/results/t011-final-service-qualification.json
+35ae41826c9ae4b78367e5ff59528f64210de36070c2001e5bdf50533ff2b5f1  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-qualified-1kc4.json
+fa6dd9ceddf83cbb874ea31437936c61531e09729b16960f1efb84cbdf336026  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-qualified.json
+fa6dd9ceddf83cbb874ea31437936c61531e09729b16960f1efb84cbdf336026  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-qualified-pass1.json
+334b181c4bbf5660a9403f89c4e7e1fd18e0f7f775e2bf632800cb79cfcfa786  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-qualified-pass2.json
+334b181c4bbf5660a9403f89c4e7e1fd18e0f7f775e2bf632800cb79cfcfa786  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-c57-qualified-pass2b.json
+e4800a5d423b43ca52fb0554dd9b479e2910e47acff28afe9cdaf0b00c56afca  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-qualified-pass1.json
+043d17ebc96ea4d153ea0f056daba853e54b2cff91b9a9c101c68a2d537d35ab  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-qualified-pass2.json
+b7d70ff20fe83a1a9a64bb722f93de4d0b2bea3ffd7ba26622aa2a73c9e58de7  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-qualified-pass3.json
+d7c27761daa3df34c578e01046fb1f320f1785382d2d9bf27adf841df957952a  experiments/E044-g022-qpn2-sm70-actorder/results/t011-state-reuse-cancel.json
+69b94c218c4747d209af62a3ef5e668d00b65863cdbf411745937b9297177d40  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-c57-qualified-pass1.jsonl
+bf8fc0a8700374e2c255db6fecb8b5696530c672536121d3db52b40e5269b808  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-c57-qualified-pass2b.jsonl
+c4f7497397a4b51896e1053acdc38e9313acde8019fb210fe782208372830b35  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-qualified-pass1.jsonl
+4ca6ef54c3ddde4bdffca913b6d7584224831d8625ec20f4307730704b4a120f  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-qualified-pass2.jsonl
+5847df83c7212afb5fdefd3e151e8f4e764aa45d909515e68f0a087777670234  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-qualified-pass3.jsonl
+ed59028674696f5fc4ff37a0ea53e1db5cf0bd49a60a2ff57487741bb4a1d4bb  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-c57-qualified-pass1.jsonl
+e10d64b097f2d137eafedb86c825f02120ecd1c3077071e2b73ad91e6196b56d  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-c57-qualified-pass2b.jsonl
+f0294783b7daf24333480229165ce2bf306410641a886400a73c5960b1d41ea1  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-t011-qualified-pass1.jsonl
+dc12b0eeff7bb214d5326b9536392b73583aa98c9cb93776cd61e62aafedc992  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-t011-qualified-pass2.jsonl
+d46c0273dc6713d4a827d37f45790d6962ba818a2bd60aaa552187c0088aa71a  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-t011-qualified-pass3.jsonl
