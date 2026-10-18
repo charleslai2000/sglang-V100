@@ -4,11 +4,11 @@
     "layer": "gate_up_proj",
     "M": 1,
     "mode": "eager",
-    "median_us": 142.33599603176117,
+    "median_us": 141.31200313568115,
     "p10_us": 140.28799533843994,
-    "p90_us": 147.45600521564484,
+    "p90_us": 162.81600296497345,
     "n": 80,
-    "output_sha256": "7395b2e584cfb45b4a0a3405687c4b48b98e49a267f6250146d8918f3d6a4ad0",
+    "output_sha256": "1e6b277e29893caf8645312449cdbf09b123ca5ebfc716bd411d300a41c899a7",
     "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
   },
   {
@@ -18,9 +18,9 @@
     "mode": "graph",
     "median_us": 84.99199897050858,
     "p10_us": 83.96799862384796,
-    "p90_us": 86.01599931716919,
+    "p90_us": 87.0399996638298,
     "n": 80,
-    "output_sha256": "7395b2e584cfb45b4a0a3405687c4b48b98e49a267f6250146d8918f3d6a4ad0",
+    "output_sha256": "1e6b277e29893caf8645312449cdbf09b123ca5ebfc716bd411d300a41c899a7",
     "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
   },
   {
@@ -30,9 +30,9 @@
     "mode": "eager",
     "median_us": 144.3839967250824,
     "p10_us": 143.36000382900238,
-    "p90_us": 146.43199741840363,
+    "p90_us": 152.5759994983673,
     "n": 80,
-    "output_sha256": "5738dfa9e15531be80ddef6dbd94cc3c19331aead16c1510a5969ec0ed41b040",
+    "output_sha256": "6a243d97797c03dc80d5f1adc1be57d30f2e66b88b795e42837eedd8c077d43e",
     "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
   },
   {
@@ -44,7 +44,7 @@
     "p10_us": 87.0399996638298,
     "p90_us": 90.11200070381165,
     "n": 80,
-    "output_sha256": "5738dfa9e15531be80ddef6dbd94cc3c19331aead16c1510a5969ec0ed41b040",
+    "output_sha256": "6a243d97797c03dc80d5f1adc1be57d30f2e66b88b795e42837eedd8c077d43e",
     "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
   },
   {
@@ -54,9 +54,9 @@
     "mode": "eager",
     "median_us": 148.47999811172485,
     "p10_us": 146.43199741840363,
-    "p90_us": 151.5520066022873,
+    "p90_us": 153.60000729560852,
     "n": 80,
-    "output_sha256": "243734101cbe87cd651caac540a8f5b37e456f8d07e9a979b748f5e18d1fcf80",
+    "output_sha256": "4b61c61202d58469322eedeca5043bcc4c3e35cde63eb45f115f8b60bb0bda3d",
     "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
   },
   {
@@ -65,10 +65,10 @@
     "M": 4,
     "mode": "graph",
     "median_us": 92.16000139713287,
-    "p10_us": 90.11200070381165,
+    "p10_us": 91.13600105047226,
     "p90_us": 93.18400174379349,
     "n": 80,
-    "output_sha256": "243734101cbe87cd651caac540a8f5b37e456f8d07e9a979b748f5e18d1fcf80",
+    "output_sha256": "4b61c61202d58469322eedeca5043bcc4c3e35cde63eb45f115f8b60bb0bda3d",
     "candidate_binary_sha256": "50fa484fa71f14febb779ad4e6cea045911144de07a65b4001144b1d978a0121"
   }
 ]

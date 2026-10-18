@@ -13,5 +13,7 @@ fbc5a2a9ff704ff0ecc7960683ab245fdb670aac15c31dfea09c459e1f43b6c6  experiments/E0
 2e3ec7e797db90d6fbae771f4878b0f22dc97d3db2f5997fb575ebfe2d25b264  experiments/E044-g022-qpn2-sm70-actorder/qpn2_layer_binding.py
 6395d3899ce5f71afdf1ef297c0982e029a625a0f592008f2d379eea21954f72  experiments/E044-g022-qpn2-sm70-actorder/check_t011_mapping.py
 5ed6b451aa1818b7ae4c4eee6196ad63549396cd12b25853fe4e4ffdea21eaad  experiments/E044-g022-qpn2-sm70-actorder/service_t011_c57_compare.py
-f3fcd765d8cbed89698b41ba9cee6cf0ea7e718dc94fde7e3564ce7a98547a3e  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-t011.json
+4280b45041608039f92df24e739114d7fccf29f1adef9094b15645846b62f1b8  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-t011.json
 183dad7bbe83a5e059f188985a60a6d7fbf0d09c498659f48ee107b9c7613a40  experiments/E044-g022-qpn2-sm70-actorder/results/t011-gpu-timing-matched-summary.json
+b2cc1f03fbf38059e143d328fa14d2ed6485736cad66d6e993eeb379e7cc4a2a  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-c57.json
+4280b45041608039f92df24e739114d7fccf29f1adef9094b15645846b62f1b8  experiments/E044-g022-qpn2-sm70-actorder/results/t011-layer-fullmodel-t011.json
