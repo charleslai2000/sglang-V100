@@ -1,0 +1,6 @@
+# Pi control DB is session-local, including SQLite WAL/SHM files.
+control/control.sqlite3*
+
+# Package checkouts and installed npm state are machine-local runtime caches.
+git/
+npm/
