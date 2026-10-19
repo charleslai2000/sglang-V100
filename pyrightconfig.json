@@ -1,0 +1,25 @@
+{
+  "include": [
+    "python",
+    "test",
+    "tests"
+  ],
+  "exclude": [
+    "**/.venv",
+    "**/venv",
+    "**/build",
+    "**/build-*",
+    "**/__pycache__"
+  ],
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux",
+  "venvPath": "/home/charles/miniconda3/envs",
+  "venv": "sglang-v100",
+  "extraPaths": [
+    "python",
+    "sgl-kernel/python",
+    "experiments/E035-g022-actorder-q4-wmma"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "error"
+}
