@@ -1,9 +1,5 @@
 {
-  "include": [
-    "python",
-    "test",
-    "tests"
-  ],
+  "include": ["python", "test", "tests"],
   "exclude": [
     "**/.venv",
     "**/venv",
@@ -13,8 +9,8 @@
   ],
   "pythonVersion": "3.12",
   "pythonPlatform": "Linux",
-  "venvPath": "/home/charles/miniconda3/envs",
-  "venv": "sglang-v100",
+  "venvPath": "<absolute-path-to-virtual-environment-parent>",
+  "venv": "<environment-name>",
   "extraPaths": [
     "python",
     "sgl-kernel/python",

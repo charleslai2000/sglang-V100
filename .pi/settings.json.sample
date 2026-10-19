@@ -1,0 +1,40 @@
+{
+  "lsp": {
+    "enabled": true,
+    "servers": {
+      "rust-analyzer": {
+        "command": "<absolute-path-to-rust-analyzer>",
+        "args": [],
+        "env": {
+          "RUSTUP_TOOLCHAIN": "<toolchain-version>",
+          "CARGO_TARGET_DIR": "<absolute-path-outside-repository>"
+        },
+        "rootMarkers": ["Cargo.toml"]
+      },
+      "clangd": {
+        "command": "<absolute-path-to-clangd>",
+        "args": [
+          "--background-index",
+          "--compile-commands-dir=<absolute-path-to-external-compile-database>",
+          "--query-driver=<absolute-path-to-clang++>"
+        ],
+        "rootMarkers": [".git"]
+      },
+      "pyright": {
+        "command": "pyright-langserver",
+        "args": ["--stdio"],
+        "env": {
+          "PATH": "<environment-bin-paths>:$PATH",
+          "VIRTUAL_ENV": "<absolute-path-to-python-environment>",
+          "PYTHONPATH": "<project-python-paths>"
+        },
+        "rootMarkers": ["pyrightconfig.json", ".git"]
+      },
+      "markdown": {
+        "command": "<absolute-path-to-markdown-oxide>",
+        "args": []
+      }
+    }
+  },
+  "packages": ["<path-to-pi-lsp-extension>"]
+}
