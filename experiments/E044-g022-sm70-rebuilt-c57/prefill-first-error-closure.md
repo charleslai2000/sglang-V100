@@ -26,4 +26,14 @@ A separate fresh worker ran fixed 512-token Prefill and compared each actual dow
 - Native log SHA256 `d0145faa37af280e903342e3ca5204772bd7f65a2c109ece67f04363fc636ccf`; candidate first-error log SHA256 `a4d26ecf0bdcd398081992a8c78dbc4b8ffde34f978c12ee2af36d2f8910ee72`.
 - Candidate shared extension SHA256 for both controlled candidate and oracle processes: `faa2cf9c7cc0230c2e13e7aad0223e53f01e7ad3d77984a7e75294209e7c011e`; source SHA256 `1a09fd0fe727ed14f216ecc3af5dfabea00b3744a3b1cd4a4fcfd59f32287558`.
 
-Full corrected model integration, same-input hidden/logit comparison under identical arithmetic, Graph replay, 512/1K/4K synchronized performance/kernel counts, peak VRAM and service qualification remain undone. The current total call materializes a 4-byte-per-weight FP32 matrix per invocation; at K=12,288 and N=3,072 this is 144 MiB per call (plus FP32 input/output). It is released after the call but no reusable scratch pool/performance memory proof exists yet. This is a significant unresolved per-call memory and Prefill cost risk. Candidate remains experimental/default-off.
+Full corrected model integration, same-input hidden/logit comparison under identical arithmetic, Graph replay, kernel-count collection, and service qualification remain undone. A warmed (one shape warmup plus two repeat warmups, five CUDA-event trials per shape) single-worker candidate diagnostic run on the target V100 measured:
+
+| Prefill tokens | median GPU event ms | token/s | peak PyTorch allocated | peak reserved |
+|---:|---:|---:|---:|---:|
+| 512 | 265.312 | 1,929.8 | 9,998,886,912 B | 10,915,676,160 B |
+| 1,024 | 478.797 | 2,138.7 | 10,080,884,736 B | 10,915,676,160 B |
+| 4,096 | 1,881.118 | 2,177.4 | 10,609,440,768 B | 10,915,676,160 B |
+
+All three trial outputs had finite hidden/logits. Log: `/data/t011/artifacts/commonops128/t011-prefill-fp32-gemm-benchmark.log`, SHA256 `2f979b4ac7890644061bcb116ef7a8878670d5ef7fb61015091bc9d85a57c6ad`. These are candidate-only measurements without matched native baseline, no profiler kernel count, and don't establish the 3% threshold. They follow model initialization and unmeasured shape warmups; no first-use timings are included. This is a forward diagnostic, not full service Prefill TPS.
+
+The current total call materializes a 4-byte-per-weight FP32 matrix per invocation; at K=12,288 and N=3,072 this is 144 MiB per call (plus FP32 input/output). It is released after the call but no reusable scratch pool/performance memory proof exists yet. Candidate remains experimental/default-off; the memory footprint and no-baseline timing are unresolved risks.
