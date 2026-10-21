@@ -107,11 +107,15 @@ class FalconH1MLP(nn.Module):
                 raise RuntimeError("FP32 Prefill down path does not support reduce-scatter")
             if self.down_proj.reduce_results and get_tensor_model_parallel_world_size() > 1:
                 raise RuntimeError("FP32 Prefill down path is currently TP1-only")
-            from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
-                gptq_gemm_fp32_groupwise,
+            output = torch.ops.t011_prefill.gptq_fp32_prefill(
+                x.contiguous(),
+                self.down_proj.qweight.contiguous(),
+                self.down_proj.qzeros.contiguous(),
+                self.down_proj.scales.contiguous(),
+                self.down_proj.g_idx.contiguous(),
+                float(self.down_multiplier),
+                False,
             )
-
-            output = gptq_gemm_fp32_groupwise(x, self.down_proj)
             x = (output * self.down_multiplier).to(self.down_proj.params_dtype)
         else:
             x, _ = self.down_proj(

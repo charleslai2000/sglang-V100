@@ -1,0 +1,21 @@
+# T011 Prefill first-error closure and FP32 cuBLAS candidate
+
+Status: candidate remains experimental and opt-in only. This records one controlled fixed-input comparison, not final qualification.
+
+## Controlled first-error comparison
+
+- Target GPU UUID: `GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189`; host MemAvailable before runs: 31.1 GB.
+- Checkpoint: `/data/t011/hf/Falcon-H1-7B-Instruct-GPTQ-Int4` (same directory/revision for both fresh processes); frozen QPN2 Decode binary SHA256 `6f3ee5732ca571149c9209e403c1d03330a2a151a56541ca40b38c2f849af90f`.
+- Input IDs and positions are both exact `0..511`; each arm ran in a fresh Python process with a newly loaded model and newly initialized worker/request/Mamba/KV state. Independent random seeds are reset before construction. QPN2 source/binary, config, parameters and expected model are the same.
+- Native run log: `/data/t011/artifacts/commonops128/t011-prefill-first-error.log`; candidate run log: `/data/t011/artifacts/commonops128/t011-prefill-first-error-candidate.log`. Script: `/data/t011/artifacts/t011-prefill-first-error.py`.
+- Both arms: every observed layer mixer in/out, MLP gate-up and down projection boundary through L42 finite. Native first nonfinite producer is `model.layers.43.mlp.down_proj`, output FP16 `[512,3072]`, first Inf `[229,175]`. Candidate has no nonfinite observed boundary; final hidden and logits finite.
+- The L43 activation was independently captured immediately before `act_fn` (actual down-projection input). It is FP16 `[512,12288]`, finite in each run. Native activation SHA256 `62ffb16875f6ef7d9a5f51d0e49b7c4f504ab1fd46d0729f389fde6a7a04368d`; candidate activation SHA256 `1b63e53a36b89b8088bcdf4e3ec3771281a602ef34c45251d818888f4a55ff8f`. These differ because the two preceding executions already have different hidden states from numerical changes; both coordinates used for their own references are finite. Do not treat their references as same-activation A/B comparisons.
+- Within each arm the independent FP64 dot used that exact run's captured activation and the exact model's qweight/qzeros/scales/g_idx. Native `[229,175]`: raw FP64 `77708.75079141936`; scaled FP64 `2529.5817314915157`; direct FP32 raw `77708.75`; scaled FP32 `2529.58154296875`; final FP16 `2530`. Native raw FP16 output overflows, matching observed Inf. Candidate `[229,175]`: raw FP64 `77837.93990025949`; scaled FP64 `2533.7871061282385`; direct FP32 raw `77837.9375`; scaled FP32 `2533.786865234375`; final FP16 `2534`.
+- The old reported FP64 values `77871.5990610119` and `77708.75079141936` are not contradictory: the first comes from the separately initialized/previously hooked activation (max about 5196, artifact `/data/t011/artifacts/commonops128/t011-fp32-helper-oracle.log`), the second from a different fixed-512-token run's native activation (max about 5176; artifact `t011-fp64-prefill-forensics.log`). The present controlled run reproduced the latter input hash, and directly showed candidate-arm hidden divergence. Do not repeat this investigation absent changed inputs or code.
+- The earlier E044 experiment reported a pointwise dot of `77708.75079141936` even while its full activation contained NaN at `[229,175]`: the dot uses a finite FP64 activation coordinate from the different controlled capture, not the NaN-containing activation. It was not evidence that NaN had been multiplied. Current diagnostic independently checks finiteness before producing a dot oracle.
+
+## Current implementation
+
+`prefill_gptq_gemm.cu` now reconstructs Q4 `(q - (qzero+1))*scale` directly to FP32, converts FP16 activation to FP32, uses FP32 input/output and `CUBLAS_COMPUTE_32F` `cublasGemmEx`, multiplies the output in FP32 in Falcon's existing down multiplier location, then casts to the layer parameter dtype. It does not modify global cuBLAS policy, checkpoint data, or Decode QPN2. Weight scratch is invocation-local and released after the call; persistent per-layer FP32 weights are not kept.
+
+This code has only built successfully at this point. It still needs operator strict oracle (all output coordinates/layers), corrected full-model/Graph qualification, scratch-reuse and memory testing, synchronized benchmarking and identity-specific rebuild records. No pass is inferred from the fixed-point sample.

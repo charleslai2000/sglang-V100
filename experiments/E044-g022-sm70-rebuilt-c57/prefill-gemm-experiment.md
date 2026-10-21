@@ -1,5 +1,7 @@
 # Isolated SM70 Prefill GPTQ GEMM experiment (not qualified)
 
+The subsequent FP32-weight reconstruction iteration and controlled same-input first-error investigation are recorded in `prefill-first-error-closure.md`. They supersede the earlier FP16-weight prototype implementation, but do not retroactively qualify it or the current candidate.
+
 This experiment is independent of the QPN2 Decode kernel and is disabled by default. The prototype reconstructs checkpoint Q4/group128 weights into FP16, invokes `cublasGemmEx` with FP16 inputs and FP32 output using `CUBLAS_COMPUTE_32F` / `CUBLAS_GEMM_DEFAULT`, and can apply the existing Falcon down multiplier as FP32 alpha. It does not mutate cuBLAS handle math mode or alter checkpoint parameters.
 
 ## Current V100 evidence
