@@ -823,7 +823,10 @@ class FusedMoE(torch.nn.Module):
             isinstance(method, ModelOptNvFp4FusedMoEMethod)
             or isinstance(method, Fp8MoEMethod)
             or isinstance(method, UnquantizedFusedMoEMethod)
-            or isinstance(method, CompressedTensorsMxInt4MoE)
+            or (
+                CompressedTensorsMxInt4MoE is not None
+                and isinstance(method, CompressedTensorsMxInt4MoE)
+            )
         ):
             shard_id = {"w1": "w3", "w3": "w1", "w2": "w2"}[shard_id]
 

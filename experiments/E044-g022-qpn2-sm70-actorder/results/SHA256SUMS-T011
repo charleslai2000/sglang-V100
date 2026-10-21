@@ -33,13 +33,39 @@ e4800a5d423b43ca52fb0554dd9b479e2910e47acff28afe9cdaf0b00c56afca  experiments/E0
 b7d70ff20fe83a1a9a64bb722f93de4d0b2bea3ffd7ba26622aa2a73c9e58de7  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-qualified-pass3.json
 d7c27761daa3df34c578e01046fb1f320f1785382d2d9bf27adf841df957952a  experiments/E044-g022-qpn2-sm70-actorder/results/t011-state-reuse-cancel.json
 69b94c218c4747d209af62a3ef5e668d00b65863cdbf411745937b9297177d40  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-c57-qualified-pass1.jsonl
-bf8fc0a8700374e2c255db6fecb8b5696530c672536121d3db52b40e5269b808  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-c57-qualified-pass2b.jsonl
-c4f7497397a4b51896e1053acdc38e9313acde8019fb210fe782208372830b35  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-qualified-pass1.jsonl
-4ca6ef54c3ddde4bdffca913b6d7584224831d8625ec20f4307730704b4a120f  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-qualified-pass2.jsonl
-5847df83c7212afb5fdefd3e151e8f4e764aa45d909515e68f0a087777670234  experiments/E044-g022-qpn2-sm70-actorder/results/gpu-t011-qualified-pass3.jsonl
-ed59028674696f5fc4ff37a0ea53e1db5cf0bd49a60a2ff57487741bb4a1d4bb  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-c57-qualified-pass1.jsonl
-e10d64b097f2d137eafedb86c825f02120ecd1c3077071e2b73ad91e6196b56d  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-c57-qualified-pass2b.jsonl
-f0294783b7daf24333480229165ce2bf306410641a886400a73c5960b1d41ea1  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-t011-qualified-pass1.jsonl
-dc12b0eeff7bb214d5326b9536392b73583aa98c9cb93776cd61e62aafedc992  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-t011-qualified-pass2.jsonl
-d46c0273dc6713d4a827d37f45790d6962ba818a2bd60aaa552187c0088aa71a  experiments/E044-g022-qpn2-sm70-actorder/results/fpm-t011-qualified-pass3.jsonl
-e4800a5d423b43ca52fb0554dd9b479e2910e47acff28afe9cdaf0b00c56afca  experiments/E044-g022-qpn2-sm70-actorder/results/t011-service-t011-qualified.json
+
+## Current source identities (2026-10-21)
+
+1b2d44fc8be989facbc7d5697c71c9819a2c196bf174ae2ba9c036074b64ca4a  python/sglang/srt/layers/quantization/compressed_tensors/schemes/__init__.py
+7bac438b3210eb038c4409bee4bb56918964c806d34c7528a95649e5508e468b  python/sglang/srt/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a4_mxint4_moe.py
+60b990fc6db40cadf39c44aad4dc1d4e029183758e14f0ce79f2a04653e09311  python/sglang/srt/layers/quantization/compressed_tensors/compressed_tensors.py
+0e05751c12749b1cfab6c538e10f62151d7af556a02db40d08d878c7175076d7  python/sglang/srt/layers/moe/fused_moe_triton/layer.py
+0c0c2589b59949962bc7dbb47681756bda8b02428b26c3e341aafe1248c369a1  python/sglang/srt/hardware_backend/gpu/quantization/gptq_kernels.py
+c101d0443865831918b2e16f0658347843110b9daf33a8160a4f8664baf607f3  sgl-kernel/CMakeLists.txt
+ff4715b670346d95386c6d87d102d38acdf6db0c65097b223337ddbecc81bea1  sgl-kernel/csrc/common_extension.cc
+0c915a464b503197145ef654628389fdca9f8576f153c3ea9ebf660d522fa173  experiments/E044-g022-qpn2-sm70-actorder/qpn2_multiwarp.py
+c101d0443865831918b2e16f0658347843110b9daf33a8160a4f8664baf607f3  sgl-kernel/CMakeLists.txt
+ff4715b670346d95386c6d87d102d38acdf6db0c65097b223337ddbecc81bea1  sgl-kernel/csrc/common_extension.cc
+0c915a464b503197145ef654628389fdca9f8576f153c3ea9ebf660d522fa173  experiments/E044-g022-qpn2-sm70-actorder/qpn2_multiwarp.py
+
+## Current load/Graph artifacts (2026-10-21)
+
+CUDA 12.8 SM70 final artifacts:
+
+- T011 frozen QPN2 extension: `6f3ee5732ca571149c9209e403c1d03330a2a151a56541ca40b38c2f849af90f` (`/data/t011/build/qpn128-final/frozen/qpn2_multiwarp-6f3ee5732ca571149c9209e403c1d03330a2a151a56541ca40b38c2f849af90f.so`); source `78beb9cc51f6b1960a00fc2109242d3ec9bc4326d9791c475d55f5fca63f089e`.
+- Installed SM70 common_ops binary `ab674da66a36e493a0afe3fc8d84bd4de420c04f4c4820bf3309522f6a950c58`; wheel `c2859a7846116aa445d7dadd6f50320d142061050783a7439ae0249804a4bfed`.
+- L43 strict JSONL `8fd31a490e83a6ebfb541f0ceaf210eed97498dd3fcb0043eb2c3762943d4245`; run log `05da25ceef7434caa9b8a555af7122867f672785ca6ddd9940a2631ffb37064f`.
+- Model/Graph/artifacts follow by SHA.
+
+e67ebd50303fc234bb3c9a151953568ede0f7cc7f6bbd27b60418a11fcbabb7e  /data/t011/artifacts/commonops128/model-132-module-audit.json
+0ba2576d14fc6cadc537aef6d241c22a5af0beb16689c32c4d169bc27e0290cb  /data/t011/artifacts/commonops128/model-loader-stage.log
+efcbad92e4c1221d6a57dfe06df41081fcd3798aa5709d13726f147244300261  /data/t011/artifacts/commonops128/model-forward-stage.log
+ef310ddd7f57f463dc230ddcbc9e9fb07d562437cbf10e5ab0e8c7d682c170b9  /data/t011/artifacts/commonops128/graph-runner-stage.log
+d839101fd1ad4baa158595227f8504b8170c0a69b319ff02339a6846b45f05ef  /data/t011/artifacts/commonops128/layer-oracle.log
+
+## Final CUDA 12.8 L43 qualification artifacts (2026-10-20)
+
+- Final CUDA 12.8 T011 extension SHA `6f3ee5732ca571149c9209e403c1d03330a2a151a56541ca40b38c2f849af90f`; source SHA `78beb9cc51f6b1960a00fc2109242d3ec9bc4326d9791c475d55f5fca63f089e`.
+- Qualification JSONL SHA `8fd31a490e83a6ebfb541f0ceaf210eed97498dd3fcb0043eb2c3762943d4245` (`/data/t011/artifacts/commonops128/t011-final-l43.jsonl`); log SHA `05da25ceef7434caa9b8a555af7122867f672785ca6ddd9940a2631ffb37064f` (`/data/t011/artifacts/commonops128/t011-final-l43.log`). 15 cells: strict eager/Graph oracle bad=0, repeat and independent scratch equal, Graph cast equal to eager.
+- SM70 common_ops shared library SHA `ab674da66a36e493a0afe3fc8d84bd4de420c04f4c4820bf3309522f6a950c58`; wheel SHA `c2859a7846116aa445d7dadd6f50320d142061050783a7439ae0249804a4bfed`.
+- Qualification source CLI/file handling was fixed in `qpn2_multiwarp.py`. The single L43 fixture was the only available package at `/data`.

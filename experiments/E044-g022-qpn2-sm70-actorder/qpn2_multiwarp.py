@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """T011 multiwarp QPN2 experiment generator, packer and strict fixture qualifier."""
-import argparse, hashlib, json, sys
+import argparse, faulthandler, hashlib, json, sys, time
 from pathlib import Path
 import numpy as np, torch
 from torch.utils.cpp_extension import load
@@ -79,12 +79,21 @@ def load_module(build_dir: str | Path):
     if hashlib.sha256(frozen.read_bytes()).hexdigest()!=identity:raise RuntimeError('frozen T011 binary SHA mismatch')
     return mod,frozen
 
+def _stage(name):
+ print(json.dumps({'stage': name, 'time': time.time()}), flush=True)
+
 def main():
+ faulthandler.enable(all_threads=True)
+ _stage('import-complete')
  p=argparse.ArgumentParser();p.add_argument('--fixtures',default='/mnt/data/pc01/sglang-v100-migration/remote-evidence/sglang-logs/s4-m3a-fixtures');p.add_argument('--build',default=str(HERE/'build-t011'));p.add_argument('--out',default=str(HERE/'results/t011-correctness.jsonl'));p.add_argument('--mode',choices=['all','eager','graph'],default='all');p.add_argument('--fixture-filter');p.add_argument('--M-filter',type=int,choices=(1,2,3,4));p.add_argument('--split-filter',type=int,choices=(8,16,32));a=p.parse_args()
  if torch.cuda.device_count()!=1: raise SystemExit('require CUDA_VISIBLE_DEVICES set to only target UUID')
  assert_cuda_uuid(torch,'GPU-eaeb0cc6-58aa-8413-bef3-7fb075992189')
+ _stage('extension-load-start')
  mod,binary=load_module(a.build);sf=Path(a.build)/'qpn2_multiwarp.cu';root=Path(a.fixtures);rows=[]
- for copied in sorted(root.iterdir()):
+ _stage('extension-load-complete:'+str(binary))
+ fixture_dirs=[root] if (root/'manifest.json').is_file() else sorted(x for x in root.iterdir() if x.is_dir() and (x/'manifest.json').is_file())
+ for copied in fixture_dirs:
+  _stage('fixture:'+str(copied))
   if not copied.is_dir() or copied.name.startswith('.'):continue
   if a.fixture_filter and a.fixture_filter not in copied.name:continue
   cm=json.loads((copied/'manifest.json').read_text());T=cm['tensors'];K=T['g_idx']['shape'][0];N=T['qweight']['shape'][1];G=T['scales']['shape'][0]
@@ -103,21 +112,27 @@ def main():
   qt=torch.from_numpy(packed.view(np.int32).copy()).cuda();st=torch.from_numpy(sc.copy()).cuda();pt=torch.from_numpy(perm).cuda();w64=(q.astype(np.float64)-(z[g].astype(np.float64)+1))*sc.astype(np.float64)[g]
   for M in ((a.M_filter,) if a.M_filter else (1,2,3,4)):
    tests=[('ordinary',xfull[:M])]
-   if cm['prefix']=='43.mlp.down_proj' and M==4:tests.append(('4x_saved_stress',raw(Path('/mnt/data/pc01/sglang-v100-migration/experiments/E035/packed-word-fixture-package/c57_stress_x_fp16.bin'),'<f2',(4,K))))
+   if cm['prefix']=='43.mlp.down_proj' and M==4:
+    stress_path=Path('/mnt/data/pc01/sglang-v100-migration/experiments/E035/packed-word-fixture-package/c57_stress_x_fp16.bin')
+    if not stress_path.is_file():stress_path=copied/'c57_stress_x_fp16.bin'
+    if stress_path.is_file():tests.append(('4x_saved_stress',raw(stress_path,'<f2',(4,K))))
    for label,xnp in tests:
     xt=torch.from_numpy(np.ascontiguousarray(xnp)).cuda();gx=torch.empty_like(xt);o=torch.empty((M,N),device='cuda',dtype=torch.float32);ref=torch.from_numpy((xnp.astype(np.float64)@w64).astype(np.float32)).cuda()
     for split in ((a.split_filter,) if a.split_filter else (8,16,32)):
      if G%split:continue
-     ye_view=mod.run(xt,qt,st,pt,gx,o,split);torch.cuda.synchronize();ye=ye_view.clone();tol=1e-4+5e-5*ref.abs();err=(ye-ref).abs();badmask=err>tol;bad=int(badmask.sum().item());repeat_equal=None;independent=None;go=None;graph_badmask=torch.zeros_like(badmask);gb=0;cast=None
+     _stage(f'eager-start:{cm["prefix"]}:M{M}:{label}:S{split}')
+     ye_view=mod.run(xt,qt,st,pt,gx,o,split);_stage('eager-returned');torch.cuda.synchronize();_stage('eager-synchronized');ye=ye_view.clone();tol=1e-4+5e-5*ref.abs();err=(ye-ref).abs();badmask=err>tol;bad=int(badmask.sum().item());repeat_equal=None;independent=None;go=None;graph_badmask=torch.zeros_like(badmask);gb=0;cast=None
      if a.mode in ('all','eager'):
       again_view=mod.run(xt,qt,st,pt,gx,o,split);torch.cuda.synchronize();again=again_view.clone();repeat_equal=torch.equal(ye,again)
+      _stage('oracle-and-repeat-complete')
       fresh=torch.empty_like(o);y2_view=mod.run(xt,qt,st,pt,gx,fresh,split);torch.cuda.synchronize();y2=y2_view.clone();independent=torch.equal(ye,y2)
+      _stage('independent-scratch-complete')
      if a.mode in ('all','graph'):
       stream=torch.cuda.Stream();stream.wait_stream(torch.cuda.current_stream())
       with torch.cuda.stream(stream):
        graph=torch.cuda.CUDAGraph()
        with torch.cuda.graph(graph,stream=stream):gy=mod.run(xt,qt,st,pt,gx,o,split)
-       graph.replay();torch.cuda.synchronize()
+       _stage('graph-captured');graph.replay();_stage('graph-replayed');torch.cuda.synchronize();_stage('graph-synchronized')
       torch.cuda.current_stream().wait_stream(stream);go=o.clone();graph_badmask=(go-ref).abs()>tol;gb=int(graph_badmask.sum().item());cast=torch.equal(go.half(),ye.half())
      row={'fixture':cm['prefix'],'fixture_dir':copied.name,'manifest_sha256':hashlib.sha256((copied/'manifest.json').read_bytes()).hexdigest(),'M':M,'input':label,'splitk':split,'mode':a.mode,'strict_bad':bad,'bad_points':[{'m':i,'n':j,'actual':float(ye[i,j]),'reference':float(ref[i,j]),'error':float(err[i,j]),'allowed':float(tol[i,j])} for i,j in badmask.nonzero()[:50].tolist()],'graph_strict_bad':gb,'graph_bad_points':[{'m':i,'n':j,'actual':float(go[i,j]),'reference':float(ref[i,j]),'error':float((go-ref).abs()[i,j]),'allowed':float(tol[i,j])} for i,j in graph_badmask.nonzero()[:50].tolist()],'max_ratio':float((err/tol).max()),'repeat_equal':repeat_equal,'independent_scratch_equal':independent,'graph_cast_equal_to_eager':cast,'eager_sha256':hashlib.sha256(ye.cpu().numpy().tobytes()).hexdigest(),'graph_sha256':hashlib.sha256(go.cpu().numpy().tobytes()).hexdigest() if go is not None else None,'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(sf.read_bytes()).hexdigest()};rows.append(row);print(json.dumps(row),flush=True)
      if bad or gb or (a.mode in ('all','eager') and (not repeat_equal or not independent)) or (a.mode in ('all','graph') and not cast):raise RuntimeError(f'strict/state/cast failure: {row}')

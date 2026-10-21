@@ -221,6 +221,12 @@ option(SGL_KERNEL_ENABLE_SM100A           "Enable SM100A"           OFF)
 option(SGL_KERNEL_V100_ONLY               "Build only for V100 sm70, skip all sm80/sm89/sm90/sm100 targets"  OFF)
 option(SGL_KERNEL_GPTQ_CANDIDATE "Build isolated GPTQ candidate dispatch" OFF)
 
+# SM70 FlashInfer uses CUDA software fallbacks, but the legacy norm templates
+# instantiate BF16 code through a separate ENABLE_BF16 gate. Keep BF16 disabled
+# for the V100-only target, without changing other architecture configurations.
+if (SGL_KERNEL_V100_ONLY)
+    set(SGL_KERNEL_ENABLE_BF16 OFF)
+endif()
 if (SGL_KERNEL_ENABLE_BF16)
     list(APPEND SGL_KERNEL_CUDA_FLAGS
         "-DFLASHINFER_ENABLE_BF16"
@@ -290,63 +296,70 @@ if ("${CUDA_VERSION}" VERSION_GREATER_EQUAL "12.8" OR SGL_KERNEL_ENABLE_FP4)
     )
 endif()
 
-# All source files
-# NOTE: Please sort the filenames alphabetically
-# sm70 (V100) compatible sources — these do not use bf16 intrinsics that require sm80+
+# V100 runtime source set: include the complete operator implementations
+# referenced by common_extension.cc, plus the kernels needed by Falcon's GPTQ,
+# RMSNorm, attention, Mamba and scheduler paths. Keep the build SM70-only.
 set(SOURCES
     "csrc/allreduce/custom_all_reduce.cu"
     "csrc/attention/cutlass_mla_kernel.cu"
     "csrc/attention/merge_attn_states.cu"
-    "csrc/attention/vertical_slash_index.cu"
     "csrc/common_extension.cc"
     "csrc/elementwise/activation.cu"
-    "csrc/elementwise/concat_mla.cu"
-    "csrc/elementwise/copy.cu"
     "csrc/elementwise/fused_add_rms_norm_kernel.cu"
     "csrc/elementwise/pos_enc.cu"
-    "csrc/elementwise/topk.cu"
-
-    "csrc/gemm/bmm_fp8.cu"
     "csrc/gemm/dsv3_fused_a_gemm.cu"
-    "csrc/gemm/dsv3_router_gemm_bf16_out.cu"
     "csrc/gemm/dsv3_router_gemm_entry.cu"
-    "csrc/gemm/dsv3_router_gemm_float_out.cu"
-    "csrc/gemm/fp8_blockwise_gemm_kernel.cu"
     "csrc/gemm/fp8_gemm_kernel.cu"
+    "csrc/gemm/gptq/gptq_kernel.cu"
     "csrc/gemm/int8_gemm_kernel.cu"
     "csrc/gemm/per_token_group_quant_8bit.cu"
     "csrc/gemm/per_token_group_quant_8bit_v2.cu"
     "csrc/gemm/per_token_quant_fp8.cu"
-    "csrc/gemm/qserve_w4a8_per_chn_gemm.cu"
-    "csrc/gemm/qserve_w4a8_per_group_gemm.cu"
-    "csrc/gemm/gptq/gptq_kernel.cu"
     "csrc/grammar/apply_token_bitmask_inplace_cuda.cu"
-
     "csrc/kvcacheio/transfer.cu"
     "csrc/mamba/causal_conv1d.cu"
     "csrc/memory/weak_ref_tensor.cpp"
-
-    "csrc/moe/cutlass_moe/w4a8/scaled_mm_entry.cu"
-    "csrc/moe/cutlass_moe/w4a8/w4a8_moe_data.cu"
-    "csrc/moe/cutlass_moe/w4a8/w4a8_grouped_mm_c3x.cu"
-    "csrc/moe/moe_align_kernel.cu"
-    "csrc/moe/moe_fused_gate.cu"
-    "csrc/moe/kimi_k2_moe_fused_gate.cu"
-    "csrc/moe/moe_sum.cu"
-    "csrc/moe/moe_topk_softmax_kernels.cu"
-    "csrc/moe/moe_topk_sigmoid_kernels.cu"
-    "csrc/moe/fp8_blockwise_moe_kernel.cu"
-    "csrc/moe/prepare_moe_input.cu"
-
-    "csrc/quantization/gguf/gguf_kernel.cu"
-    "csrc/speculative/eagle_utils.cu"
-    "csrc/speculative/ngram_utils.cu"
-    "csrc/speculative/packbit.cu"
-    "csrc/speculative/speculative_sampling.cu"
-
     "${repo-flashinfer_SOURCE_DIR}/csrc/norm.cu"
     "${repo-flashinfer_SOURCE_DIR}/csrc/renorm.cu"
 )
+if (SGL_KERNEL_V100_ONLY)
+    list(APPEND SOURCES
+        "csrc/attention/vertical_slash_index.cu"
+        "csrc/elementwise/concat_mla.cu"
+        "csrc/elementwise/copy.cu"
+        "csrc/elementwise/topk.cu"
+        "csrc/gemm/bmm_fp8.cu"
+        "csrc/gemm/dsv3_fused_a_gemm.cu"
+        "csrc/gemm/dsv3_router_gemm_bf16_out.cu"
+        "csrc/gemm/dsv3_router_gemm_entry.cu"
+        "csrc/gemm/dsv3_router_gemm_float_out.cu"
+        "csrc/gemm/fp8_blockwise_gemm_kernel.cu"
+        "csrc/gemm/fp8_gemm_kernel.cu"
+        "csrc/gemm/gptq/gptq_kernel.cu"
+        "csrc/gemm/int8_gemm_kernel.cu"
+        "csrc/gemm/per_token_group_quant_8bit.cu"
+        "csrc/gemm/per_token_group_quant_8bit_v2.cu"
+        "csrc/gemm/per_token_quant_fp8.cu"
+        "csrc/moe/fp8_blockwise_moe_kernel.cu"
+        "csrc/moe/cutlass_moe/w4a8/scaled_mm_entry.cu"
+        "csrc/moe/cutlass_moe/w4a8/w4a8_grouped_mm_c3x.cu"
+        "csrc/moe/cutlass_moe/w4a8/w4a8_moe_data.cu"
+        "csrc/moe/moe_align_kernel.cu"
+        "csrc/moe/moe_fused_gate.cu"
+        "csrc/moe/kimi_k2_moe_fused_gate.cu"
+        "csrc/moe/moe_sum.cu"
+        "csrc/moe/moe_topk_softmax_kernels.cu"
+        "csrc/moe/moe_topk_sigmoid_kernels.cu"
+        "csrc/moe/prepare_moe_input.cu"
+        "csrc/gemm/qserve_w4a8_per_chn_gemm.cu"
+        "csrc/gemm/qserve_w4a8_per_group_gemm.cu"
+        "csrc/quantization/gguf/gguf_kernel.cu"
+        "csrc/speculative/eagle_utils.cu"
+        "csrc/speculative/ngram_utils.cu"
+        "csrc/speculative/packbit.cu"
+        "csrc/speculative/speculative_sampling.cu"
+    )
+endif()
 
 if (NOT SGL_KERNEL_V100_ONLY)
     # Sources requiring sm80+ (bf16 hardware intrinsics, CUDA 12.6+ APIs)

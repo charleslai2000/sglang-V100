@@ -34,13 +34,34 @@ if TYPE_CHECKING:
         CompressedTensorsConfig,
     )
 
-if is_flashinfer_available():
-    from flashinfer.fp4_quantization import block_scale_interleave
-    from flashinfer.fused_moe import (
+def _load_mxint4_flashinfer_ops():
+    """Load SM100-only FlashInfer symbols when MXINT4 backend is selected."""
+    if not is_flashinfer_available():
+        raise RuntimeError(
+            "MXINT4 MoE requires FlashInfer with the SM100 MXINT4 API; "
+            "FlashInfer is unavailable."
+        )
+    try:
+        from flashinfer.fp4_quantization import block_scale_interleave
+        from flashinfer.fused_moe import (
+            convert_to_block_layout,
+            trtllm_mxint4_block_scale_moe,
+        )
+        from flashinfer.fused_moe.core import (
+            _maybe_get_cached_w3_w1_permute_indices,
+            get_w2_permute_indices_with_cache,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "MXINT4 MoE requires the SM100 MXINT4 FlashInfer symbols "
+            "trtllm_mxint4_block_scale_moe, get_w2_permute_indices_with_cache, "
+            "and the MXINT4 block-layout helpers; install a compatible build "
+            "or select a supported MoE backend."
+        ) from exc
+    return (
+        block_scale_interleave,
         convert_to_block_layout,
         trtllm_mxint4_block_scale_moe,
-    )
-    from flashinfer.fused_moe.core import (
         _maybe_get_cached_w3_w1_permute_indices,
         get_w2_permute_indices_with_cache,
     )
@@ -52,6 +73,13 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
         quant_config: CompressedTensorsConfig,
         weight_quant: QuantizationArgs,
     ):
+        (
+            self.block_scale_interleave,
+            self.convert_to_block_layout,
+            self.trtllm_mxint4_block_scale_moe,
+            self._maybe_get_cached_w3_w1_permute_indices,
+            self.get_w2_permute_indices_with_cache,
+        ) = _load_mxint4_flashinfer_ops()
         self.quant_config = quant_config
         # get_moe_scheme already resolved the matching per-layer scheme. Mixed
         # precision checkpoints need not define a literal "Linear" target.
@@ -202,7 +230,7 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             # 1. Reorder rows of W1 and scales for fused gated activation
             # 2. Shuffle weights and scaling factors for transposed mma output
             # for both w3_w1 and w2 weights and scale factors
-            permute_indices = _maybe_get_cached_w3_w1_permute_indices(
+            permute_indices = self._maybe_get_cached_w3_w1_permute_indices(
                 self._cache_permute_indices,
                 cur_expert_gemm1_weight,
                 epilogue_tile_m,
@@ -210,21 +238,21 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             gemm1_weights_shuffled = cur_expert_gemm1_weight[
                 permute_indices.to(gemm1_weights.device)
             ].contiguous()
-            permute_sf_indices = _maybe_get_cached_w3_w1_permute_indices(
+            permute_sf_indices = self._maybe_get_cached_w3_w1_permute_indices(
                 self._cache_permute_indices,
                 gemm1_scales[i].to(torch.bfloat16),
                 epilogue_tile_m,
                 num_elts_per_sf=32,
             )
             gemm1_scales_shuffled.append(
-                block_scale_interleave(
+                self.block_scale_interleave(
                     gemm1_scales[i]
                     .to(torch.bfloat16)[permute_sf_indices.to(gemm1_scales.device)]
                     .contiguous()
                 )
             )
 
-            permute_indices = get_w2_permute_indices_with_cache(
+            permute_indices = self.get_w2_permute_indices_with_cache(
                 self._cache_permute_indices,
                 cur_expert_gemm2_weight,
                 epilogue_tile_m,
@@ -233,14 +261,14 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
                 permute_indices.to(gemm2_weights.device)
             ].contiguous()
 
-            permute_sf_indices = get_w2_permute_indices_with_cache(
+            permute_sf_indices = self.get_w2_permute_indices_with_cache(
                 self._cache_permute_indices,
                 gemm2_scales[i].to(torch.bfloat16),
                 epilogue_tile_m,
                 num_elts_per_sf=16,
             )
             gemm2_scales_shuffled.append(
-                block_scale_interleave(
+                self.block_scale_interleave(
                     gemm2_scales[i]
                     .to(torch.bfloat16)[permute_sf_indices.to(gemm2_scales.device)]
                     .contiguous()
@@ -248,10 +276,10 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             )
 
             block_k = 128
-            gemm1_weights_shuffled = convert_to_block_layout(
+            gemm1_weights_shuffled = self.convert_to_block_layout(
                 gemm1_weights_shuffled.view(torch.uint8), block_k
             )
-            gemm2_weights_shuffled = convert_to_block_layout(
+            gemm2_weights_shuffled = self.convert_to_block_layout(
                 gemm2_weights_shuffled.view(torch.uint8), block_k
             )
 
@@ -338,7 +366,7 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
                 num_tokens, hidden_size, dtype=torch.bfloat16, device=x.device
             )
 
-        trtllm_mxint4_block_scale_moe(
+        self.trtllm_mxint4_block_scale_moe(
             routing_logits=router_logits,  # float
             routing_bias=correction_bias,
             hidden_states=x,

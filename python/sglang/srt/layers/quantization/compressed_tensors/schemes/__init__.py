@@ -4,8 +4,25 @@ from .compressed_tensors_scheme import (
     CompressedTensorsLinearScheme,
     CompressedTensorsMoEScheme,
 )
-from .compressed_tensors_w4a4_mxint4_moe import CompressedTensorsMxInt4MoE
 from .compressed_tensors_w4a4_nvfp4 import CompressedTensorsW4A4Fp4
+
+# Keep SM100 MXINT4 kernels optional: their FlashInfer APIs are not present in
+# all supported builds. The unavailable sentinel fails explicitly if selected.
+try:
+    from .compressed_tensors_w4a4_mxint4_moe import CompressedTensorsMxInt4MoE
+except ImportError as exc:
+    _MXINT4_IMPORT_ERROR = exc
+
+    class CompressedTensorsMxInt4MoE:
+        """Explicit unavailable sentinel for unsupported SM100 MXINT4 builds."""
+
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                "MXINT4 MoE requires FlashInfer SM100 MXINT4 APIs unavailable "
+                "in this installation"
+            ) from _MXINT4_IMPORT_ERROR
+
+
 from .compressed_tensors_w4a4_nvfp4_moe import CompressedTensorsW4A4Nvfp4MoE
 from .compressed_tensors_w4a8_int8_moe import NPUCompressedTensorsW4A8Int8DynamicMoE
 from .compressed_tensors_w8a8_fp8 import CompressedTensorsW8A8Fp8
@@ -38,7 +55,7 @@ __all__ = [
     "NPUCompressedTensorsW4A16Int4DynamicMoE",
     "WNA16_SUPPORTED_BITS",
     "CompressedTensorsW4A4Fp4",
+    "CompressedTensorsMxInt4MoE",
     "CompressedTensorsW4A4Nvfp4MoE",
     "NPUCompressedTensorsW4A8Int8DynamicMoE",
-    "CompressedTensorsMxInt4MoE",
 ]

@@ -72,7 +72,7 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.def("rmsnorm(Tensor! output, Tensor input, Tensor weight, float eps, bool enable_pdl) -> ()");
   m.impl("rmsnorm", torch::kCUDA, &rmsnorm);
 
-  m.def("fused_add_rmsnorm(Tensor! input, Tensor! residual, Tensor weight, float eps, bool enable_pdl) -> ()");
+  m.def("fused_add_rmsnorm(Tensor(a!) input, Tensor(a!) residual, Tensor weight, float eps, bool enable_pdl) -> ()");
   m.impl("fused_add_rmsnorm", torch::kCUDA, &sgl_fused_add_rmsnorm);
 
   m.def("gemma_rmsnorm(Tensor! output, Tensor input, Tensor weight, float eps, bool enable_pdl) -> ()");
@@ -286,6 +286,11 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.impl("tree_speculative_sampling_target_only", torch::kCUDA, &tree_speculative_sampling_target_only);
 
   m.def(
+      "segment_packbits(Tensor x, Tensor input_indptr, Tensor output_indptr, Tensor! y, int batch_size, "
+      "int cuda_stream) -> ()");
+  m.impl("segment_packbits", torch::kCUDA, &segment_packbits);
+
+  m.def(
       "verify_tree_greedy(Tensor! predicts, Tensor! accept_index, Tensor! accept_token_num, "
       "Tensor candidates, Tensor retrive_index, Tensor retrive_next_token, Tensor retrive_next_sibling, "
       "Tensor target_predict) -> ()");
@@ -303,11 +308,6 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
       "Tensor! retrive_next_sibling, int topk, int depth, int draft_token_num, int tree_mask_mode) -> "
       "()");
   m.impl("build_tree_kernel_efficient", torch::kCUDA, &build_tree_kernel_efficient);
-
-  m.def(
-      "segment_packbits(Tensor x, Tensor input_indptr, Tensor output_indptr, Tensor! y, int batch_size, "
-      "int cuda_stream) -> ()");
-  m.impl("segment_packbits", torch::kCUDA, &segment_packbits);
 
   /*
    * From csrc/kvcacheio

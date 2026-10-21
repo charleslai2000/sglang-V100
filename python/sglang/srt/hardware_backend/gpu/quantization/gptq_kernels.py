@@ -145,9 +145,12 @@ class GPTQLinearKernel:
                         cols=tile*32+col
                         for kg in range(K//16):
                             ks=perm_np[(kg//8)*128+(kg%8)*16+ko];v=q[ks[:,None],cols[None,:]].T;packed[tile,kg]=v[:,0::2]|(v[:,1::2]<<4)
-                    layer.register_buffer("_t011_qpn2_packed",torch.from_numpy(packed.copy()).view(torch.int32).to(qw.device),persistent=False)
-                    layer.register_buffer("_t011_qpn2_perm",torch.from_numpy(perm_np).to(qw.device,dtype=torch.int32),persistent=False)
+                    # Copy one module at a time from host staging to avoid a second
+                    # full-model GPU allocation peak while original GPTQ weights remain resident.
+                    layer.register_buffer("_t011_qpn2_packed",torch.from_numpy(packed).view(torch.int32).to(qw.device),persistent=False)
+                    layer.register_buffer("_t011_qpn2_perm",torch.from_numpy(perm_np.copy()).to(qw.device,dtype=torch.int32),persistent=False)
                     layer.__dict__["_t011_qpn2_module"]=qpn_mod;layer.__dict__["_t011_qpn2_sha"]=actual;layer.__dict__["_t011_qpn2_status"]="packed";layer.__dict__["_t011_qpn2_pack_bytes"]=packed.nbytes;t011_status="packed"
+                    del packed,q,perm_np,col,ko
 
         # for torch.compile
         layer.qzeros = torch.nn.Parameter(layer.qzeros.data, requires_grad=False)
