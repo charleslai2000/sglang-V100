@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any, Iterable, List, Optional, Set, Tuple
 
 import torch
@@ -82,6 +83,7 @@ class FalconH1MLP(nn.Module):
         self.tp_size = get_tensor_model_parallel_world_size()
 
         self.gate_multiplier, self.down_multiplier = mlp_multipliers
+        self.prefill_fp32_down = os.environ.get("SGLANG_T011_FP32_PREFILL_DOWN") == "1"
 
     def forward(
         self,
@@ -93,11 +95,30 @@ class FalconH1MLP(nn.Module):
         gate_up[:, : self.intermediate_size // self.tp_size] *= self.gate_multiplier
 
         x = self.act_fn(gate_up)
-        x, _ = self.down_proj(
-            x,
-            skip_all_reduce=use_reduce_scatter,
-        )
-        x = x * self.down_multiplier
+        if self.prefill_fp32_down and forward_batch is not None and forward_batch.forward_mode.is_extend():
+            # The native SM70 GPTQ kernel returns FP16 before Falcon's small
+            # down multiplier. Preserve the FP32 projection through scaling.
+            from sglang.srt.layers.quantization.gptq.gptq import GPTQLinearMethod
+
+            quant = self.down_proj.quant_method
+            if not isinstance(quant, GPTQLinearMethod):
+                raise RuntimeError("FP32 Prefill down path is limited to GPTQ linear layers")
+            if use_reduce_scatter:
+                raise RuntimeError("FP32 Prefill down path does not support reduce-scatter")
+            if self.down_proj.reduce_results and get_tensor_model_parallel_world_size() > 1:
+                raise RuntimeError("FP32 Prefill down path is currently TP1-only")
+            from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+                gptq_gemm_fp32_groupwise,
+            )
+
+            output = gptq_gemm_fp32_groupwise(x, self.down_proj)
+            x = (output * self.down_multiplier).to(self.down_proj.params_dtype)
+        else:
+            x, _ = self.down_proj(
+                x,
+                skip_all_reduce=use_reduce_scatter,
+            )
+            x = x * self.down_multiplier
         return x
 
 

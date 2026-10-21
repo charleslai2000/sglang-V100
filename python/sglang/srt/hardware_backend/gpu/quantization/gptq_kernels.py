@@ -51,6 +51,81 @@ _g017_dispatch_logged = False
 _t011_logged_layers = set()
 _t011_module_cache = {}
 gptq_shuffle = _unsupported_kernel
+_rebuilt_c57_module = None
+_rebuilt_c57_library_path = None
+
+
+def gptq_gemm_fp32_groupwise(x: torch.Tensor, layer: torch.nn.Module) -> torch.Tensor:
+    """FP32 GPTQ Q4 projection for isolated SM70 Prefill overflow diagnosis.
+
+    Keeps the checkpoint Q4 values, group zero points/scales and g_idx mapping,
+    but accumulates the dequantized group contributions in FP32. This is opt-in
+    and intended to defer output casting until the caller applies its multiplier.
+    """
+    if x.ndim != 2 or x.dtype != torch.float16:
+        raise RuntimeError("groupwise FP32 GPTQ path requires 2D FP16 activations")
+    if x.shape[0] > 2048:
+        raise RuntimeError(f"groupwise FP32 GPTQ probe capped at M<=2048, got {x.shape[0]}")
+    qw = layer.qweight
+    qz = layer.qzeros
+    scales = layer.scales
+    gidx = layer.g_idx
+    k_size = gidx.numel()
+    n_size = qw.shape[1]
+    if qw.dtype != torch.int32 or qz.dtype != torch.int32 or scales.dtype != torch.float16:
+        raise RuntimeError("groupwise FP32 GPTQ path requires int32 Q4 and FP16 scales")
+    n = torch.arange(n_size, device=x.device, dtype=torch.int64)
+    n_byte = n // 8
+    n_shift = (n % 8) * 4
+    packed_zero = qz.to(torch.int64)
+    zero_values = ((packed_zero[:, n_byte] >> n_shift) & 0xF) + 1
+    output = torch.zeros((x.shape[0], n_size), device=x.device, dtype=torch.float32)
+    packed_weight = qw.to(torch.int64)
+    for group in range(scales.shape[0]):
+        k = torch.nonzero(gidx == group, as_tuple=False).flatten()
+        if not k.numel():
+            continue
+        packed_rows = packed_weight.index_select(0, k // 8)
+        shifts = ((k % 8) * 4).to(torch.int64).unsqueeze(1)
+        q_values = ((packed_rows >> shifts) & 0xF).to(torch.float32)
+        zeros = zero_values[group].to(torch.float32)
+        w = (q_values - zeros.unsqueeze(0)) * scales[group].to(torch.float32).unsqueeze(0)
+        x_group = x.index_select(1, k).to(torch.float32)
+        output.add_(torch.matmul(x_group, w))
+    return output
+
+
+def _get_rebuilt_c57_op():
+    global _rebuilt_c57_module, _rebuilt_c57_library_path
+    library_path = os.environ.get("SGLANG_REBUILT_C57_LIBRARY")
+    expected_sha = os.environ.get("SGLANG_REBUILT_C57_SHA256")
+    if not library_path or not expected_sha:
+        raise RuntimeError("REBUILT-C57 opt-in requires library path and SHA256")
+    real_path = os.path.realpath(library_path)
+    with open(real_path, "rb") as f:
+        actual_sha = hashlib.sha256(f.read()).hexdigest()
+    if actual_sha != expected_sha:
+        raise RuntimeError(f"REBUILT-C57 SHA mismatch: expected {expected_sha}, got {actual_sha}")
+    if _rebuilt_c57_library_path != real_path:
+        torch.ops.load_library(real_path)
+        _rebuilt_c57_library_path = real_path
+        _rebuilt_c57_module = torch.ops.rebuilt_c57
+    schema = torch._C._dispatch_find_schema_or_throw(
+        "rebuilt_c57::gptq_q4_fp32_m4_candidate", ""
+    ).schema()
+    expected_schema = (
+        "rebuilt_c57::gptq_q4_fp32_m4_candidate(Tensor a, Tensor b_q_weight, "
+        "Tensor b_gptq_qzeros, Tensor b_gptq_scales, Tensor b_g_idx, "
+        "bool return_fp32=False) -> Tensor"
+    )
+    if str(schema) != expected_schema or not torch._C._dispatch_has_kernel_for_dispatch_key(
+        "rebuilt_c57::gptq_q4_fp32_m4_candidate", "CUDA"
+    ):
+        raise RuntimeError(
+            f"REBUILT-C57 op registration mismatch: schema={schema}, "
+            "CUDA implementation missing"
+        )
+    return _rebuilt_c57_module
 
 try:
     from sgl_kernel import gptq_gemm, gptq_shuffle
@@ -175,14 +250,26 @@ class GPTQLinearKernel:
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        global _g017_dispatch_logged
         out_shape = x.shape[:-1] + (layer.qweight.shape[-1],)
         reshaped_x = x.reshape(-1, x.shape[-1])
 
         candidate_expected_sha = os.environ.get("SGLANG_G017_CANDIDATE_SHA256")
         candidate_extension_path = os.environ.get("SGLANG_KERNEL_G017_CANDIDATE_PATH")
         t011_optin=os.environ.get("SGLANG_G022_QPN2_BINDING")=="1"
+        rebuilt_c57_requested = os.environ.get("SGLANG_REBUILT_C57_ENABLE") == "1"
+        rebuilt_c57_enabled = (
+            not t011_optin
+            and rebuilt_c57_requested
+            and not self.use_shuffle
+            and layer.quant_config.weight_bits == 4
+            and reshaped_x.dtype == torch.float16
+            and torch.cuda.is_available()
+            and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
+        )
         candidate_enabled = (
             not t011_optin
+            and not rebuilt_c57_enabled
             and not self.use_shuffle
             and 1 <= reshaped_x.shape[0] <= 4
             and layer.quant_config.weight_bits == 4
@@ -191,7 +278,25 @@ class GPTQLinearKernel:
             and torch.cuda.get_device_capability(reshaped_x.device)[0] == 7
             and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1"
         )
-        if t011_optin and os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE")=="1":raise RuntimeError("T011 and G017 c57 candidate opt-ins are mutually exclusive")
+        if t011_optin and (os.environ.get("SGLANG_G017_Q4_FP32_CANDIDATE") == "1" or rebuilt_c57_requested):
+            raise RuntimeError("T011 and c57 candidate opt-ins are mutually exclusive")
+        if rebuilt_c57_requested and (
+            t011_optin
+            or self.use_shuffle
+            or layer.quant_config.weight_bits != 4
+            or reshaped_x.dtype != torch.float16
+            or not torch.cuda.is_available()
+            or torch.cuda.get_device_capability(reshaped_x.device)[0] != 7
+        ):
+            raise RuntimeError(
+                "REBUILT-C57 was explicitly enabled but this layer is ineligible "
+                f"(shuffle={self.use_shuffle}, dtype={reshaped_x.dtype})"
+            )
+        if rebuilt_c57_enabled and reshaped_x.shape[0] > 4:
+            raise RuntimeError(
+                "REBUILT-C57 explicitly requested but M exceeds kernel limit: "
+                f"M={reshaped_x.shape[0]}"
+            )
         t011_enabled=(t011_optin and getattr(layer,"_t011_qpn2_status",None)=="packed" and not self.use_shuffle and 1<=reshaped_x.shape[0]<=4 and reshaped_x.dtype==torch.float16 and reshaped_x.shape[1]==layer.g_idx.numel() and torch.cuda.is_available() and torch.cuda.get_device_capability(reshaped_x.device)[0]==7)
         if t011_enabled:
             expected=os.environ.get("SGLANG_G022_QPN2_EXTENSION_SHA256")
@@ -204,6 +309,21 @@ class GPTQLinearKernel:
             gx=torch.empty_like(reshaped_x);fp32=torch.empty((reshaped_x.shape[0],layer.qweight.shape[1]),device=reshaped_x.device,dtype=torch.float32)
             split=8 if reshaped_x.shape[1]==3072 else 16
             output=qpn_mod.run(reshaped_x,layer._t011_qpn2_packed,layer.scales,layer._t011_qpn2_perm,gx,fp32,split).to(reshaped_x.dtype)
+        elif rebuilt_c57_enabled:
+            module = _get_rebuilt_c57_op()
+            global _g017_dispatch_logged
+            if not _g017_dispatch_logged:
+                logging.getLogger(__name__).warning(
+                    "REBUILT-C57 dispatch active layer=%s library=%s sha256=%s M=%d K=%d N=%d",
+                    getattr(layer, "prefix", layer.__class__.__name__),
+                    _rebuilt_c57_library_path, os.environ.get("SGLANG_REBUILT_C57_SHA256"),
+                    reshaped_x.shape[0], reshaped_x.shape[1], layer.qweight.shape[-1],
+                )
+                _g017_dispatch_logged = True
+            output = module.gptq_q4_fp32_m4_candidate(
+                reshaped_x, layer.qweight.to(torch.int32), layer.qzeros.to(torch.int32),
+                layer.scales, layer.g_idx, False,
+            )
         elif candidate_enabled:
             # Both exact extension identity and bytes are required before dispatch.
             if not candidate_extension_path:
@@ -227,7 +347,6 @@ class GPTQLinearKernel:
                 raise RuntimeError(
                     f"G017 candidate extension SHA mismatch: expected {candidate_expected_sha}, got {loaded_sha} at {loaded_path}"
                 )
-            global _g017_dispatch_logged
             if not _g017_dispatch_logged:
                 logging.getLogger(__name__).warning(
                     "G017 candidate GPTQ dispatch active: path=%s sha256=%s M=%d K=%d N=%d",
