@@ -12,13 +12,18 @@ The earlier sampling JIT log is a distinct failure: `/usr/bin/nvcc` included `/u
 
 ## Real c57 dispatch evidence
 
-A fresh process loaded full Falcon worker with explicit REBUILT-C57 path/SHA, then `_dummy_run(batch_size=1)` reached `GPTQLinearKernel.apply` on `model.layers.0.mlp.gate_up_proj` with Prefill M=512. It failed closed because the rebuilt c57 native op only supports M<=4. The log contains `REBUILT-C57 dispatch active ... M=512 K=3072 N=24576` followed by the CUDA op's `candidate supports aligned M in [1,4] geometries`, proving the registered native c57 kernel was actually invoked (and rejected unsupported M), not merely loaded. The SGLang startup code catches this error as a Prefill warmup warning and continues; the later diagnostic `_dummy_run` emitted the same native rejection but the harness did not propagate that exception and printed `FORWARD_OK None`. That print is not a successful Prefill result. Fix the harness/warmup propagation and route Prefill only through intended common GPTQ fallback before calling the c57 Decode path.
+A full Falcon worker process loaded REBUILT-C57 in-process, checked exact schema and CUDA registration, executed a real 512-token Prefill through the existing native GPTQ fallback, and then ran Falcon model Decode forwards at M1/M2/M4. The candidate is selected only for M<=4; M=512/1024 requests fail closed at `GPTQLinearKernel.apply`, so Prefill cannot silently route to the candidate. The log has a successful dispatch record on `model.layers.0.mlp.gate_up_proj` with M=1, K=3072, N=24576 and the exact library path/SHA. Subsequent M2/M4 model forwards returned finite full `(batch,130049)` logits. The original common_ops fallback is unchanged for prefill, and the test harness explicitly restores it for M>4. These are real c57 calls and model-forward smoke, but not independent FP32 numerical correctness or Graph capture/replay.
 
-- Full log: `/data/t011/artifacts/commonops128/rebuilt-c57-worker-identity.log`, SHA256 `0158ac86a0fb460b411318d56fa480b65153e2ba824efd1106dcdfdd0bdcc5b0`.
-- Harness: `/data/t011/artifacts/rebuilt-c57-worker-identity.py`, SHA256 `e9e9263cfa1335742612cb120a335ae33bb68fa56d3918f45ef8af2c35d003fa` (uses pytorch sampling; sampling not measured).
-- REBUILT-C57 binary SHA remains `ab5db27bade8cb868faed6ee4b72c9f7047f838b0ac23c4cdfa4c2b895944d95`; original source SHA `fe4d9d3710a3900a8983d32567e5c9eff9c83acea7b3e04fccb50df3437949b1`.
-- Peak observations from this partial worker: allocated `9,753,574,912` bytes and reserved `10,714,349,568` bytes at worker-loaded checkpoint, before verified Forward. These are not capacity peaks.
-- No successful M1/M2/M4 Decode, numerical oracle, Graph, state, or service result. T011 remains ACTIVE.
+- Full latest worker log: `/data/t011/artifacts/commonops128/rebuilt-c57-worker-identity.log`, SHA256 `dd539ba1141b3a58b02797cf0ce4ae8b39305fcd75b50c16f9d9206475087e8d`.
+- Harness: `/data/t011/artifacts/rebuilt-c57-worker-identity.py`, SHA256 `4827ac99c6277ae90376efdac82fe8fb2d5d9d4f7dca985682a8157b1d73ad8d` (pytorch sampling; no sampling-service claim).
+- REBUILT-C57 binary SHA: `ab5db27bade8cb868faed6ee4b72c9f7047f838b0ac23c4cdfa4c2b895944d95`; original CUDA source SHA `fe4d9d3710a3900a8983d32567e5c9eff9c83acea7b3e04fccb50df3437949b1`.
+- Prefill logits shape `(1,130049)`, hidden shape `(512,3072)`; Decode M1/M2/M4 logits shapes respectively `(1,130049)`, `(2,130049)`, `(4,130049)`, all hidden tensors finite. This is not an oracle comparison.
+- Allocator snapshot after worker creation: allocated `9,753,187,840`, reserved `10,714,349,568`; after forward `9,757,878,272`, reserved `10,714,349,568`. Not a load/Graph/runtime peak measurement or capacity proof.
+- No Graph capture/replay, state lifecycle, independent numerical oracle, or service result yet. T011 remains ACTIVE.
+
+## Isolated RoPE numerical test
+
+The exact previously failing RoPE specialization was rebuilt by `_jit_fused_rope_module(True, 128, torch.float16)` on the designated V100. A 16-token Q/K test compared output against explicit FP32 NeoX rotation followed by FP16 cast: max error 0, differing elements 0, output SHA256 `e44eb34a4866aa178c27c92342f3f6dfd946c8f626b5a3bbbaa3aca356e0e7ed`. Test log SHA256 `61f57122fd682bd5136b4dab34229ea469dfd7def2b6970fb6df2cbeffe268a2`; harness `/data/t011/artifacts/test_rope_sm70.py`. This qualifies only this RoPE specialization/test shape.
 
 ## Uncommitted status
 

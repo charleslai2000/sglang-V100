@@ -7,6 +7,6 @@ This directory builds an isolated Torch custom op from the original G017 c57 CUD
 - Registration schema is `rebuilt_c57::gptq_q4_fp32_m4_candidate`; CUDA implementation is bound in `rebuilt_c57_op.cc`.
 - `gptq_kernels.py` REBUILT-C57 dispatch is exploratory and is not model-qualified. It checks artifact SHA, schema string, and that a CUDA dispatch-key implementation exists, but worker integration and kernel execution have not passed.
 - Current dispatch diff patch SHA256: `2cf308612ba431b56e02731a2ba2a7432851e78216802c840aa40aa84a28a0a6` at `/data/t011/artifacts/rebuilt-c57-dispatch-exploratory.patch`. The patch is uncommitted and not production-qualified.
-- Initial Falcon worker identity and SM70 JIT findings (including the actual c57 kernel invocation rejecting Prefill M=512) are recorded in `worker-jit-findings.md`; this is not successful model qualification.
+- Falcon worker/JIT findings and the actual M1/M2/M4 REBUILT-C57 calls following a Prefill fallback are recorded in `worker-jit-findings.md`. These are model-forward smoke only, not oracle/Graph/state/service qualification.
 - Build script SHA256 `ba3f00b88d49165382f6e6a91458271fc812d21a20b0489ba0b105d76453fc46`; op registration unit SHA256 `62230be68d3676f3e17b05b409e7bce916b7247eec2d05e12cfa726a30fffbb4`.
 - Build/load/small-matrix smoke is not Falcon dispatch, correctness, Graph, capacity, or performance qualification. Do not use as READY evidence.
