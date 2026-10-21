@@ -1,0 +1,16 @@
+diff --git a/flashinfer/jit/core.py b/flashinfer/jit/core.py
+index db3d0db..7fe779e 100644
+--- a/flashinfer/jit/core.py
++++ b/flashinfer/jit/core.py
+@@ -52,8 +52,9 @@ def check_cuda_arch():
+     for major, minor in current_compilation_context.TARGET_CUDA_ARCHS:
+         if major >= 8:
+             eligible = True
+-        elif major == 7 and minor.isdigit():
+-            if int(minor) >= 5:
++        elif major == 7 and str(minor).isdigit():
++            # SGLang's pinned SM70 FlashInfer patch intentionally supports V100.
++            if int(minor) >= 0:
+                 eligible = True
+ 
+     # Raise error only if all detected architectures are lower than sm75
