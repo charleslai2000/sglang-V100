@@ -15,6 +15,10 @@ D. Imported `GPTQMarlinConfig`, `MoeWNA16Config`, `CompressedTensorsWNA16MoE`, a
 
 GPTQ's `get_moe_scheme` was also checked and explicitly rejects unsupported GPTQ MoE (raises, not silently accepting). The V100 environment emits its existing warning that the optional `marlin_v100` MoE kernel was not found; this test does not claim MoE execution support or numerical qualification.
 
+## Commit/push
+
+Validated source/evidence committed as `f472803a6a14b24a3e4ec9bc68c1d9fb79260d8b` and pushed to `origin/main`; remote ref was independently read back as the same SHA. The unrelated experimental runtime dispatch and compressed_tensors WNA16 import adjustment remain uncommitted and are not part of this commit.
+
 ## Exploratory dispatch status
 
 The `gptq_kernels.py` REBUILT-C57 route remains unqualified; its current diff is archived outside the repository at `/data/t011/artifacts/rebuilt-c57-dispatch-exploratory.patch`, SHA256 `5be2078fa9cc4b198ea257618cc7338fbf5356c5f874a6ca8226539d8243ba70`. Standalone binary SHA `ab5db27bade8cb868faed6ee4b72c9f7047f838b0ac23c4cdfa4c2b895944d95` has only build/load/small-matrix smoke evidence. No worker dispatch, Graph kernel identity, model correctness, state, capacity or service result is claimed.
