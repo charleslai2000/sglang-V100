@@ -1,8 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
-    gptq_marlin_moe_repack,
-)
+def gptq_marlin_moe_repack(*args, **kwargs):
+    # Keep this public package export without importing gptq_kernels during
+    # package initialization; the kernel module imports quantization utilities.
+    from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+        gptq_marlin_moe_repack as _repack,
+    )
+
+    return _repack(*args, **kwargs)
 
 from .gptq import (
     GPTQAscendConfig,

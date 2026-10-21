@@ -5,10 +5,6 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 
-from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
-    GPTQMarlinLinearKernel,
-    MarlinLinearLayerConfig,
-)
 from sglang.srt.layers.parameter import (
     ChannelQuantScaleParameter,
     GroupQuantScaleParameter,
@@ -31,6 +27,10 @@ __all__ = ["GPTQMarlinLinearScheme"]
 
 class GPTQMarlinLinearScheme(GPTQLinearSchemeBase):
     def __init__(self, quant_config: "GPTQMarlinConfig"):
+        from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+            GPTQMarlinLinearKernel,
+        )
+
         self.quant_config = quant_config
         self.kernel = GPTQMarlinLinearKernel(quant_config)
 
@@ -52,6 +52,10 @@ class GPTQMarlinLinearScheme(GPTQLinearSchemeBase):
     ) -> None:
         output_size_per_partition = sum(output_partition_sizes)
         is_row_parallel = input_size != input_size_per_partition
+
+        from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+            MarlinLinearLayerConfig,
+        )
 
         self.kernel.kernel_config = MarlinLinearLayerConfig(
             full_weight_shape=(input_size, output_size),
