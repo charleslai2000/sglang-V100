@@ -10,7 +10,7 @@ All commands used `/data/t011/venv/sglang/bin/python`, `PYTHONPATH=$PWD/python`,
 
 A. `from ...gptq_kernels import ...; from ...gptq import GPTQConfig` — PASS.
 B. `GPTQConfig`, `GPTQLinearScheme`, `GPTQLinearKernel` reverse import — PASS.
-C. `get_quantization_config('gptq') is GPTQConfig` — PASS. Constructed `GPTQConfig(4,128,True,False,{},'',False,False)`, `GPTQLinearScheme(config)` and asserted exact kernel class identity — PASS.
+C. `get_quantization_config('gptq')` registry lookup and actual Falcon GPTQ class resolution — PASS. Note: `get_quantization_config` returns the registered config class; it does not itself return a scheme. Constructed `GPTQConfig(4,128,True,False,{},'',False,False)`, `GPTQLinearScheme(config)` and asserted exact kernel class identity — PASS.
 D. Imported `GPTQMarlinConfig`, `MoeWNA16Config`, `CompressedTensorsWNA16MoE`, and public repack wrapper — PASS.
 
 GPTQ's `get_moe_scheme` was also checked and explicitly rejects unsupported GPTQ MoE (raises, not silently accepting). The V100 environment emits its existing warning that the optional `marlin_v100` MoE kernel was not found; this test does not claim MoE execution support or numerical qualification.
