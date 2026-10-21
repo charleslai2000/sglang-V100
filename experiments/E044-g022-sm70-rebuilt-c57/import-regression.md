@@ -19,6 +19,10 @@ GPTQ's `get_moe_scheme` was also checked and explicitly rejects unsupported GPTQ
 
 Validated source/evidence committed as `f472803a6a14b24a3e4ec9bc68c1d9fb79260d8b` and pushed to `origin/main`; remote ref was independently read back as the same SHA. The unrelated experimental runtime dispatch and compressed_tensors WNA16 import adjustment remain uncommitted and are not part of this commit.
 
+## Worker-chain attempt (not passed)
+
+After import regression, attempted an isolated full Falcon `TpModelWorker` with REBUILT-C57 opt-in and exact candidate SHA. First run stopped at missing isolated `libz3.so`; rerun with `/data/t011/ops/libz3/root/usr/lib/x86_64-linux-gnu` resolved that, then stopped in FlashInfer sampling JIT before worker completion because the local CUDA toolkit lacks host C headers (`/usr/include/c++/12/cmath: include_next <math.h>` failed while JIT compiles with nvcc). It used `/usr/bin/nvcc` and system include paths despite the installed `/data` toolkit path. No dispatch or model forward occurred. Full traceback/log: `/data/t011/artifacts/commonops128/rebuilt-c57-worker-identity.log`. This is an environment compile blocker, not a successful worker identity result. No CUDA/global environment changes were made.
+
 ## Exploratory dispatch status
 
 The `gptq_kernels.py` REBUILT-C57 route remains unqualified; its current diff is archived outside the repository at `/data/t011/artifacts/rebuilt-c57-dispatch-exploratory.patch`, SHA256 `5be2078fa9cc4b198ea257618cc7338fbf5356c5f874a6ca8226539d8243ba70`. Standalone binary SHA `ab5db27bade8cb868faed6ee4b72c9f7047f838b0ac23c4cdfa4c2b895944d95` has only build/load/small-matrix smoke evidence. No worker dispatch, Graph kernel identity, model correctness, state, capacity or service result is claimed.
