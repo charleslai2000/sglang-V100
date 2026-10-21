@@ -67,15 +67,36 @@ SGL_REGISTER_DTYPE_TRAIT(fp16_t, fp16x2_t);
 SGL_REGISTER_DTYPE_TRAIT(bf16_t, bf16x2_t);
 
 /// TODO: Add ROCM implementation
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
+SGL_DEVICE fp32x2_t bf16x2_to_float2_sm70(const bf16x2_t& value) {
+  return make_float2(__bfloat162float(value.x), __bfloat162float(value.y));
+}
+
+SGL_DEVICE bf16x2_t float2_to_bf16x2_sm70(const fp32x2_t& value) {
+  return __halves2bfloat162(__float2bfloat16_rn(value.x), __float2bfloat16_rn(value.y));
+}
+#endif
+
 SGL_REGISTER_DTYPE_TRAIT(
     fp32x2_t, fp32x4_t, SGL_REGISTER_TYPE_END; SGL_REGISTER_FROM_FUNCTION(fp16x2_t, __half22float2);
-    SGL_REGISTER_FROM_FUNCTION(bf16x2_t, __bfloat1622float2););
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
+    SGL_REGISTER_FROM_FUNCTION(bf16x2_t, bf16x2_to_float2_sm70);
+#else
+    SGL_REGISTER_FROM_FUNCTION(bf16x2_t, __bfloat1622float2);
+#endif
+);
 
 SGL_REGISTER_DTYPE_TRAIT(
     fp16x2_t, void, SGL_REGISTER_TYPE_END; SGL_REGISTER_FROM_FUNCTION(fp32x2_t, __float22half2_rn););
 
 SGL_REGISTER_DTYPE_TRAIT(
-    bf16x2_t, void, SGL_REGISTER_TYPE_END; SGL_REGISTER_FROM_FUNCTION(fp32x2_t, __float22bfloat162_rn););
+    bf16x2_t, void, SGL_REGISTER_TYPE_END;
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
+    SGL_REGISTER_FROM_FUNCTION(fp32x2_t, float2_to_bf16x2_sm70);
+#else
+    SGL_REGISTER_FROM_FUNCTION(fp32x2_t, __float22bfloat162_rn);
+#endif
+);
 
 #ifndef USE_ROCM
 SGL_REGISTER_DTYPE_TRAIT(fp8_e4m3_t, fp8x2_e4m3_t);
