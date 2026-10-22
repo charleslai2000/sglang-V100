@@ -1,6 +1,16 @@
 # G022 plan
 
-Status: **ACTIVE — T010 PERFORMANCE-NO-GO only for serial single-warp CTA. T011 has identity-safe exact-c57/T011 service cohorts at shared .75/8192 configuration, RID-linked GPU events, and real b4 improvement at 1K/c4; no b4 is achieved at 4K/c4 due actual scheduler admission. Final Prefill/TTFT/ITL, hidden/logit, request-state/slot-reuse correctness and exact model output checks remain open; no final gate/Owner ACCEPTED.** Preserve G023 ON_HOLD, S1/default/exact-c57 and protected E035 file.
+Status: **ACTIVE — T011 FP32-reconstruction and dual-FP16 residual Prefill routes are closed PERFORMANCE/NUMERICAL-NO-GO by owner ruling. Independently qualified QPN2 Decode evidence is preserved but not production ACCEPTED. New compressed-Q4 Tensor Core Prefill task T012 is ACTIVE; downstream T011 state/capacity/service gates remain conditional on T012 passing.** Preserve G023 ON_HOLD, S1/default/exact-c57 and protected E035 file.
+
+## T011 — Decode QPN2 preserved; prior Prefill routes PERFORMANCE/NUMERICAL-NO-GO
+
+Owner ruling: close the FP32 full-weight reconstruction and dual-FP16 residual Prefill routes as PERFORMANCE/NUMERICAL-NO-GO. Keep the independently qualified QPN2 Decode work and its identity-bound evidence; do not mark it production ACCEPTED. T011 remains active only for owner-authorized closure work and no acceptance transfers to a changed binary.
+
+## T012 — compressed-Q4 Tensor Core Prefill milestone
+
+New owner-authorized implementation task: implement large-M Prefill directly from compressed GPTQ Q4 using SM70 Tensor Cores, reusing the proven T011 Q4 prepack, K permutation, quadpair layout and bounded multiwarp reduction where applicable. Must preserve GPTQ-v1 zero+1, group128, nonidentity g_idx, exact FP16 representation of q-zero, per-group FP32 scales/accumulation, FP32 down multiplier, final-only FP16 cast, and avoid a global [G,M,N] partial or persistent dense weight copy. Full task/gates: `control/G022-falcon-v100-c4-performance/tasks/T012-compressed-q4-tensorcore-prefill.md`.
+
+T012 gates are sequential: 512-token L0/L22/L43 and 44-layer independent FP64 strict oracle, CUDA Graph and first-error regression; then actual 1K/4K; then same-condition native/FP32/new route Prefill timing/kernel/DRAM/Tensor/VRAM/load-preprocess accounting. Only if correctness holds and new route has no repeatable >3% regression against native may the remaining model-state, 16GiB and six service workpoints resume automatically. No further architecture variants after an evidence-backed bounded repair fails. Default stays off, QPN2 Decode unchanged, G023 ON_HOLD, and no Owner ACCEPTED.
 
 ## T011 — operator stage complete; model/service frontier active
 

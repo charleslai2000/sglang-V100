@@ -1,10 +1,10 @@
 # Current frontier
 
 ## G022-falcon-v100-c4-performance
-- T011 — QPN2 multiwarp group-aligned execution — ACTIVE
-  - frontier: Optional SM100 MXINT4 import fixed; new SHA `6f3ee573…` loads 88/88 runtime GPTQ linears, captures Graph1/2/3/4 and runs one 512-token Prefill→Decode path. Frozen FP32/logit/greedy oracle, concurrent state/slot lifecycle, NVML peak/capacity and six-point fresh c57/T011 service A/B remain decisive gates; no READY/NO-GO.
-  - task: `control/G022-falcon-v100-c4-performance/tasks/T011-qpn2-multiwarp-group-reduction.md`
-  - unblock/reopen: Operator gate and bounded NCU passed. Continue owner authorization, target V100 only, MemAvailable≥8GiB, protect E035/unowned changes, S1/default/exact-c57 unchanged; G023 ON_HOLD.
+- T011 — QPN2 multiwarp group-aligned execution — ACTIVE (Decode evidence preserved; prior Prefill routes PERFORMANCE/NUMERICAL-NO-GO)
+  - frontier: Owner closed full-weight FP32 and dual-FP16 residual Prefill. New T012 compressed-Q4 Tensor Core Prefill is active; only after it passes may outstanding model-state, 16-GiB and six-point service gates resume. QPN2 Decode remains independently qualified, not production ACCEPTED.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T011-qpn2-multiwarp-group-reduction.md`; Prefill: `control/G022-falcon-v100-c4-performance/tasks/T012-compressed-q4-tensorcore-prefill.md`
+  - unblock/reopen: Implement T012 per frozen strict oracle and target V100/MemAvailable constraints. Preserve E035/unowned changes, S1/default/exact-c57; G023 ON_HOLD.
 
 ## G023-falcon-gpu-l1-prefix-cache
 - T001 — qualify Falcon GPU prefix reuse — DEFERRED
