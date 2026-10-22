@@ -55,6 +55,7 @@ _rebuilt_c57_module = None
 _rebuilt_c57_library_path = None
 _t012_prefill_q4_module = None
 _t012_prefill_q4_sha = None
+_t012_prefill_workspaces = {}
 
 
 def apply_t012_prefill_q4(layer: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -84,19 +85,15 @@ def apply_t012_prefill_q4(layer: torch.nn.Module, x: torch.Tensor) -> torch.Tens
         if not hasattr(layer,"_t012_prepack_nbytes"):
             layer._t012_prepack_nbytes=packed.numel()*packed.element_size()+perm.numel()*perm.element_size()
         layer._t012_q4_packed=packed;layer._t012_q4_perm=perm
-        layer._t012_q4_max_m=max(4096,x.shape[0])
-        layer._t012_q4_gather=torch.empty((layer._t012_q4_max_m,K),device=x.device,dtype=torch.float16)
-        layer._t012_q4_output=torch.empty((layer._t012_q4_max_m,N),device=x.device,dtype=torch.float32)
-    if x.shape[0]>layer._t012_q4_max_m:
-        layer._t012_q4_max_m=x.shape[0]
-        layer._t012_q4_gather=torch.empty((layer._t012_q4_max_m,K),device=x.device,dtype=torch.float16)
-        layer._t012_q4_output=torch.empty((layer._t012_q4_max_m,N),device=x.device,dtype=torch.float32)
     m=x.shape[0]
-    if m>=64:
-        split,mtile=4,64
-    else:
-        split,mtile=16,8
-    return _t012_prefill_q4_module.run(x.contiguous(),layer._t012_q4_packed,layer.qzeros,layer.scales,layer._t012_q4_perm,layer._t012_q4_gather[:m],layer._t012_q4_output[:m],split,mtile)
+    key=(x.device.index,K,N,m)
+    workspace=_t012_prefill_workspaces.get(key)
+    if workspace is None:
+        workspace=(torch.empty((m,K),device=x.device,dtype=torch.float16),torch.empty((m,N),device=x.device,dtype=torch.float32))
+        _t012_prefill_workspaces[key]=workspace
+    gather,scratch=workspace
+    split,mtile=(16,8) if m<64 else (4,64)
+    return _t012_prefill_q4_module.run(x.contiguous(),layer._t012_q4_packed,layer.qzeros,layer.scales,layer._t012_q4_perm,gather,scratch,split,mtile)
 
 
 def gptq_gemm_fp32_groupwise(x: torch.Tensor, layer: torch.nn.Module) -> torch.Tensor:
