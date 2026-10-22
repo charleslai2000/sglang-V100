@@ -42,7 +42,7 @@ template<int SPLITK> __global__ void kern(const uint2*q,const int*qzeros,const h
   if(m0+row<M)out[(size_t)(m0+row)*N+(size_t)nt*32+col]=v;
  }
 }
-torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor qz,torch::Tensor s,torch::Tensor p,torch::Tensor gx,torch::Tensor o,int split){TORCH_CHECK(x.is_cuda()&&q.is_cuda()&&qz.is_cuda()&&s.is_cuda()&&p.is_cuda()&&gx.is_cuda()&&o.is_cuda(),"T012 CUDA tensors required");TORCH_CHECK(x.scalar_type()==at::kHalf&&qz.scalar_type()==at::kInt&&s.scalar_type()==at::kHalf&&gx.scalar_type()==at::kHalf&&o.scalar_type()==at::kFloat,"T012 dtype mismatch");int M=x.size(0),K=x.size(1),N=s.size(1),G=s.size(0);TORCH_CHECK(M>=1&&K%128==0&&N%32==0&&G==K/128&&G%split==0,"T012 unsupported shape/split");TORCH_CHECK(q.dim()==4&&q.size(0)==N/32&&q.size(1)==K/16&&q.size(2)==32&&q.size(3)==2&&qz.numel()==(size_t)G*N/8&&p.numel()==K&&gx.sizes()==x.sizes()&&o.sizes()==at::IntArrayRef({M,N}),"T012 tensor shape mismatch");auto st=at::cuda::getCurrentCUDAStream();gather<<<(M*K+255)/256,256,0,st>>>(reinterpret_cast<half*>(x.data_ptr<at::Half>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),p.data_ptr<int>(),M,K);
+torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor qz,torch::Tensor s,torch::Tensor p,torch::Tensor gx,torch::Tensor o,int split){TORCH_CHECK(x.is_cuda()&&q.is_cuda()&&qz.is_cuda()&&s.is_cuda()&&p.is_cuda()&&gx.is_cuda()&&o.is_cuda(),"T012 CUDA tensors required");TORCH_CHECK(x.scalar_type()==at::kHalf&&qz.scalar_type()==at::kInt&&s.scalar_type()==at::kHalf&&gx.scalar_type()==at::kHalf&&o.scalar_type()==at::kFloat,"T012 dtype mismatch");int M=x.size(0),K=x.size(1),N=s.size(1),G=s.size(0);TORCH_CHECK(M>=1&&K%128==0&&N%32==0&&G==K/128&&G%split==0,"T012 unsupported shape/split");TORCH_CHECK(q.scalar_type()==at::kInt&&p.scalar_type()==at::kInt,"T012 packed Q4 and permutation must be int32");TORCH_CHECK(q.dim()==4&&q.size(0)==N/32&&q.size(1)==K/16&&q.size(2)==32&&q.size(3)==2&&qz.dim()==2&&qz.size(0)==G&&qz.size(1)==N/8&&p.numel()==K&&gx.sizes()==x.sizes()&&o.sizes()==at::IntArrayRef({M,N}),"T012 tensor shape mismatch");auto st=at::cuda::getCurrentCUDAStream();gather<<<(M*K+255)/256,256,0,st>>>(reinterpret_cast<half*>(x.data_ptr<at::Half>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),p.data_ptr<int>(),M,K);
  #define LAUNCH(S) kern<S><<<(N/32)*((M+7)/8),32*S,0,st>>>(reinterpret_cast<uint2*>(q.data_ptr<int>()),qz.data_ptr<int>(),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),reinterpret_cast<half*>(s.data_ptr<at::Half>()),o.data_ptr<float>(),M,N,K,G)
  if(split==8)LAUNCH(8);else if(split==16)LAUNCH(16);else if(split==32)LAUNCH(32);else TORCH_CHECK(false,"T012 split must be 8,16,32");
  #undef LAUNCH
@@ -68,14 +68,17 @@ def prepack(qweight: torch.Tensor, g_idx: torch.Tensor, n: int):
         unpacked[bit::8] = ((raw >> (4 * bit)) & 15).astype(np.uint8)
     col = np.array([((lane >> 2) & 3) * 8 + (lane & 3) + (4 if lane & 16 else 0) for lane in range(32)], dtype=np.int32)
     ko = np.array([0,2,4,6,1,3,5,7,8,10,12,14,9,11,13,15], dtype=np.int32)
-    packed = np.empty((n // 32, k // 16, 32, 8), dtype=np.uint8)
+    packed_bytes = np.empty((n // 32, k // 16, 32, 8), dtype=np.uint8)
     for tile in range(n // 32):
         cols = tile * 32 + col
         for kg in range(k // 16):
             ks = perm[(kg // 8) * 128 + (kg % 8) * 16 + ko]
             vals = unpacked[ks[:, None], cols[None, :]].T
-            packed[tile, kg] = vals[:, 0::2] | (vals[:, 1::2] << 4)
-    return torch.from_numpy(packed.copy()), torch.from_numpy(perm)
+            packed_bytes[tile, kg] = vals[:, 0::2] | (vals[:, 1::2] << 4)
+    # Kernel ABI is uint2 per lane (two uint32 words, four packed bytes each).
+    # This is a bitwise view only: retain the eight Q4 nibbles unchanged.
+    packed = packed_bytes.copy().view(np.uint32).reshape(n // 32, k // 16, 32, 2)
+    return torch.from_numpy(packed.copy().view(np.int32)), torch.from_numpy(perm)
 
 
 def load(build_dir: str, cuda_home: str | None = None):
