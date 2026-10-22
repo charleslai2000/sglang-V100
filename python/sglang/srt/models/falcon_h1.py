@@ -84,6 +84,7 @@ class FalconH1MLP(nn.Module):
 
         self.gate_multiplier, self.down_multiplier = mlp_multipliers
         self.prefill_fp32_down = os.environ.get("SGLANG_T011_FP32_PREFILL_DOWN") == "1"
+        self.prefill_q4_tc = os.environ.get("SGLANG_T012_PREFILL_Q4_TC") == "1"
 
     def forward(
         self,
@@ -95,7 +96,11 @@ class FalconH1MLP(nn.Module):
         gate_up[:, : self.intermediate_size // self.tp_size] *= self.gate_multiplier
 
         x = self.act_fn(gate_up)
-        if self.prefill_fp32_down and forward_batch is not None and forward_batch.forward_mode.is_extend():
+        if self.prefill_q4_tc and forward_batch is not None and forward_batch.forward_mode.is_extend():
+            from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import apply_t012_prefill_q4
+            output = apply_t012_prefill_q4(self.down_proj, x)
+            x = (output * self.down_multiplier).to(self.down_proj.params_dtype)
+        elif self.prefill_fp32_down and forward_batch is not None and forward_batch.forward_mode.is_extend():
             # The native SM70 GPTQ kernel returns FP16 before Falcon's small
             # down multiplier. Preserve the FP32 projection through scaling.
             from sglang.srt.layers.quantization.gptq.gptq import GPTQLinearMethod

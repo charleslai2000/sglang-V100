@@ -53,6 +53,50 @@ _t011_module_cache = {}
 gptq_shuffle = _unsupported_kernel
 _rebuilt_c57_module = None
 _rebuilt_c57_library_path = None
+_t012_prefill_q4_module = None
+_t012_prefill_q4_sha = None
+
+
+def apply_t012_prefill_q4(layer: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Experimental compressed-Q4 SM70 Prefill; leaves the Decode route alone."""
+    global _t012_prefill_q4_module, _t012_prefill_q4_sha
+    if x.ndim != 2 or x.dtype != torch.float16 or x.shape[0] <= 0:
+        raise RuntimeError(f"T012 Prefill expects a positive-row FP16 input, got {tuple(x.shape)} {x.dtype}")
+    K=x.shape[1];N=layer.qweight.shape[1]
+    if K != 12288 or N != 3072 or layer.scales.shape != (96,3072):
+        raise RuntimeError(f"unsupported T012 GPTQ geometry K={K} N={N}")
+    build=Path(os.environ.get("SGLANG_T012_PREFILL_Q4_BUILD","/data/t011/build/t012-prefill-q4-mtile-run"))
+    source=Path(os.environ.get("SGLANG_T012_PREFILL_Q4_SOURCE","/data/workspace/3rdparty/sglang-V100/experiments/E044-g022-sm70-rebuilt-c57/prefill_q4_tc.py"))
+    if _t012_prefill_q4_module is None:
+        spec=importlib.util.spec_from_file_location("t012_prefill_q4_tc",source)
+        if spec is None or spec.loader is None: raise RuntimeError(f"cannot load T012 source {source}")
+        mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+        _t012_prefill_q4_module=mod.load(str(build))
+        binary=Path(_t012_prefill_q4_module.__file__).resolve();_t012_prefill_q4_sha=hashlib.sha256(binary.read_bytes()).hexdigest()
+        expected=os.environ.get("SGLANG_T012_PREFILL_Q4_SHA256")
+        if expected and expected != _t012_prefill_q4_sha: raise RuntimeError("T012 Prefill binary SHA mismatch")
+    packed=getattr(layer,"_t012_q4_packed",None)
+    if packed is None:
+        spec=importlib.util.spec_from_file_location("t012_prefill_q4_tc",source)
+        if spec is None or spec.loader is None: raise RuntimeError(f"cannot load T012 source {source}")
+        mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+        packed,perm=mod.prepack(layer.qweight,layer.g_idx,N);packed=packed.to(device=x.device);perm=perm.to(device=x.device)
+        if not hasattr(layer,"_t012_prepack_nbytes"):
+            layer._t012_prepack_nbytes=packed.numel()*packed.element_size()+perm.numel()*perm.element_size()
+        layer._t012_q4_packed=packed;layer._t012_q4_perm=perm
+        layer._t012_q4_max_m=max(4096,x.shape[0])
+        layer._t012_q4_gather=torch.empty((layer._t012_q4_max_m,K),device=x.device,dtype=torch.float16)
+        layer._t012_q4_output=torch.empty((layer._t012_q4_max_m,N),device=x.device,dtype=torch.float32)
+    if x.shape[0]>layer._t012_q4_max_m:
+        layer._t012_q4_max_m=x.shape[0]
+        layer._t012_q4_gather=torch.empty((layer._t012_q4_max_m,K),device=x.device,dtype=torch.float16)
+        layer._t012_q4_output=torch.empty((layer._t012_q4_max_m,N),device=x.device,dtype=torch.float32)
+    m=x.shape[0]
+    if m>=64:
+        split,mtile=4,64
+    else:
+        split,mtile=16,8
+    return _t012_prefill_q4_module.run(x.contiguous(),layer._t012_q4_packed,layer.qzeros,layer.scales,layer._t012_q4_perm,layer._t012_q4_gather[:m],layer._t012_q4_output[:m],split,mtile)
 
 
 def gptq_gemm_fp32_groupwise(x: torch.Tensor, layer: torch.nn.Module) -> torch.Tensor:
