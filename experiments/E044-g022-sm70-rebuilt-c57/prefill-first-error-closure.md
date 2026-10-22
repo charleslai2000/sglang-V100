@@ -40,7 +40,7 @@ All three trial outputs had finite hidden/logits. Log: `/data/t011/artifacts/com
 
 A fresh process per arm, fixed checkpoint/config/input tokens and deterministic state seed, same 512/1K/4K shapes, three unmeasured warmups and seven uninstrumented trials per process. Order per shape: native, FP32, FP32, native. The 512 FP32 arms also collect one profiler trace; those profiled runs are excluded from timing, and the sequence is native, FP32-profile, FP32-profile, native. Native is performance-only because its hidden output is nonfinite. The runner measures GPU event time, host submission and synchronization wait, PyTorch allocator peaks; controller separately samples target-UUID NVML memory/utilization every 250 ms.
 
-Completed 512-token arms so far:
+Completed alternating 512/1K/4K arms (per-shape order native, FP32, FP32, native; seven uninstrumented repetitions each; instrumentation only on FP32 512 and not used in the reported timings):
 
 | Arm | median GPU ms | TPS | host submit ms | sync wait ms | peak allocated | peak reserved | hidden finite |
 |---|---:|---:|---:|---:|---:|---:|---|
@@ -49,9 +49,22 @@ Completed 512-token arms so far:
 | FP32 pass 2 | 271.055 | 1888.9 | 260.642 | 10.457 | 9,998,886,912 B | 10,915,676,160 B | yes |
 | Native pass 2 | 182.992 | 2797.9 | 180.455 | 2.552 | 9,954,846,720 B | 10,890,510,336 B | no |
 
-These controlled order-paired measurements indicate ~47.6–48.1% full-Prefill GPU-event slowdown for FP32 versus native at 512 tokens. Existing profiler breakdown (instrumented, not performance-timing evidence) shows per 44 down calls approx FP32 Q4 reconstruction kernel 151.3 ms total, activation conversion/cast kernels small relative, and FP32 `volta_sgemm_128x128_nn` 1,122.4 ms aggregate across 440 calls (profiler sum may include concurrency/serialization and must not be equated to event interval). Native's FP16 weight reconstruction sums 121.2 ms and half GEMM 328.9 ms across 440 calls. This identifies GEMM as dominant incremental work, with FP32 weight reconstruction also material. Double FP16 residual Tensor Core experiment is therefore authorized by the owner instruction, but must pass the complete strict FP64 oracle before any qualification. No uncontrolled additional candidates will be tried.
+Completed pair medians:
 
-Profiler trace: `/data/t011/artifacts/commonops128/t011-prefill-profiler-fp32-512.json` (single instrumented 512 forward, 18,484 traced kernel events across setup/warmups/measured iterations/diagnostics; trace includes overhead and is not a per-forward kernel count). Full CUDA Event/host log: `/data/t011/artifacts/commonops128/t011-prefill-ab-alternating.log`; NVML samples: `/data/t011/artifacts/commonops128/t011-prefill-nvml-samples.jsonl`. The controller measures only 512 shape at this point; 1K and 4K are still in progress.
+| Tokens | Native pass 1 / pass 2 (ms) | FP32 pass 1 / pass 2 (ms) | Paired slowdown % |
+|---:|---:|---:|---:|
+| 512 | 184.135 / 182.992 | 270.948 / 271.055 | 47.15 / 48.12 |
+| 1,024 | 279.006 / 278.616 | 480.847 / 480.900 | 72.34 / 72.60 |
+| 4,096 | 1,082.139 / 1,086.673 | 1,896.815 / 1,887.867 | 75.28 / 73.73 |
+
+Every native run has nonfinite final hidden states, so it remains performance-only. Every FP32 run has finite hidden/logits. All three contexts show reproducible >3% regression, far above the gate. Median GPU Event throughput is 2.78K/3.67K/3.78K tokens/s native versus 1.89K/2.13K/2.16K FP32 at 512/1K/4K.
+
+Existing profiler breakdown (instrumented, not performance-timing evidence) shows per 44 down calls approx FP32 Q4 reconstruction kernel 151.3 ms total, activation conversion/cast kernels small relative, and FP32 `volta_sgemm_128x128_nn` 1,122.4 ms aggregate across 440 calls (profiler sum may include concurrency/serialization and must not be equated to event interval). Native's FP16 weight reconstruction sums 121.2 ms and half GEMM 328.9 ms across 440 calls. This identifies GEMM as dominant incremental work, with FP32 weight reconstruction also material. Double FP16 residual Tensor Core experiment is therefore authorized by the owner instruction, but must pass the complete strict FP64 oracle before any qualification. No uncontrolled additional candidates will be tried.
+
+Profiler trace: `/data/t011/artifacts/commonops128/t011-prefill-profiler-fp32-512.json` (single instrumented 512 forward, 18,484 traced kernel events across setup/warmups/measured iterations/diagnostics; trace includes overhead and is not a per-forward kernel count). Full CUDA Event/host log: `/data/t011/artifacts/commonops128/t011-prefill-ab-alternating.log`, SHA256 `40908b547cdbae7d8d3da24544970b39ee0329efdfc97596ce560a9371382f7a`; NVML samples `/data/t011/artifacts/commonops128/t011-prefill-nvml-samples.jsonl`, SHA256 `3edb8e9609828069aafe31bd68a982ad783e252d6f4b3d415b3ecc8aa4013939`; controller exit-0 log `/data/t011/artifacts/commonops128/t011-prefill-ab-controller.log` is empty (SHA256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`); profiler trace SHA256 `2ce61a0daa370d5ca4d50ac160264a5c2977ee629ead15466da3ffc06bc596be`; scripts SHA256 `40ecb05e837d939cb9f29f9adfd87efcbdad710b558e9e2f93ecc7313c28bae1` and `b995eedced4bc9580bd5d4fe142e4e6e0c787d129768839edf95eda39b4e5c9e`.
+
+NVML sampling max process-period device used was 11,062.5 MiB FP32 512, 11,050.5 MiB FP32 1K and 4K; native max was 11,026.5 MiB. Minimum free device memory was 5,321.5 MiB. PyTorch per-shape FP32 allocated peaks were 9.999/10.081/10.609 GB; reserved 10.916 GB. This was not the final service/capacity run.
+
 
 Current call allocates 144 MiB FP32 weights per projection (K=12,288,N=3,072), plus activation and output; allocator peak delta is about 41.9 MiB for whole run relative to native at 512, but PyTorch `max_memory_allocated` may not show overlapping scratch lifetime accurately across calls. Scratch reuse could reduce allocator churn, but does not eliminate Q4 reconstruction, FP32 writes or GEMM. NVML peak sampling has not been summarized yet.
 
