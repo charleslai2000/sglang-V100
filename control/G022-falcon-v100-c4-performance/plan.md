@@ -1,18 +1,22 @@
 # G022 plan
 
-Status: **ACTIVE — T011 FP32-reconstruction and dual-FP16 residual Prefill routes are closed PERFORMANCE/NUMERICAL-NO-GO by owner ruling. Independently qualified QPN2 Decode evidence is preserved but not production ACCEPTED. New compressed-Q4 Tensor Core Prefill task T012 is ACTIVE; downstream T011 state/capacity/service gates remain conditional on T012 passing.** Preserve G023 ON_HOLD, S1/default/exact-c57 and protected E035 file.
+Status: **ACTIVE — T012 DONE / CLOSED / PERFORMANCE-NO-GO / NUMERICAL-NOT-FULLY-QUALIFIED.** The implemented compressed-Q4 Tensor Core Prefill route missed the <=3% regression gate by ~13–15% at 512, ~38% at 1K and ~38% at 4K. Full-model numerical qualification and per-run binary identity binding remain incomplete. T011/T012 joint service matrix NOT_RUN because T012 failed its Prefill performance gate. T011 QPN2 Decode evidence remains independently preserved but production qualification is incomplete/not ACCEPTED. No further Falcon optimization in this closure. Preserve G023 ON_HOLD, S1/default/exact-c57 and protected E035 file.
 
 ## T011 — Decode QPN2 preserved; prior Prefill routes PERFORMANCE/NUMERICAL-NO-GO
 
 Owner ruling: close the FP32 full-weight reconstruction and dual-FP16 residual Prefill routes as PERFORMANCE/NUMERICAL-NO-GO. Keep the independently qualified QPN2 Decode work and its identity-bound evidence; do not mark it production ACCEPTED. T011 remains active only for owner-authorized closure work and no acceptance transfers to a changed binary.
 
-## T012 — compressed-Q4 Tensor Core Prefill milestone
+## T012 — CLOSED / PERFORMANCE-NO-GO / NUMERICAL-NOT-FULLY-QUALIFIED
 
-New owner-authorized implementation task: implement large-M Prefill directly from compressed GPTQ Q4 using SM70 Tensor Cores, reusing the proven T011 Q4 prepack, K permutation, quadpair layout and bounded multiwarp reduction where applicable. Must preserve GPTQ-v1 zero+1, group128, nonidentity g_idx, exact FP16 representation of q-zero, per-group FP32 scales/accumulation, FP32 down multiplier, final-only FP16 cast, and avoid a global [G,M,N] partial or persistent dense weight copy. Full task/gates: `control/G022-falcon-v100-c4-performance/tasks/T012-compressed-q4-tensorcore-prefill.md`.
+T012 is closed for the implemented route. Full-Prefill A/B missed the frozen <=3% regression threshold; full-model 44-layer correctness and reliable measured-binary identity binding were not completed. Do not infer the whole compressed-Q4 Tensor Core algorithm category is infeasible. Retain opt-in source/tests/evidence for traceability; do not continue Falcon optimization under this task. Joint T011/T012 state, capacity and service matrix is NOT_RUN because T012 did not pass performance. Full closure and evidence index: `control/G022-falcon-v100-c4-performance/tasks/T012-compressed-q4-tensorcore-prefill.md`.
 
-T012 gates are sequential: 512-token L0/L22/L43 and 44-layer independent FP64 strict oracle, CUDA Graph and first-error regression; then actual 1K/4K; then same-condition native/FP32/new route Prefill timing/kernel/DRAM/Tensor/VRAM/load-preprocess accounting. Only if correctness holds and new route has no repeatable >3% regression against native may the remaining model-state, 16GiB and six service workpoints resume automatically. No further architecture variants after an evidence-backed bounded repair fails. Default stays off, QPN2 Decode unchanged, G023 ON_HOLD, and no Owner ACCEPTED.
+T011 Decode QPN2 evidence and historical identities are preserved, but its production qualification remains incomplete/not ACCEPTED. S1/default unchanged; G023 ON_HOLD.
 
-## T011 — operator stage complete; model/service frontier active
+## T011 — QPN2 Decode evidence preserved; remaining production qualification incomplete
+
+T011 QPN2 operator correctness/performance and historical service evidence remain identity-bound as documented below. T011 is not production ACCEPTED. Joint final model-state/capacity/service acceptance did not run because the prerequisite T012 Prefill route failed its performance gate. Any continuation requires a future explicit authorization; no Falcon work is active in this closure.
+
+## T011 — operator evidence preserved; remaining production qualification incomplete
 
 Owner clarified that T010's PERFORMANCE-NO-GO applies only to the serial single-warp CTA and authorized T011. T011 implements donor-informed SPLITK 8/16/32, whole GPTQ group128 ownership, independent scale, FP32 group sums and bounded deterministic shared FP32 reduction. This is distinct from both T010 and rejected E035 global G×M×N scheme.
 

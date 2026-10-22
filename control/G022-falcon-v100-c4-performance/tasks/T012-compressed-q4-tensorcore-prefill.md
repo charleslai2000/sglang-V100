@@ -1,6 +1,9 @@
 # G022/T012 — Compressed-Q4 Tensor Core Prefill
 
-Status: **ACTIVE — implementation not started; no performance/correctness result claimed.** Owner-authorized follow-on to T011's Prefill PERFORMANCE/NUMERICAL-NO-GO. T011's FP32 full-weight reconstruction and dual-FP16 residual routes are closed and must not be revived. T011 QPN2 Decode remains independently qualified only at its recorded binary identities; no production ACCEPTED designation.
+Status: **DONE — CLOSED / PERFORMANCE-NO-GO / NUMERICAL-NOT-FULLY-QUALIFIED.** Final disposition supersedes the prospective implementation gates and intermediate checkpoints below. The implemented T012 route failed the frozen full-Prefill <=3% regression gate. Full-model numerical qualification and measured-binary identity binding remain incomplete. This result applies to this T012 implementation only; it is not evidence that compressed-Q4 Tensor Core algorithms as a class are infeasible.
+Work area: experiments
+Inputs: Owner-authorized G022/T012 directives; existing T011 QPN2 prepack/quadpair/multiwarp evidence; real Falcon GPTQ checkpoint and frozen strict FP64 oracle; assigned V100 only.
+Completion: Implement and assess opt-in compressed-Q4 SM70 Tensor Core Prefill without changing Decode QPN2/default, then pass strict full-model correctness and <=3% matched Prefill regression or close with decisive route-specific NO-GO.
 
 ## Objective
 
@@ -94,12 +97,28 @@ The existing worker/ForwardBatch harness was extended to run three fresh-process
 
 Host wall medians tracked event time closely. T012 throughput: 2,415/2,665/2,742 tokens/s at 512/1K/4K, vs native 2,789/3,675/3,787; FP32 1,914/2,131/2,166. T012's allocator peaks were 10.844/10.863/11.304 GB allocated, 11.648 GB reserved; NVML sampled device used peaked at 11,748.5 MiB for T012, leaving 4,635.5 MiB free (native max 11,026.5 MiB). This is not 16-GiB capacity qualification. No T012 run was profiler-instrumented, so these are uninstrumented latency figures.
 
-The T012 route reproducibly misses the frozen <=3% regression gate by ~13–38%, and misses it more at large M. This is decisive performance NO-GO for the implemented architecture under the explicit stop rule, so the conditional T011 state/capacity/service matrix was not launched. Numerical limits remain separately open at full-model scope: component L43 M512/1K/4K real-weight strict operator checks passed previously, but actual Falcon captured-activation 44-layer oracle, L0/L22 model-boundary comparisons, full Eager/Graph hidden/logit checks and actual graph timing were not completed. Therefore classify this route PERFORMANCE-NO-GO, not a proven numeric failure and not full-model PASS. Do not proceed with further architecture variants, M-tile tuning or service qualification unless explicitly reauthorized.
+The T012 route reproducibly misses the frozen <=3% regression gate: approximately 13–15% at 512, 38% at 1K, and 38% at 4K. This is decisive performance NO-GO for this implementation, so the conditional T011/T012 state, capacity and service matrix was not launched. Numerical limits remain separately open at full-model scope: independent strict operator checks passed for the recorded L43/down fixture M4 and generated-input M512/1K/4K cases; actual Falcon captured-activation 44-layer oracle, L0/L22 model-boundary comparisons, first-error full-model regression, and full Eager/Graph hidden/logit checks were not completed. The route is NUMERICAL-NOT-FULLY-QUALIFIED, not a proven numeric failure and not full-model PASS. The actual measured T012 binary SHA was not reliably bound to every timed subprocess; no production-binary qualification is claimed. No complete GPU profiler attribution was collected, so no definitive performance root cause is asserted. T011/T012 joint service matrix is NOT_RUN because T012 failed its performance gate. Do not proceed with further T012 variants or service qualification under this closure.
 
 The A/B harness wrote the T012 binary SHA from its environment override (`06ff...`) even though that override was set before process-local compilation. A post-cohort artifact hash of the build path is `bbdfcc8a24fd046b09ccf7980734d9e271db7968210e77c390933543f132d79f`; because each subprocess may relink the same extension path, this post-run digest is not proof of every measured arm's loaded binary identity. This identity limitation is recorded and no SHA-specific production claim is made. The earlier frozen fixture binary `c848...` and M64 oracle binary `026e...` are separate identities. Source at the current commit is independently SHA-indexed in the delivery report; source/binary identity pairing for these timings is incomplete.
 
-## Stop rule / deliverables
+## Final closure summary (2026-10-22)
 
-After one architecture implementation and at most one bounded, source-backed repair to that implementation, if strict correctness, >3% regression, 16-GiB capacity, or service gates fail, stop with evidence-backed NO-GO and root cause. Do not implement unrelated candidates or weaken gates.
+- **Decision:** CLOSED / PERFORMANCE-NO-GO / NUMERICAL-NOT-FULLY-QUALIFIED.
+- **Measured complete Prefill:** native/T012 paired GPU Event medians (ms): 512: 183.602/211.800 and 188.064/212.121; 1K: 278.660/384.051 and 278.877/384.483; 4K: 1081.611/1493.640 and 1084.629/1493.940. T012 repeated regression: ~13–15%, ~38%, ~38%, respectively, exceeding 3% gate.
+- **Numerical scope:** strict independent FP64 operator checks passed on L43/down real GPTQ component and controlled M512/1K/4K operator inputs; actual full-model 44-layer captured-activation and L0/L22/L43 hidden/logit/Graph qualification not completed. Do not describe as full model PASS or numeric FAIL.
+- **Identity/profiling:** exact running T012 binary SHA was not reliably bound to every timed subprocess; no production binary acceptance. No complete matching-boundary GPU profiler attribution; performance mechanism/root cause remains unproven.
+- **Resource:** T012 allocator allocated peak 10.844/10.863/11.304 GB, reserved 11.648 GB; NVML sampled device usage peak 11,748.5 MiB, minimum free 4,635.5 MiB. Not 16-GiB capacity qualification.
+- **Downstream:** joint T011/T012 state, 16-GiB and service matrix **NOT_RUN**, because T012 failed Prefill performance gate. T011 QPN2 Decode evidence is preserved at its recorded identities, but production qualification remains incomplete/not ACCEPTED. S1 default unchanged; G023 remains ON_HOLD.
+- **Scope:** this is a NO-GO for the implemented T012 route only, not a claim that compressed-Q4 Tensor Core methods in general are infeasible. Preserve implementation/test/artifacts for traceability and rollback. No further Falcon optimization or Gemma testing in this closure.
 
-Commit/push real source, tests, control records and evidence before each substantive progress report; verify `HEAD == origin/main`. Final report must identify actual binary SHA, source diff, full Prefill/Decode/service result matrix, numerical and performance risks, artifact paths/hashes and READY-FOR-OWNER or decisive NO-GO. Never mark Owner ACCEPTED.
+Primary evidence: A/B `/data/t011/artifacts/commonops128/t012-prefill-ab.log` SHA256 `942b988b690e3a7ea7b4fdb0432eb61ccaf48bb22d3338ebd55b44d1d732e1a1`; NVML `/data/t011/artifacts/commonops128/t012-prefill-nvml.jsonl` SHA256 `991805bd563fd474f0afc5d4beb542dbd4f5daada860f431c734b6d14ce71a20`; completed controller log SHA256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. T012 exact per-run binary binding is unresolved; post-cohort build-path SHA is not promoted as the tested-binary identity.
+
+Final closure supersedes the earlier prospective gates and intermediate evidence wording above. Preserve historical results, source and tests. No Owner ACCEPTED designation.
+
+## Result
+
+T012 is DONE as a route-specific PERFORMANCE-NO-GO / NUMERICAL-NOT-FULLY-QUALIFIED. Three-arm Prefill performance failed the gate at all measured shapes. The 512-token 44-layer actual-activation oracle and model Eager/Graph hidden/logit qualification did not complete; run-time binary SHA was not reliably tied to every timed subprocess. The required joint service matrix was NOT_RUN for the performance-gate reason.
+
+## Remaining
+
+No work remains in this closed task. Do not infer the entire compressed-Q4 Tensor Core design class is infeasible. Any future Falcon optimization requires a separately authorized task; preserve this route's source and evidence, keep default disabled, and do not mark T011 production accepted.

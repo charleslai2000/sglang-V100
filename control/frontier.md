@@ -1,10 +1,10 @@
 # Current frontier
 
 ## G022-falcon-v100-c4-performance
-- T011 — QPN2 multiwarp group-aligned execution — ACTIVE (Decode evidence preserved; prior Prefill routes PERFORMANCE/NUMERICAL-NO-GO)
-  - frontier: Owner closed full-weight FP32 and dual-FP16 residual Prefill. New T012 compressed-Q4 Tensor Core Prefill is active; only after it passes may outstanding model-state, 16-GiB and six-point service gates resume. QPN2 Decode remains independently qualified, not production ACCEPTED.
-  - task: `control/G022-falcon-v100-c4-performance/tasks/T011-qpn2-multiwarp-group-reduction.md`; Prefill: `control/G022-falcon-v100-c4-performance/tasks/T012-compressed-q4-tensorcore-prefill.md`
-  - unblock/reopen: Implement T012 per frozen strict oracle and target V100/MemAvailable constraints. Preserve E035/unowned changes, S1/default/exact-c57; G023 ON_HOLD.
+- T011 — QPN2 multiwarp group-aligned execution — ACTIVE (Decode evidence preserved; production qualification incomplete)
+  - frontier: T011's independent QPN2 Decode work remains documented but not production ACCEPTED. Its downstream model-state, 16-GiB capacity and service gates were not completed because the prerequisite T012 Prefill route closed PERFORMANCE-NO-GO / NUMERICAL-NOT-FULLY-QUALIFIED; joint service matrix is NOT_RUN. T012's ~13–15% 512 and ~38% 1K/4K regression is route-specific, not a verdict on compressed-Q4 Tensor Core methods as a class.
+  - task: `control/G022-falcon-v100-c4-performance/tasks/T011-qpn2-multiwarp-group-reduction.md`
+  - unblock/reopen: T012 is DONE and no Falcon optimization continues in this closure. Resume only under future explicit authorization. Preserve E035/unowned changes, S1/default/exact-c57; G023 ON_HOLD.
 
 ## G023-falcon-gpu-l1-prefix-cache
 - T001 — qualify Falcon GPU prefix reuse — DEFERRED
