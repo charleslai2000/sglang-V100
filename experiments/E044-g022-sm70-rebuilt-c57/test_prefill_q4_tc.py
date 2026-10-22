@@ -48,7 +48,7 @@ def check_roundtrip(qweight, g_idx):
 
 def main():
     import argparse, json
-    ap=argparse.ArgumentParser();ap.add_argument("--fixture",required=True);ap.add_argument("--build",required=True);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument("--fixture",required=True);ap.add_argument("--build",required=True);ap.add_argument("--M",type=int,default=0);ap.add_argument("--tile",type=int,default=0);ap.add_argument("--splits",default="");args=ap.parse_args()
     d=Path(args.fixture)
     import json as js
     meta=js.loads((d/'manifest.json').read_text())['tensors']
@@ -60,7 +60,10 @@ def main():
     binary=mod.load(args.build)
     p,perm=mod.prepack(q,g,q.shape[1]);print('PACKED_ABI',p.dtype,tuple(p.shape),perm.dtype,flush=True)
     print('BUILD_MODULE',binary.__file__,flush=True)
-    K,N=x.shape[1],q.shape[1];G=sc.shape[0];M=x.shape[0]
+    K,N=x.shape[1],q.shape[1];G=sc.shape[0];M=args.M or x.shape[0]
+    if M!=x.shape[0]:
+        if M not in (512,1024,4096): raise ValueError('M override supported only for requested qualification shapes')
+        x=torch.arange(M*K,dtype=torch.int64).remainder(2047).to(torch.float16).reshape(M,K).div_(128).contiguous()
     qcodes=unpack_words(q);zraw=qz.numpy().view(np.uint32);z=np.empty((G,N),dtype=np.uint8)
     for bit in range(8):z[:,bit::8]=((zraw>>(4*bit))&15).astype(np.uint8)
     groups=g.numpy();w=(qcodes.astype(np.float64)-(z[groups].astype(np.float64)+1))*sc.numpy().astype(np.float64)[groups]
@@ -69,15 +72,18 @@ def main():
     qd, pd, qzd, sd, xd = dev(p),dev(perm),dev(qz),dev(sc),dev(x)
     gx=torch.empty_like(xd);out=torch.empty((M,N),device='cuda',dtype=torch.float32)
     bads=[]
-    for split in (8,16,32):
-     if G%split: continue
-     got=binary.run(xd,qd,qzd,sd,pd,gx,out,split).clone();torch.cuda.synchronize();tol=1e-4+5e-5*ref.abs();err=(got-ref).abs();bad=int((err>tol).sum());bads.append(bad)
-     print('EAGER',json.dumps({'M':M,'split':split,'bad':bad,'max_ratio':float((err/tol).max()),'max_abs':float(err.max()),'finite':bool(torch.isfinite(got).all())}),flush=True)
-     if bad: raise AssertionError('strict FP64 oracle failed')
-     graph=torch.cuda.CUDAGraph()
-     with torch.cuda.graph(graph): gout=binary.run(xd,qd,qzd,sd,pd,gx,out,split).clone()
-     graph.replay();torch.cuda.synchronize();ge=(gout-ref).abs();gb=int((ge>1e-4+5e-5*ref.abs()).sum());print('GRAPH',json.dumps({'M':M,'split':split,'bad':gb,'finite':bool(torch.isfinite(gout).all())}),flush=True)
-     if gb or not torch.equal(gout.half(),got.half()): raise AssertionError('Graph oracle/cast mismatch')
+    for mtile,split_set in ((8,(8,16,32)),(32,(8,)),(64,(4,))):
+     if args.tile and mtile!=args.tile: continue
+     for split in split_set:
+      if args.splits and split not in tuple(int(v) for v in args.splits.split(',')): continue
+      if G%split: continue
+      got=binary.run(xd,qd,qzd,sd,pd,gx,out,split,mtile).clone();torch.cuda.synchronize();tol=1e-4+5e-5*ref.abs();err=(got-ref).abs();bad=int((err>tol).sum());bads.append(bad)
+      print('EAGER',json.dumps({'M':M,'mtile':mtile,'split':split,'bad':bad,'max_ratio':float((err/tol).max()),'max_abs':float(err.max()),'finite':bool(torch.isfinite(got).all())}),flush=True)
+      if bad: raise AssertionError('strict FP64 oracle failed')
+      graph=torch.cuda.CUDAGraph()
+      with torch.cuda.graph(graph): gout=binary.run(xd,qd,qzd,sd,pd,gx,out,split,mtile).clone()
+      graph.replay();torch.cuda.synchronize();ge=(gout-ref).abs();gb=int((ge>1e-4+5e-5*ref.abs()).sum());print('GRAPH',json.dumps({'M':M,'mtile':mtile,'split':split,'bad':gb,'finite':bool(torch.isfinite(gout).all())}),flush=True)
+      if gb or not torch.equal(gout.half(),got.half()): raise AssertionError('Graph oracle/cast mismatch')
     print('ORACLE_FINAL',json.dumps({'cases':len(bads),'strict_bad_total':sum(bads),'binary_sha256':__import__('hashlib').sha256(Path(binary.__file__).read_bytes()).hexdigest()}),flush=True)
 
 if __name__=='__main__':main()

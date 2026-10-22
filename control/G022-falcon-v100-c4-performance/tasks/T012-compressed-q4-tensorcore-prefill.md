@@ -61,6 +61,21 @@ Without seeking another routing decision, run the outstanding T011 model-state/h
 
 On assigned V100, actual L43/down fixture (`K=12288, N=3072`, manifest SHA `7c0057edb888d0b4c3730c717a6c3359ff48e07ea439714f39653d4149c48271`) roundtripped all 37,748,736 Q4 codes bitwise; prepacked size 18,874,368 bytes. SM70 binary SHA `c8a0ade8eae01a52df4a703189fca47e9eaeb34718fa365efc41b9523699cf48`, source SHA recorded by Git after commit. SASS contains `HMMA.884` and cubin target `sm_70`; SPLITK 8/16/32 report REG64 and shared 8/16/32 KiB, stack/local zero. Fixture M4 strict FP64 eager and CUDA Graph oracle passes for ordinary and saved 4× stress input, repeat/fresh scratch/Graph cast equal, strict_bad=0; max tolerance ratio 0.412535. Independent runner log `/data/t011/artifacts/commonops128/t012-prefill-q4-build-roundtrip.log` SHA256 `e390284eddf43cfa4b4bd2bf08dc063c18f5e23b83bf1b2caf8e394ffa7a348e`; frozen QPN validator JSONL `/data/t011/artifacts/commonops128/t012-qpn-validation.jsonl` SHA256 `c24f85d20b568f6688ff4a26daafe4b56285c3c4d0f62764735b993595783f6f`. These are component/fixture results only, not 512/44-layer/model/1K/4K acceptance or performance.
 
+### M-tile experiment update (intermediate, not full Prefill acceptance)
+
+An initial template over-expanded the shared partial across split-K and exceeded SM70's 48KiB CTA shared-memory budget at most 32/64-row combinations. A bounded implementation change made CTA own multiple 8-row HMMA fragments while sharing packed Q4 reads within each group iteration; the M64 test uses split4 to keep shared storage 32KiB. This source currently includes this work-in-progress extension; it remains experimental and must be requalified after final source identity is frozen.
+
+On actual L43/down Q4 (`K=12288,N=3072,G=96`), M4 (fixture input) and generated finite controlled M512/1024/4096 inputs were independently checked against original GPTQ FP64. The fixture M4 tested tile8/split8,16,32; tile32/split8; tile64/split4. At M512/1K/4K tile64/split4, eager and Graph strict-bad=0, Graph FP16 cast equals eager, max tolerance ratio about 0.509/0.519/0.519. These generated activation rows are operator stress/scale checks, not actual model activation captures or model correctness.
+
+A nine-sample uninstrumented single-Linear CUDA Event diagnostic at M512 showed tile8/split16 2.518ms, tile32/split8 2.050ms, tile64/split4 1.939ms (−18.6% / −23.0% vs tile8). At M4 the same tiles measured 0.0799/0.1280/0.2345ms, so large tile is harmful for small M. This doesn't attribute bytes or establish end-to-end speed. cuobjdump for this binary reports tile8 split16 64 registers/16KiB shared, tile32 split8 127 registers/32KiB, tile64 split4 239 registers/32KiB; stack/local zero. The high register count for 64-row ownership predicts low occupancy and needs Nsight/whole-prefill validation; 32-row tile may be the safer reuse candidate. No launch synchronization or kernel fusion assumption is made.
+
+Prototype evidence paths and SHA256:
+- `/data/t011/artifacts/commonops128/t012-prefill-q4-mtile-real.log` `2d24e9c9f6bfa16b3b69d353ee989d501d781be8bc06c43bf3b1b1d81debb0dc`
+- `/data/t011/artifacts/commonops128/t012-prefill-q4-m512-oracle.log` `9c5ddbf2aac68405074136d927bc6aefeb30e162435941c38174b6714f9925cf`
+- `/data/t011/artifacts/commonops128/t012-prefill-q4-m1024-oracle.log` `fa4d835c42d05d55f10a4b85badd9c2debcbc85bdb4b4b28dc74d387c1bee79a`
+- `/data/t011/artifacts/commonops128/t012-prefill-q4-m4096-oracle.log` `b35ba9e279a8f264db101a3f92bf975db800238f6c46587802f322e00a5be982`
+- `/data/t011/artifacts/commonops128/t012-mtile-benchmark.log` `79e975996c796d7719fdfd7afb46375d6afc33cfb3d1f12ec120346d8e6dd258`
+
 ## Stop rule / deliverables
 
 After one architecture implementation and at most one bounded, source-backed repair to that implementation, if strict correctness, >3% regression, 16-GiB capacity, or service gates fail, stop with evidence-backed NO-GO and root cause. Do not implement unrelated candidates or weaken gates.

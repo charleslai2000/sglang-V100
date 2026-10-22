@@ -19,32 +19,32 @@ CUDA_SRC = r'''#include <torch/extension.h>
 __device__ __forceinline__ unsigned h2(half a,half b){return (unsigned)__half_as_ushort(a)|((unsigned)__half_as_ushort(b)<<16);}
 __device__ __forceinline__ int nib(const int* p,size_t index){unsigned v=(unsigned)p[index>>3];return (v>>((index&7)*4))&15;}
 __global__ void gather(const half*x,half*gx,const int*p,int M,int K){size_t i=(size_t)blockIdx.x*blockDim.x+threadIdx.x;if(i<(size_t)M*K)gx[i]=x[(i/K)*(size_t)K+p[i%K]];}
-template<int SPLITK> __global__ void kern(const uint2*q,const int*qzeros,const half*x,const half*s,float*out,int M,int N,int K,int G){
- __shared__ float partial[SPLITK][8][32];
- int lane=threadIdx.x&31,warp=threadIdx.x>>5,qp=(lane>>2)&3,r=(lane&3)+((lane&16)?4:0),nt=blockIdx.x%(N/32),mt=blockIdx.x/(N/32),m0=mt*8;
+template<int SPLITK,int MTILE=8> __global__ void kern(const uint2*q,const int*qzeros,const half*x,const half*s,float*out,int M,int N,int K,int G){
+ __shared__ float partial[SPLITK][MTILE][32];
+ int lane=threadIdx.x&31,warp=threadIdx.x>>5,qp=(lane>>2)&3,r=(lane&3)+((lane&16)?4:0),nt=blockIdx.x%(N/32),mt=blockIdx.x/(N/32),m0=mt*MTILE;
  int groups_per_warp=G/SPLITK,g0=warp*groups_per_warp;const uint2*base=q+(size_t)nt*(K/16)*32+lane;
- float acc[8]={0};
- for(int g=g0;g<g0+groups_per_warp;++g){float c[8]={0};
+ float acc[MTILE/8][8]={{0}};
+ for(int g=g0;g<g0+groups_per_warp;++g){float c[MTILE/8][8]={{0}};
   int col0=nt*32+qp*8;
   int z0=nib(qzeros,(size_t)g*N+col0+0),z1=nib(qzeros,(size_t)g*N+col0+1),z2=nib(qzeros,(size_t)g*N+col0+2),z3=nib(qzeros,(size_t)g*N+col0+3),z4=nib(qzeros,(size_t)g*N+col0+4),z5=nib(qzeros,(size_t)g*N+col0+5),z6=nib(qzeros,(size_t)g*N+col0+6),z7=nib(qzeros,(size_t)g*N+col0+7);
   int zs[8]={z0+1,z1+1,z2+1,z3+1,z4+1,z5+1,z6+1,z7+1};
   for(int kg=0;kg<8;++kg){uint2 z=*(base+(size_t)(g*8+kg)*32);uint32_t w[2]={z.x,z.y};unsigned B[8];for(int wi=0;wi<2;++wi)for(int bi=0;bi<4;++bi){int j=wi*4+bi;int p0=(w[wi]>>(bi*4))&15,p1=(w[wi]>>((bi+4)*4))&15;B[j]=h2(__int2half_rn(p0-zs[j]),__int2half_rn(p1-zs[j]));}
-   int kk=kg*16;const half*xr=x+(size_t)(m0+r)*K+(size_t)g*128+kk;uint4 u=make_uint4(0,0,0,0),v=make_uint4(0,0,0,0);if(m0+r<M){u=*reinterpret_cast<const uint4*>(xr);v=*reinterpret_cast<const uint4*>(xr+8);}unsigned A[4],V[4];*reinterpret_cast<uint4*>(A)=u;*reinterpret_cast<uint4*>(V)=v;MMA(c,A[0],A[1],B[0],B[1]);MMA(c,A[2],A[3],B[2],B[3]);MMA(c,V[0],V[1],B[4],B[5]);MMA(c,V[2],V[3],B[6],B[7]);}
+   int kk=kg*16;for(int tm=0;tm<MTILE/8;++tm){const half*xr=x+(size_t)(m0+tm*8+r)*K+(size_t)g*128+kk;uint4 u=make_uint4(0,0,0,0),v=make_uint4(0,0,0,0);if(m0+tm*8+r<M){u=*reinterpret_cast<const uint4*>(xr);v=*reinterpret_cast<const uint4*>(xr+8);}unsigned A[4],V[4];*reinterpret_cast<uint4*>(A)=u;*reinterpret_cast<uint4*>(V)=v;MMA(c[tm],A[0],A[1],B[0],B[1]);MMA(c[tm],A[2],A[3],B[2],B[3]);MMA(c[tm],V[0],V[1],B[4],B[5]);MMA(c[tm],V[2],V[3],B[6],B[7]);}}
   #pragma unroll
-  for(int i=0;i<8;++i){int row=(i&2)|((lane&16)?4:0)|(lane&1),col=(i&1)|(((lane>>1)&1)<<1)|((i>>2)<<2),m=row,n=nt*32+qp*8+col;if(m<8&&m0+m<M)acc[i]+=c[i]*__half2float(s[(size_t)g*N+n]);}
+  for(int tm=0;tm<MTILE/8;++tm)for(int i=0;i<8;++i){int row=(i&2)|((lane&16)?4:0)|(lane&1),col=(i&1)|(((lane>>1)&1)<<1)|((i>>2)<<2),m=tm*8+row,n=nt*32+qp*8+col;if(row<8&&m0+m<M)acc[tm][i]+=c[tm][i]*__half2float(s[(size_t)g*N+n]);}
  }
  #pragma unroll
- for(int i=0;i<8;++i){int row=(i&2)|((lane&16)?4:0)|(lane&1),col=(i&1)|(((lane>>1)&1)<<1)|((i>>2)<<2);partial[warp][row][qp*8+col]=acc[i];}
+ for(int tm=0;tm<MTILE/8;++tm)for(int i=0;i<8;++i){int row=tm*8+(i&2)|((lane&16)?4:0)|(lane&1),col=(i&1)|(((lane>>1)&1)<<1)|((i>>2)<<2);partial[warp][row][qp*8+col]=acc[tm][i];}
  __syncthreads();
- for(int e=threadIdx.x;e<8*32;e+=blockDim.x){int row=e>>5,col=e&31;float v=0.f;
+ for(int e=threadIdx.x;e<MTILE*32;e+=blockDim.x){int row=e>>5,col=e&31;float v=0.f;
   #pragma unroll
   for(int w=0;w<SPLITK;++w)v=v+partial[w][row][col];
   if(m0+row<M)out[(size_t)(m0+row)*N+(size_t)nt*32+col]=v;
  }
 }
-torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor qz,torch::Tensor s,torch::Tensor p,torch::Tensor gx,torch::Tensor o,int split){TORCH_CHECK(x.is_cuda()&&q.is_cuda()&&qz.is_cuda()&&s.is_cuda()&&p.is_cuda()&&gx.is_cuda()&&o.is_cuda(),"T012 CUDA tensors required");TORCH_CHECK(x.scalar_type()==at::kHalf&&qz.scalar_type()==at::kInt&&s.scalar_type()==at::kHalf&&gx.scalar_type()==at::kHalf&&o.scalar_type()==at::kFloat,"T012 dtype mismatch");int M=x.size(0),K=x.size(1),N=s.size(1),G=s.size(0);TORCH_CHECK(M>=1&&K%128==0&&N%32==0&&G==K/128&&G%split==0,"T012 unsupported shape/split");TORCH_CHECK(q.scalar_type()==at::kInt&&p.scalar_type()==at::kInt,"T012 packed Q4 and permutation must be int32");TORCH_CHECK(q.dim()==4&&q.size(0)==N/32&&q.size(1)==K/16&&q.size(2)==32&&q.size(3)==2&&qz.dim()==2&&qz.size(0)==G&&qz.size(1)==N/8&&p.numel()==K&&gx.sizes()==x.sizes()&&o.sizes()==at::IntArrayRef({M,N}),"T012 tensor shape mismatch");auto st=at::cuda::getCurrentCUDAStream();gather<<<(M*K+255)/256,256,0,st>>>(reinterpret_cast<half*>(x.data_ptr<at::Half>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),p.data_ptr<int>(),M,K);
- #define LAUNCH(S) kern<S><<<(N/32)*((M+7)/8),32*S,0,st>>>(reinterpret_cast<uint2*>(q.data_ptr<int>()),qz.data_ptr<int>(),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),reinterpret_cast<half*>(s.data_ptr<at::Half>()),o.data_ptr<float>(),M,N,K,G)
- if(split==8)LAUNCH(8);else if(split==16)LAUNCH(16);else if(split==32)LAUNCH(32);else TORCH_CHECK(false,"T012 split must be 8,16,32");
+torch::Tensor run(torch::Tensor x,torch::Tensor q,torch::Tensor qz,torch::Tensor s,torch::Tensor p,torch::Tensor gx,torch::Tensor o,int split,int mtile=8){TORCH_CHECK(x.is_cuda()&&q.is_cuda()&&qz.is_cuda()&&s.is_cuda()&&p.is_cuda()&&gx.is_cuda()&&o.is_cuda(),"T012 CUDA tensors required");TORCH_CHECK(x.scalar_type()==at::kHalf&&qz.scalar_type()==at::kInt&&s.scalar_type()==at::kHalf&&gx.scalar_type()==at::kHalf&&o.scalar_type()==at::kFloat,"T012 dtype mismatch");int M=x.size(0),K=x.size(1),N=s.size(1),G=s.size(0);TORCH_CHECK(M>=1&&K%128==0&&N%32==0&&G==K/128&&G%split==0,"T012 unsupported shape/split");TORCH_CHECK(q.scalar_type()==at::kInt&&p.scalar_type()==at::kInt,"T012 packed Q4 and permutation must be int32");TORCH_CHECK(q.dim()==4&&q.size(0)==N/32&&q.size(1)==K/16&&q.size(2)==32&&q.size(3)==2&&qz.dim()==2&&qz.size(0)==G&&qz.size(1)==N/8&&p.numel()==K&&gx.sizes()==x.sizes()&&o.sizes()==at::IntArrayRef({M,N}),"T012 tensor shape mismatch");auto st=at::cuda::getCurrentCUDAStream();gather<<<(M*K+255)/256,256,0,st>>>(reinterpret_cast<half*>(x.data_ptr<at::Half>()),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),p.data_ptr<int>(),M,K);
+ #define LAUNCH(S,T) kern<S,T><<<(N/32)*((M+T-1)/T),32*S,0,st>>>(reinterpret_cast<uint2*>(q.data_ptr<int>()),qz.data_ptr<int>(),reinterpret_cast<half*>(gx.data_ptr<at::Half>()),reinterpret_cast<half*>(s.data_ptr<at::Half>()),o.data_ptr<float>(),M,N,K,G)
+ if(mtile==8){if(split==8)LAUNCH(8,8);else if(split==16)LAUNCH(16,8);else if(split==32)LAUNCH(32,8);else TORCH_CHECK(false,"split must be 8,16,32");}else if(mtile==32){TORCH_CHECK(split==8,"MTILE32 requires split8");LAUNCH(8,32);}else if(mtile==64){TORCH_CHECK(split==4,"MTILE64 requires split4");LAUNCH(4,64);}else TORCH_CHECK(false,"MTILE must be 8,32,64");
  #undef LAUNCH
  C10_CUDA_KERNEL_LAUNCH_CHECK();return o;}
 PYBIND11_MODULE(TORCH_EXTENSION_NAME,m){m.def("run",&run);}
