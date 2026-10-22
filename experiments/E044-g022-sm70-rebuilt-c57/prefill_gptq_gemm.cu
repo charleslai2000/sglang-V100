@@ -13,6 +13,8 @@ __global__ void reconstruct_q4_fp32_kernel(
     const half* __restrict__ scales,
     const int32_t* __restrict__ gidx,
     float* __restrict__ weight,
+    half* __restrict__ weight_hi,
+    half* __restrict__ weight_lo,
     int K, int N) {
   const int n = blockIdx.x * blockDim.x + threadIdx.x;
   const int k = blockIdx.y * blockDim.y + threadIdx.y;
@@ -23,13 +25,20 @@ __global__ void reconstruct_q4_fp32_kernel(
   const uint32_t packed_z = reinterpret_cast<const uint32_t*>(qzeros)[g * (N >> 3) + (n >> 3)];
   const int z = ((packed_z >> ((n & 7) * 4)) & 0xf) + 1;
   const float scale = __half2float(scales[g * N + n]);
-  weight[k * N + n] = static_cast<float>(q - z) * scale;
+  const float exact = static_cast<float>(q - z) * scale;
+  if (weight != nullptr) weight[k * N + n] = exact;
+  if (weight_hi != nullptr && weight_lo != nullptr) {
+    const half hi = __float2half_rn(exact);
+    weight_hi[k * N + n] = hi;
+    weight_lo[k * N + n] = __float2half_rn(exact - __half2float(hi));
+  }
 }
 }
 
 at::Tensor gptq_prefill_fp32_gemm(
     at::Tensor x, at::Tensor qweight, at::Tensor qzeros,
-    at::Tensor scales, at::Tensor gidx, double multiplier, bool apply_multiplier) {
+    at::Tensor scales, at::Tensor gidx, double multiplier, bool apply_multiplier,
+    bool use_double_fp16) {
   TORCH_CHECK(x.is_cuda() && x.scalar_type() == at::kHalf && x.dim() == 2,
               "x must be CUDA FP16 [M,K]");
   TORCH_CHECK(qweight.is_cuda() && qweight.scalar_type() == at::kInt && qweight.dim() == 2,
@@ -47,14 +56,21 @@ at::Tensor gptq_prefill_fp32_gemm(
   TORCH_CHECK(x.is_contiguous() && qweight.is_contiguous() && qzeros.is_contiguous() &&
               scales.is_contiguous() && gidx.is_contiguous(), "inputs must be contiguous");
   c10::cuda::CUDAGuard guard(x.device());
-  auto weight=at::empty({K,N},x.options().dtype(at::kFloat));
-  auto activation=x.to(at::kFloat);
+  auto weight=use_double_fp16 ? at::Tensor() : at::empty({K,N},x.options().dtype(at::kFloat));
+  auto weight_hi=use_double_fp16 ? at::empty({K,N},x.options()) : at::Tensor();
+  auto weight_lo=use_double_fp16 ? at::empty({K,N},x.options()) : at::Tensor();
+  auto activation=use_double_fp16 ? at::Tensor() : x.to(at::kFloat);
+  auto activation_half=use_double_fp16 ? x : at::Tensor();
   auto out=at::empty({M,N},x.options().dtype(at::kFloat));
+  auto second=use_double_fp16 ? at::empty({M,N},x.options().dtype(at::kFloat)) : at::Tensor();
   dim3 block(32,8), grid((N+31)/32,(K+7)/8);
   reconstruct_q4_fp32_kernel<<<grid,block,0,at::cuda::getCurrentCUDAStream()>>>(
       qweight.data_ptr<int32_t>(),qzeros.data_ptr<int32_t>(),
       reinterpret_cast<const half*>(scales.data_ptr<at::Half>()),gidx.data_ptr<int32_t>(),
-      weight.data_ptr<float>(),K,N);
+      use_double_fp16 ? nullptr : weight.data_ptr<float>(),
+      use_double_fp16 ? reinterpret_cast<half*>(weight_hi.data_ptr<at::Half>()) : nullptr,
+      use_double_fp16 ? reinterpret_cast<half*>(weight_lo.data_ptr<at::Half>()) : nullptr,
+      K,N);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   cublasHandle_t handle=at::cuda::getCurrentCUDABlasHandle();
   const float alpha=apply_multiplier ? static_cast<float>(multiplier) : 1.0f;
@@ -62,11 +78,27 @@ at::Tensor gptq_prefill_fp32_gemm(
   // Row-major x[M,K], w[K,N], out[M,N] via column-major reinterpretation.
   // Explicit FP32 inputs/output/compute; no global handle math-mode mutation.
   const cublasGemmAlgo_t algo = CUBLAS_GEMM_DEFAULT;
-  cublasStatus_t status=cublasGemmEx(handle,CUBLAS_OP_N,CUBLAS_OP_N,
-      N,M,K,&alpha,weight.data_ptr<float>(),CUDA_R_32F,N,
-      activation.data_ptr<float>(),CUDA_R_32F,K,&beta,out.data_ptr<float>(),CUDA_R_32F,N,
-      CUBLAS_COMPUTE_32F,algo);
-  TORCH_CHECK(status==CUBLAS_STATUS_SUCCESS,"cublasGemmEx FP32 GPTQ Prefill failed: ",static_cast<int>(status));
+  cublasStatus_t status;
+  if (use_double_fp16) {
+    const float one=1.0f;
+    status=cublasGemmEx(handle,CUBLAS_OP_N,CUBLAS_OP_N,
+        N,M,K,&one,weight_hi.data_ptr<at::Half>(),CUDA_R_16F,N,
+        activation_half.data_ptr<at::Half>(),CUDA_R_16F,K,&beta,out.data_ptr<float>(),CUDA_R_32F,N,
+        CUBLAS_COMPUTE_32F,algo);
+    TORCH_CHECK(status==CUBLAS_STATUS_SUCCESS,"cublasGemmEx FP16 high component failed: ",static_cast<int>(status));
+    status=cublasGemmEx(handle,CUBLAS_OP_N,CUBLAS_OP_N,
+        N,M,K,&one,weight_lo.data_ptr<at::Half>(),CUDA_R_16F,N,
+        activation_half.data_ptr<at::Half>(),CUDA_R_16F,K,&beta,second.data_ptr<float>(),CUDA_R_32F,N,
+        CUBLAS_COMPUTE_32F,algo);
+    TORCH_CHECK(status==CUBLAS_STATUS_SUCCESS,"cublasGemmEx FP16 residual component failed: ",static_cast<int>(status));
+    out.add_(second);
+  } else {
+    status=cublasGemmEx(handle,CUBLAS_OP_N,CUBLAS_OP_N,
+        N,M,K,&alpha,weight.data_ptr<float>(),CUDA_R_32F,N,
+        activation.data_ptr<float>(),CUDA_R_32F,K,&beta,out.data_ptr<float>(),CUDA_R_32F,N,
+        CUBLAS_COMPUTE_32F,algo);
+    TORCH_CHECK(status==CUBLAS_STATUS_SUCCESS,"cublasGemmEx FP32 GPTQ Prefill failed: ",static_cast<int>(status));
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return out;
 }

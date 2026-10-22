@@ -115,6 +115,7 @@ class FalconH1MLP(nn.Module):
                 self.down_proj.g_idx.contiguous(),
                 float(self.down_multiplier),
                 False,
+                os.environ.get("SGLANG_T011_FP16_RESIDUAL_DOWN") == "1",
             )
             x = (output * self.down_multiplier).to(self.down_proj.params_dtype)
         else:
