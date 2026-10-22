@@ -36,4 +36,23 @@ Full corrected model integration, same-input hidden/logit comparison under ident
 
 All three trial outputs had finite hidden/logits. Log: `/data/t011/artifacts/commonops128/t011-prefill-fp32-gemm-benchmark.log`, SHA256 `2f979b4ac7890644061bcb116ef7a8878670d5ef7fb61015091bc9d85a57c6ad`. These are candidate-only measurements without matched native baseline, no profiler kernel count, and don't establish the 3% threshold. They follow model initialization and unmeasured shape warmups; no first-use timings are included. This is a forward diagnostic, not full service Prefill TPS.
 
-The current total call materializes a 4-byte-per-weight FP32 matrix per invocation; at K=12,288 and N=3,072 this is 144 MiB per call (plus FP32 input/output). It is released after the call but no reusable scratch pool/performance memory proof exists yet. Candidate remains experimental/default-off; the memory footprint and no-baseline timing are unresolved risks.
+## Alternating native/FP32 Prefill A/B (in progress; no decision from partial matrix)
+
+A fresh process per arm, fixed checkpoint/config/input tokens and deterministic state seed, same 512/1K/4K shapes, three unmeasured warmups and seven uninstrumented trials per process. Order per shape: native, FP32, FP32, native. The 512 FP32 arms also collect one profiler trace; those profiled runs are excluded from timing, and the sequence is native, FP32-profile, FP32-profile, native. Native is performance-only because its hidden output is nonfinite. The runner measures GPU event time, host submission and synchronization wait, PyTorch allocator peaks; controller separately samples target-UUID NVML memory/utilization every 250 ms.
+
+Completed 512-token arms so far:
+
+| Arm | median GPU ms | TPS | host submit ms | sync wait ms | peak allocated | peak reserved | hidden finite |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Native pass 1 | 184.135 | 2780.6 | 181.770 | 2.493 | 9,954,846,720 B | 10,890,510,336 B | no |
+| FP32 pass 1 | 270.948 | 1889.7 | 255.939 | 15.091 | 9,998,886,912 B | 10,915,676,160 B | yes |
+| FP32 pass 2 | 271.055 | 1888.9 | 260.642 | 10.457 | 9,998,886,912 B | 10,915,676,160 B | yes |
+| Native pass 2 | 182.992 | 2797.9 | 180.455 | 2.552 | 9,954,846,720 B | 10,890,510,336 B | no |
+
+These controlled order-paired measurements indicate ~47.6–48.1% full-Prefill GPU-event slowdown for FP32 versus native at 512 tokens. Existing profiler breakdown (instrumented, not performance-timing evidence) shows per 44 down calls approx FP32 Q4 reconstruction kernel 151.3 ms total, activation conversion/cast kernels small relative, and FP32 `volta_sgemm_128x128_nn` 1,122.4 ms aggregate across 440 calls (profiler sum may include concurrency/serialization and must not be equated to event interval). Native's FP16 weight reconstruction sums 121.2 ms and half GEMM 328.9 ms across 440 calls. This identifies GEMM as dominant incremental work, with FP32 weight reconstruction also material. Double FP16 residual Tensor Core experiment is therefore authorized by the owner instruction, but must pass the complete strict FP64 oracle before any qualification. No uncontrolled additional candidates will be tried.
+
+Profiler trace: `/data/t011/artifacts/commonops128/t011-prefill-profiler-fp32-512.json` (single instrumented 512 forward, 18,484 traced kernel events across setup/warmups/measured iterations/diagnostics; trace includes overhead and is not a per-forward kernel count). Full CUDA Event/host log: `/data/t011/artifacts/commonops128/t011-prefill-ab-alternating.log`; NVML samples: `/data/t011/artifacts/commonops128/t011-prefill-nvml-samples.jsonl`. The controller measures only 512 shape at this point; 1K and 4K are still in progress.
+
+Current call allocates 144 MiB FP32 weights per projection (K=12,288,N=3,072), plus activation and output; allocator peak delta is about 41.9 MiB for whole run relative to native at 512, but PyTorch `max_memory_allocated` may not show overlapping scratch lifetime accurately across calls. Scratch reuse could reduce allocator churn, but does not eliminate Q4 reconstruction, FP32 writes or GEMM. NVML peak sampling has not been summarized yet.
+
+The FP32 candidate remains experimental/default-off. Do not interpret native's faster but nonfinite output as correctness, and do not enter full T011 service qualification until an approved arithmetic path passes numerical and Prefill cost gates.
