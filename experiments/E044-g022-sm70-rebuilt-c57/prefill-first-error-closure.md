@@ -65,6 +65,8 @@ Profiler trace: `/data/t011/artifacts/commonops128/t011-prefill-profiler-fp32-51
 
 NVML sampling max process-period device used was 11,062.5 MiB FP32 512, 11,050.5 MiB FP32 1K and 4K; native max was 11,026.5 MiB. Minimum free device memory was 5,321.5 MiB. PyTorch per-shape FP32 allocated peaks were 9.999/10.081/10.609 GB; reserved 10.916 GB. This was not the final service/capacity run.
 
+The single allowed dual-FP16 residual experiment was built and tested against independent per-layer FP64 reconstruction at the same real 512-token activation inputs. Although all outputs were finite and the full-model hidden/logits were finite, it produced 9,842 strict-tolerance violations across the 44 layers (notably L42=3,319 and L43=6,410) under unchanged `1e-4 + 5e-5*abs(reference)` tolerance. This attempt is rejected; no further candidate/kernel experiment is authorized by the bounded allowance. Oracle log `/data/t011/artifacts/commonops128/t011-prefill-dualfp16-oracle.log`; runner `/data/t011/artifacts/t011-prefill-dualfp16-oracle.py`; tested binary SHA256 `1085990cf345240ff2652ce776cfaa3ac879c468a258ba7c442aef355bafa055`. Strict full-model Prefill qualification consequently remains unpassed.
+
 
 Current call allocates 144 MiB FP32 weights per projection (K=12,288,N=3,072), plus activation and output; allocator peak delta is about 41.9 MiB for whole run relative to native at 512, but PyTorch `max_memory_allocated` may not show overlapping scratch lifetime accurately across calls. Scratch reuse could reduce allocator churn, but does not eliminate Q4 reconstruction, FP32 writes or GEMM. NVML peak sampling has not been summarized yet.
 
