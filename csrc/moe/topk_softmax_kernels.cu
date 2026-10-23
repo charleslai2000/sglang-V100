@@ -26,6 +26,7 @@
 #ifndef USE_ROCM
     #include <cuda_bf16.h>
     #include <cuda_fp16.h>
+    #include "sm70_bf16_compat.h"
 #else
     #include <hip/hip_bf16.h>
     #include <hip/hip_fp16.h>

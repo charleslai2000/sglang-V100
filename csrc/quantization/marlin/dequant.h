@@ -72,6 +72,7 @@ where `scale_factor * multiplier` can be computed at weight loading.
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_fp8.h>
+#include "sm70_bf16_compat.h"
 
 #include <cstdint>
 

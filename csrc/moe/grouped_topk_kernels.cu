@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cuda_fp16.h>
 #include <cuda_bf16.h>
+#include "sm70_bf16_compat.h"
 #include <cuda/std/limits>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
