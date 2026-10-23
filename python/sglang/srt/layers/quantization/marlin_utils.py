@@ -49,6 +49,7 @@ if _is_cuda:
 
 logger = logging.getLogger(__name__)
 
+
 ScalarType, scalar_types = get_scalar_types()
 
 GPTQ_MARLIN_TILE = 16
@@ -89,11 +90,56 @@ def _sm70_marlin_v100_available() -> bool:
         major, _ = get_device_capability()
         if major != 7:
             return False
+        dense_repack, dense_gemm, _ = _sm70_marlin_dense_ops()
+        if dense_repack is not None and dense_gemm is not None:
+            return True
         from sglang.jit_kernel.moe_wna16_marlin import _load_marlin_v100_op
 
         return _load_marlin_v100_op() is not None
     except Exception:
         return False
+
+
+@lru_cache(maxsize=1)
+def _sm70_marlin_dense_ops():
+    """Load and return the independently packaged SM70 dense Marlin ops."""
+    import glob
+    import os
+
+    major, _ = get_device_capability()
+    if major != 7:
+        return None, None, None
+
+    import torch
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    jit_kernel_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(here))), "jit_kernel"
+    )
+    candidates = sorted(
+        glob.glob(os.path.join(jit_kernel_dir, "_sm70_marlin_v100_dense*.so"))
+    )
+    quant_dir_candidates = sorted(
+        glob.glob(os.path.join(here, "_sm70_marlin_v100_dense*.so"))
+    )
+    candidates.extend(quant_dir_candidates)
+    home = os.path.expanduser("~")
+    candidates.extend(sorted(glob.glob(os.path.join(home, "marlin_v100", "vllm", "_C*.so"))))
+    configured = os.environ.get("SGLANG_SM70_MARLIN_DENSE_LIBRARY")
+    if configured:
+        candidates.insert(0, configured)
+    for path in candidates:
+        try:
+            torch.ops.load_library(path)
+        except Exception as e:
+            logger.warning("Could not load SM70 Dense Marlin library %s: %s", path, e)
+            continue
+        namespace = getattr(torch.ops, "_C", None)
+        repack = getattr(namespace, "gptq_marlin_repack", None) if namespace else None
+        gemm = getattr(namespace, "marlin_gemm", None) if namespace else None
+        if repack is not None and gemm is not None:
+            return repack, gemm, path
+    return None, None, None
 
 
 @lru_cache(maxsize=1)
@@ -106,82 +152,24 @@ def _sm70_marlin_v100_repack_ops():
     during loading and the marlin GEMM then reads all-zero weights. marlin_v100
     ships real SM70 repack kernels in its dense extension; load it here.
 
-    Returns ``(gptq_repack, awq_repack)`` callables, or ``(None, None)`` if the
-    extension is unavailable (non-SM70 or not built).
+    Returns the GPTQ repacker and ``None`` for unsupported AWQ on this Dense
+    INT4 symmetric-only path, or ``(None, None)`` when unavailable.
     """
-    if not _sm70_marlin_v100_available():
+    repack, _, _ = _sm70_marlin_dense_ops()
+    if repack is None:
         return None, None
-    import glob
-    import os
+    import torch
 
-    import torch  # noqa: F811
+    def _gptq(b_q_weight, perm, size_k, size_n, num_bits):
+        return repack(b_q_weight, perm, size_k, size_n, num_bits, False)
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    # setup_v100_marlin.sh installs the portable artifacts beside SGLang's
-    # JIT kernels.  The old lookup only checked this quantization source
-    # directory and ~/marlin_v100, so container images (which intentionally do
-    # not retain the full source checkout) silently fell back to SGLang's SM80+
-    # zero-output repack stub on V100.
-    jit_kernel_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(here))), "jit_kernel"
-    )
-    home = os.path.expanduser("~")
-    candidates = sorted(
-        glob.glob(os.path.join(jit_kernel_dir, "_sm70_marlin_v100_dense*.so"))
-    )
-    candidates += sorted(glob.glob(os.path.join(here, "_sm70_marlin_v100_dense*.so")))
-    candidates += sorted(glob.glob(os.path.join(home, "marlin_v100", "vllm", "_C*.so")))
-    for path in candidates:
-        try:
-            torch.ops.load_library(path)
-        except Exception:
-            continue
-        gptq = getattr(torch.ops._C, "gptq_marlin_repack", None)
-        awq = getattr(torch.ops._C, "awq_marlin_repack", None)
-        if gptq is not None:
-            # marlin_v100's op takes an extra trailing `is_a_8bit` bool; wrap it
-            # so callers can use the sglang 5-arg signature unchanged.
-            def _gptq(b_q_weight, perm, size_k, size_n, num_bits, _op=gptq):
-                return _op(b_q_weight, perm, size_k, size_n, num_bits, False)
-
-            def _awq(b_q_weight, size_k, size_n, num_bits, _op=awq):
-                return _op(b_q_weight, size_k, size_n, num_bits, False)
-
-            logger.info(
-                "SM70 (V100): using marlin_v100 gptq/awq repack from %s "
-                "(stock JIT repack is a zero-output stub below sm_80).",
-                path,
-            )
-            return _gptq, _awq
-    return None, None
+    return _gptq, None
 
 
 @lru_cache(maxsize=1)
 def _sm70_marlin_v100_gemm_op():
-    """Return marlin_v100's dense SM70 GEMM op when it is installed.
-
-    SGLang's in-tree Marlin CUDA source intentionally compiles empty kernels
-    below SM80.  The V100 integration therefore has to use the dense
-    ``marlin_v100`` extension for both repacking and execution; using only its
-    repacker still produces zero output when the in-tree GEMM stub is called.
-    Loading the repack ops also loads the shared library that registers
-    ``torch.ops._C.marlin_gemm``.
-    """
-    if not _sm70_marlin_v100_available():
-        return None
-
-    gptq_repack, _ = _sm70_marlin_v100_repack_ops()
-    if gptq_repack is None:
-        return None
-
-    op = getattr(torch.ops._C, "marlin_gemm", None)
-    if op is None:
-        logger.warning(
-            "SM70 (V100): marlin_v100 repack is available, but its dense "
-            "marlin_gemm op was not registered."
-        )
-        return None
-    return op
+    """Return the independently loaded SM70 Dense Marlin GEMM op."""
+    return _sm70_marlin_dense_ops()[1]
 
 
 # For binary size and compile time, we don't support the same types for with and
@@ -198,12 +186,11 @@ def query_marlin_supported_quant_types(
         device_capability = -1 if capability is None else capability
 
     if device_capability < 80:
-        # The stock Marlin kernel is an SM80+ stub below sm_80. On SM70 (V100)
-        # the marlin_v100 integration (scripts/setup_v100_marlin.sh) supplies
-        # real WMMA kernels, so when it is loadable we report the same
-        # quant-type support matrix as SM80+.
-        if device_capability == 70 and _sm70_marlin_v100_available():
-            pass
+        # Dense SM70 support is deliberately restricted to verified INT4
+        # symmetric group32; MoE retains its independent legacy gate.
+        if device_capability == 70:
+            if _sm70_marlin_dense_ops()[0] is None:
+                return []
         else:
             return []
 
@@ -218,6 +205,9 @@ def query_marlin_supported_quant_types(
             True, include_fp_type, device_capability
         )
         return types0 + types1
+
+    if device_capability == 70:
+        return [] if has_zp else [scalar_types.uint4b8]
 
     if has_zp:
         # AWQ style, unsigned + runtime zero-point
@@ -690,6 +680,51 @@ def should_use_atomic_add_reduce(
     return True
 
 
+def _dispatch_gptq_marlin_call(
+    input, weight, weight_scale, global_scale, weight_zp, g_idx,
+    g_idx_sort_indices, workspace, wtype, *, size_m, size_n, size_k,
+    is_k_full=True, use_atomic_add=False, use_fp32_reduce=False, is_zp_float=False,
+):
+    major, _ = get_device_capability()
+    if major == 7 and wtype == scalar_types.uint4b8:
+        if input.dtype != torch.float16 or weight_zp.numel() != 0:
+            raise RuntimeError(
+                "SM70 Dense Marlin supports only symmetric INT4 with FP16 activations"
+            )
+        op = _sm70_marlin_v100_gemm_op()
+        if op is None:
+            raise RuntimeError(
+                "SM70 uint4b8 Marlin requested but real marlin_v100 dense op is unavailable"
+            )
+        return op(
+            input,
+            None,
+            weight,
+            None,
+            weight_scale,
+            None,
+            None,
+            weight_zp,
+            g_idx,
+            g_idx_sort_indices,
+            workspace,
+            wtype.id,
+            size_m,
+            size_n,
+            size_k,
+            is_k_full,
+            use_atomic_add,
+            use_fp32_reduce,
+            is_zp_float,
+        )
+    return gptq_marlin_gemm(
+        input, None, weight, weight_scale, global_scale, weight_zp, g_idx,
+        g_idx_sort_indices, workspace, wtype, size_m=size_m, size_n=size_n,
+        size_k=size_k, is_k_full=is_k_full, use_atomic_add=use_atomic_add,
+        use_fp32_reduce=use_fp32_reduce, is_zp_float=is_zp_float,
+    )
+
+
 def apply_gptq_marlin_linear(
     input: torch.Tensor,
     weight: torch.Tensor,
@@ -718,23 +753,12 @@ def apply_gptq_marlin_linear(
 
     forward_context = get_forward_context()
     if forward_context is None:
-        output = gptq_marlin_gemm(
-            reshaped_x,
-            None,
-            weight,
-            weight_scale,
-            None,
-            weight_zp,
-            g_idx,
-            g_idx_sort_indices,
-            workspace,
-            wtype,
-            size_m=reshaped_x.shape[0],
-            size_n=output_size_per_partition,
-            size_k=input_size_per_partition,
-            is_k_full=is_k_full,
-            use_atomic_add=use_atomic_add,
-            use_fp32_reduce=use_fp32_reduce,
+        output = _dispatch_gptq_marlin_call(
+            reshaped_x, weight, weight_scale, None, weight_zp, g_idx,
+            g_idx_sort_indices, workspace, wtype,
+            size_m=reshaped_x.shape[0], size_n=output_size_per_partition,
+            size_k=input_size_per_partition, is_k_full=is_k_full,
+            use_atomic_add=use_atomic_add, use_fp32_reduce=use_fp32_reduce,
             is_zp_float=False,
         )
     else:
@@ -788,23 +812,12 @@ def apply_awq_marlin_linear(
 
     forward_context = get_forward_context()
     if forward_context is None:
-        output = gptq_marlin_gemm(
-            reshaped_x,
-            None,
-            weight,
-            weight_scale,
-            None,
-            weight_zp,
-            g_idx,
-            g_idx_sort_indices,
-            workspace,
-            quant_type,
-            size_m=reshaped_x.shape[0],
-            size_n=output_size_per_partition,
-            size_k=input_size_per_partition,
-            use_atomic_add=use_atomic_add,
-            use_fp32_reduce=use_fp32_reduce,
-            is_zp_float=False,
+        output = _dispatch_gptq_marlin_call(
+            reshaped_x, weight, weight_scale, None, weight_zp, g_idx,
+            g_idx_sort_indices, workspace, quant_type,
+            size_m=reshaped_x.shape[0], size_n=output_size_per_partition,
+            size_k=input_size_per_partition, use_atomic_add=use_atomic_add,
+            use_fp32_reduce=use_fp32_reduce, is_zp_float=False,
         )
     else:
         output = unified_apply_gptq_marlin_gemm(
@@ -1125,23 +1138,12 @@ def unified_apply_gptq_marlin_gemm(
 ) -> torch.Tensor:
     quant_config = get_forward_context().quant_config
     quant_type = quant_config.quant_type
-    return gptq_marlin_gemm(
-        input,
-        None,
-        weight,
-        weight_scale,
-        None,
-        weight_zp,
-        g_idx,
-        g_idx_sort_indices,
-        workspace,
-        quant_type,
-        size_m=input.shape[0],
-        size_n=output_size_per_partition,
-        size_k=input_size_per_partition,
-        use_atomic_add=use_atomic_add,
-        use_fp32_reduce=use_fp32_reduce,
-        is_zp_float=is_zp_float,
+    return _dispatch_gptq_marlin_call(
+        input, weight, weight_scale, None, weight_zp, g_idx,
+        g_idx_sort_indices, workspace, quant_type,
+        size_m=input.shape[0], size_n=output_size_per_partition,
+        size_k=input_size_per_partition, use_atomic_add=use_atomic_add,
+        use_fp32_reduce=use_fp32_reduce, is_zp_float=is_zp_float,
     )
 
 
@@ -1191,22 +1193,11 @@ def unified_apply_gptq_marlin_gemm_with_wtype(
             if hasattr(st, "id") and st.id == wtype_id:
                 wtype = st
                 break
-    return gptq_marlin_gemm(
-        input,
-        None,
-        weight,
-        weight_scale,
-        None,
-        weight_zp,
-        g_idx,
-        g_idx_sort_indices,
-        workspace,
-        wtype,
-        size_m=input.shape[0],
-        size_n=output_size_per_partition,
-        size_k=input_size_per_partition,
-        is_k_full=is_k_full,
-        use_atomic_add=use_atomic_add,
-        use_fp32_reduce=use_fp32_reduce,
+    return _dispatch_gptq_marlin_call(
+        input, weight, weight_scale, None, weight_zp, g_idx,
+        g_idx_sort_indices, workspace, wtype,
+        size_m=input.shape[0], size_n=output_size_per_partition,
+        size_k=input_size_per_partition, is_k_full=is_k_full,
+        use_atomic_add=use_atomic_add, use_fp32_reduce=use_fp32_reduce,
         is_zp_float=is_zp_float,
     )

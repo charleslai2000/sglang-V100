@@ -22,8 +22,10 @@ from sglang.srt.layers.parameter import (
 from sglang.srt.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsLinearScheme,
 )
+from sglang.srt.layers.quantization.utils import get_scalar_types
 from sglang.srt.layers.quantization.marlin_utils import (
     MarlinLinearLayerConfig,
+    _sm70_marlin_dense_ops,
     apply_gptq_marlin_linear,
     check_marlin_supports_shape,
     marlin_is_k_full,
@@ -39,7 +41,7 @@ from sglang.srt.layers.quantization.utils import (
     replace_parameter,
     unpack_cols,
 )
-from sglang.srt.utils import is_cuda
+from sglang.srt.utils import get_device_capability, is_cuda
 
 _is_cuda = is_cuda()
 
@@ -89,11 +91,28 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
         self.quant_type = (WNA16_ZP_SUPPORTED_TYPES_MAP[num_bits]
                            if not self.symmetric else
                            WNA16_SUPPORTED_TYPES_MAP[num_bits])
+        major, _ = get_device_capability()
+        if major == 7 and (
+            num_bits != 4
+            or self.group_size != 32
+            or not self.symmetric
+            or _sm70_marlin_dense_ops()[0] is None
+            or _sm70_marlin_dense_ops()[1] is None
+        ):
+            raise ValueError(
+                "SM70 CompressedTensors WNA16 supports only symmetric INT4 group_size=32"
+            )
+
+    @classmethod
+    def get_supported_act_dtypes(cls) -> list[torch.dtype]:
+        # The SM70 Dense Marlin kernel is FP16-only; retain BF16 support on
+        # SM80+ through the existing Marlin implementation.
+        return [torch.float16, torch.bfloat16]
 
     @classmethod
     def get_min_capability(cls) -> int:
-        # ampere and up
-        return 80
+        # The external Dense backend is verified only for symmetric INT4 group32.
+        return 70
 
     def create_weights(self, layer: torch.nn.Module, output_size: int,
                        input_size: int, output_partition_sizes: list[int],
@@ -217,6 +236,13 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
 
         device = getattr(layer, self.w_q_name).device
         c = self.kernel_config
+        major, _ = get_device_capability()
+        sm70_dense = major == 7
+        dense_ops = _sm70_marlin_dense_ops() if sm70_dense else (None, None, None)
+        if sm70_dense and (dense_ops[0] is None or dense_ops[1] is None):
+            raise RuntimeError(
+                "SM70 CompressedTensors WNA16 requires the real Dense Marlin repack and GEMM"
+            )
 
         check_marlin_supports_shape(
             c.partition_weight_shape[1],  # out_features
@@ -246,25 +272,53 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
 
         def transform_w_q(x):
             assert isinstance(x, BasevLLMParameter)
-            permute_param_layout_(x, input_dim=0, output_dim=1, packed_dim=0)
-            x.data = gptq_marlin_repack(
-                x.data.contiguous(),
-                perm=layer.g_idx_sort_indices,
-                size_k=c.partition_weight_shape[0],
-                size_n=c.partition_weight_shape[1],
-                num_bits=c.weight_type.size_bits,
-            )
+            if sm70_dense:
+                # CT and this Dense repacker share the int32 nibble payload;
+                # transpose from checkpoint [N,K/8] to the repacker's [K/8,N]
+                # input without changing code values.
+                permute_param_layout_(x, input_dim=0, output_dim=1)
+                x.data = dense_ops[0](
+                    x.data.contiguous(),
+                    layer.g_idx_sort_indices.contiguous(),
+                    c.partition_weight_shape[0],
+                    c.partition_weight_shape[1],
+                    c.weight_type.size_bits,
+                    False,
+                )
+            else:
+                permute_param_layout_(x, input_dim=0, output_dim=1, packed_dim=0)
+                x.data = gptq_marlin_repack(
+                    x.data.contiguous(),
+                    perm=layer.g_idx_sort_indices,
+                    size_k=c.partition_weight_shape[0],
+                    size_n=c.partition_weight_shape[1],
+                    num_bits=c.weight_type.size_bits,
+                )
             return x
 
         def transform_w_s(x):
             assert isinstance(x, BasevLLMParameter)
             permute_param_layout_(x, input_dim=0, output_dim=1)
+            if sm70_dense:
+                # Compressed-tensors stores [N, groups]. After the layout
+                # transpose, Marlin's SM70 kernel requires the N-channel
+                # interleave matching GPTQ's packed layout.
+                scale_perm = torch.tensor(
+                    [i + 8 * j for i in range(8) for j in range(8)],
+                    device=x.data.device,
+                )
+                x.data = x.data.reshape(-1, 64)[:, scale_perm].reshape_as(x.data)
             x.data = marlin_permute_scales(
                 x.data.contiguous(),
                 size_k=c.partition_weight_shape[0],
                 size_n=c.partition_weight_shape[1],
                 group_size=c.group_size,
             )
+            if sm70_dense:
+                # The verified SM70 Dense kernel reads half scales; this is an
+                # exact representable conversion for BF16 values, not weight
+                # dequantization or a fallback path.
+                x.data = x.data.to(torch.float16).contiguous()
             return x
 
         if c.has_g_idx:
@@ -324,6 +378,10 @@ class CompressedTensorsWNA16(CompressedTensorsLinearScheme):
 
         # `process_weights_after_loading` will ensure w_zp and w_gidx are not
         #  None for marlin
+        if get_device_capability()[0] == 7 and x.dtype != torch.float16:
+            raise RuntimeError(
+                f"SM70 Dense Marlin supports FP16 activations only, got {x.dtype}"
+            )
         return apply_gptq_marlin_linear(
             input=x,
             weight=w_q,

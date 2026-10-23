@@ -105,6 +105,10 @@ def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
                     BLOCK_M, BLOCK_N = (64, 64)
                 else:
                     BLOCK_M, BLOCK_N = (32, 64)
+        elif _is_cuda and CUDA_CAPABILITY[0] == 7:
+            # V100 exposes 96 KiB shared memory per block. 64x32 exceeds that
+            # limit for Gemma4's 512-wide attention heads; use 16x16 there.
+            BLOCK_M, BLOCK_N = (64, 64) if Lq <= 128 else (16, 16)
         else:
             # Older architectures
             BLOCK_M, BLOCK_N = (64, 64) if Lq <= 128 else (32, 32)

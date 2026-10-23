@@ -203,20 +203,24 @@ class ClippableGLUParallelLinear(nn.Module):
             prefix=add_prefix("linear", prefix),
         )
 
-        # The checkpoint has a single fused weight; MergedColumnParallelLinear
-        # expects per-shard loading.  Wrap the original weight_loader so that
-        # a call *without* shard_id (the generic load_weights path) splits
-        # automatically.
-        orig_loader = self.linear.weight.weight_loader
+        # Quantized Linear methods may replace ``weight`` with packed
+        # parameters (weight_packed/weight_scale). In that case this wrapper
+        # only needs the enclosing Gemma4 loader's fused shard mapping and no
+        # dense-weight loader override is valid.
+        weight = getattr(self.linear, "weight", None)
+        if weight is not None and hasattr(weight, "weight_loader"):
+            # The checkpoint has one fused [2*hidden, input] tensor; split it
+            # across the two MergedColumnParallelLinear shards.
+            orig_loader = weight.weight_loader
 
-        def _fused_weight_loader(param, loaded_weight, loaded_shard_id=None):
-            if loaded_shard_id is not None:
-                return orig_loader(param, loaded_weight, loaded_shard_id)
-            half = loaded_weight.shape[0] // 2
-            orig_loader(param, loaded_weight[:half], 0)
-            orig_loader(param, loaded_weight[half:], 1)
+            def _fused_weight_loader(param, loaded_weight, loaded_shard_id=None):
+                if loaded_shard_id is not None:
+                    return orig_loader(param, loaded_weight, loaded_shard_id)
+                half = loaded_weight.shape[0] // 2
+                orig_loader(param, loaded_weight[:half], 0)
+                orig_loader(param, loaded_weight[half:], 1)
 
-        self.linear.weight.weight_loader = _fused_weight_loader
+            weight.weight_loader = _fused_weight_loader
 
         self.input_min = nn.parameter.Buffer(torch.tensor(-_INF), persistent=False)
         self.input_max = nn.parameter.Buffer(torch.tensor(_INF), persistent=False)
