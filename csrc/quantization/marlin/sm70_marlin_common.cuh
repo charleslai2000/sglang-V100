@@ -1422,6 +1422,19 @@ sm70_marlin_dense_try_select_quanttrio_glm_4_7_awq_params(
   return false;
 }
 
+inline bool sm70_marlin_dense_is_gemma4_decode_shape(
+    char const* quant_format, int64_t group_size, int64_t size_m,
+    int64_t size_n, int64_t size_k) {
+  if (quant_format == nullptr || std::strcmp(quant_format, "uint4b8") != 0 ||
+      group_size != 32 ||
+      !(size_m == 1 || size_m == 2 || size_m == 4)) {
+    return false;
+  }
+  // The only Gemma dimensions covered by the completed CTA_N A/B sweep.
+  return (size_n == 2560 && size_k == 10240) ||
+         (size_n == 10240 && size_k == 2560);
+}
+
 inline Sm70MarlinAutoParams sm70_marlin_dense_auto_params(
     char const* quant_format, int64_t group_size, int64_t size_m,
     int64_t size_n, int64_t size_k) {
@@ -1431,6 +1444,17 @@ inline Sm70MarlinAutoParams sm70_marlin_dense_auto_params(
 
   if (sm70_marlin_dense_auto_env_is_set()) {
     return sm70_marlin_dense_auto_params_from_env(ctx);
+  }
+
+  // This library contains only SM70 kernels and SGLang gates entry to it on
+  // SM70. Keep the specialization solely to Gemma symmetric INT4 group32
+  // Decode M=1/2/4; Prefill and all other shapes use the prior selectors.
+  if (sm70_marlin_dense_is_gemma4_decode_shape(
+          quant_format, group_size, size_m, size_n, size_k)) {
+    Sm70MarlinAutoParams const params{
+        {32, 128, 32, 4, 32, 32, 32}, 1, true, ctx.packed_macro_n};
+    validate_sm70_marlin_auto_params("Dense", params);
+    return params;
   }
 
   Sm70MarlinAutoParams params{};
