@@ -16,6 +16,8 @@ Memory-efficient attention for prefill.
 It supports page size = 1 and prefill with KV cache (i.e. extend).
 """
 
+import os
+
 import torch
 import triton
 import triton.language as tl
@@ -114,6 +116,16 @@ def _get_block_sizes_for_extend_attention(Lq: int, Lv: int):
             BLOCK_M, BLOCK_N = (64, 64) if Lq <= 128 else (32, 32)
 
         num_warps = 4 if Lq <= 64 else 8
+        if _is_cuda and CUDA_CAPABILITY[0] == 7 and Lq == 512:
+            # Opt-in G002-M diagnostic candidate; production default stays at 8.
+            candidate_warps = os.environ.get("SGLANG_G002M_D512_NUM_WARPS")
+            if candidate_warps is not None:
+                candidate_warps = int(candidate_warps)
+                if candidate_warps not in (4, 8):
+                    raise ValueError(
+                        "SGLANG_G002M_D512_NUM_WARPS must be 4 or 8"
+                    )
+                num_warps = candidate_warps
 
     return BLOCK_DMODEL, BLOCK_DPE, BLOCK_DV, BLOCK_M, BLOCK_N, num_warps
 

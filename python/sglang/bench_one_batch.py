@@ -205,6 +205,8 @@ class BenchArgs:
     profile_start_step: Optional[int] = None
     profile_steps: Optional[int] = None
     prefill_diagnostic_id: str = ""
+    prefill_diagnostic_layer_ids: str = ""
+    prefill_diagnostic_output_file: str = ""
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser):
@@ -277,6 +279,18 @@ class BenchArgs:
             type=str,
             default="",
             help="Mark the single measured Prefill Forward with this NVTX diagnostic ID.",
+        )
+        parser.add_argument(
+            "--prefill-diagnostic-layer-ids",
+            type=str,
+            default="",
+            help="Mark selected Gemma4 layers with CUDA Events inside measured Prefill.",
+        )
+        parser.add_argument(
+            "--prefill-diagnostic-output-file",
+            type=str,
+            default="",
+            help="Save the measured Prefill logits to this file for A/B verification.",
         )
 
     @classmethod
@@ -404,11 +418,22 @@ def prepare_extend_inputs_for_correctness_test(
 def prepare_synthetic_inputs_for_latency_test(
     batch_size, input_len, custom_inputs=None
 ):
-    input_ids = (
-        custom_inputs
-        if custom_inputs
-        else np.random.randint(0, 10000, (batch_size, input_len), dtype=np.int32)
-    )
+    if custom_inputs:
+        input_ids = custom_inputs
+    else:
+        input_seed = os.environ.get("SGLANG_G002M_INPUT_SEED")
+        if input_seed is not None:
+            import hashlib
+
+            seed_payload = f"{input_seed}:{batch_size}:{input_len}".encode()
+            stable_seed = int.from_bytes(
+                hashlib.sha256(seed_payload).digest()[:8], "little"
+            )
+            input_ids = np.random.default_rng(stable_seed).integers(
+                0, 10000, (batch_size, input_len), dtype=np.int32
+            )
+        else:
+            input_ids = np.random.randint(0, 10000, (batch_size, input_len), dtype=np.int32)
     sampling_params = SamplingParams(
         temperature=0,
         max_new_tokens=BenchArgs.output_len,
@@ -702,6 +727,8 @@ def latency_test_run_once(
     profile_start_step=None,
     profile_steps=None,
     prefill_diagnostic_id="",
+    prefill_diagnostic_layer_ids="",
+    prefill_diagnostic_output_file="",
 ):
     max_batch_size = model_runner.max_batch_size(input_len, output_len)
     if batch_size > max_batch_size:
@@ -744,7 +771,41 @@ def latency_test_run_once(
             raise RuntimeError("Prefill diagnostic requires the Torch ModelRunner path")
         original_forward = runner.forward
         diagnostic_events = []
+        diagnostic_outputs = []
+        diagnostic_layer_ids = {
+            int(value) for value in prefill_diagnostic_layer_ids.split(",") if value
+        }
+        layer_events = {}
         diagnostic_range_open = False
+        attention_type = None
+        if diagnostic_layer_ids:
+            from sglang.srt.models.gemma4_causal import Gemma4Attention
+
+            attention_type = Gemma4Attention
+            original_attention = attention_type.forward
+
+            def marked_attention(attention, *args, **kwargs):
+                if attention.layer_id not in diagnostic_layer_ids:
+                    return original_attention(attention, *args, **kwargs)
+                if attention.layer_id in layer_events:
+                    raise RuntimeError(
+                        f"Duplicate diagnostic attention layer {attention.layer_id}"
+                    )
+                start = torch.cuda.Event(enable_timing=True)
+                end = torch.cuda.Event(enable_timing=True)
+                torch.cuda.nvtx.range_push(
+                    f"G002M_ATTENTION_LAYER:{attention.layer_id}:D={attention.head_dim}"
+                )
+                try:
+                    start.record()
+                    output = original_attention(attention, *args, **kwargs)
+                    end.record()
+                    layer_events[attention.layer_id] = (start, end, attention.head_dim)
+                    return output
+                finally:
+                    torch.cuda.nvtx.range_pop()
+
+            attention_type.forward = marked_attention
 
         def marked_forward(*args, **kwargs):
             if diagnostic_events:
@@ -761,6 +822,7 @@ def latency_test_run_once(
                 output = original_forward(*args, **kwargs)
                 end_event.record()
                 diagnostic_events.append((start_event, end_event))
+                diagnostic_outputs.append(output)
                 return output
             finally:
                 if diagnostic_range_open:
@@ -771,16 +833,39 @@ def latency_test_run_once(
             next_token_ids, _, batch = model_runner.extend(reqs)
         finally:
             runner.forward = original_forward
+            if attention_type is not None:
+                attention_type.forward = original_attention
         model_runner.synchronize()
         if len(diagnostic_events) != 1:
             raise RuntimeError(
                 f"Expected exactly one diagnostic Forward, got {len(diagnostic_events)}"
             )
         diagnostic_events[0][1].synchronize()
+        if prefill_diagnostic_output_file:
+            torch.save(
+                {
+                    "input_ids": [list(req.fill_ids) for req in reqs],
+                    "next_token_ids": next_token_ids.detach().cpu(),
+                    "logits": diagnostic_outputs[0].logits_output.next_token_logits.detach().cpu(),
+                },
+                prefill_diagnostic_output_file,
+            )
         diagnostic_event_ms = diagnostic_events[0][0].elapsed_time(
             diagnostic_events[0][1]
         )
         rank_print(f"Prefill diagnostic Event: {diagnostic_event_ms:.6f} ms")
+        if diagnostic_layer_ids:
+            missing = diagnostic_layer_ids.difference(layer_events)
+            if missing:
+                raise RuntimeError(f"Missing diagnostic layers: {sorted(missing)}")
+            for layer_id, (layer_start, layer_end, head_dim) in sorted(
+                layer_events.items()
+            ):
+                layer_end.synchronize()
+                rank_print(
+                    f"Prefill diagnostic layer {layer_id} D={head_dim} CUDA Event: "
+                    f"{layer_start.elapsed_time(layer_end):.6f} ms"
+                )
     else:
         next_token_ids, _, batch = model_runner.extend(reqs)
         model_runner.synchronize()
@@ -922,6 +1007,8 @@ def latency_test(
         profile_start_step=None,
         profile_steps=None,
         prefill_diagnostic_id="",
+        prefill_diagnostic_layer_ids="",
+        prefill_diagnostic_output_file="",
     )
 
     rank_print("Benchmark ...")
@@ -974,6 +1061,8 @@ def latency_test(
             bench_args.profile_start_step,
             bench_args.profile_steps,
             bench_args.prefill_diagnostic_id,
+            bench_args.prefill_diagnostic_layer_ids,
+            bench_args.prefill_diagnostic_output_file,
         )
         if ret is not None:
             result_list.append(ret)
