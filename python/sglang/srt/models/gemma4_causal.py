@@ -13,6 +13,7 @@
 # ==============================================================================
 
 import logging
+import os
 import re
 from typing import Iterable, List, Optional, Set, Tuple, Union
 
@@ -467,13 +468,21 @@ class Gemma4Attention(nn.Module):
             q, _ = self.rotary_emb(positions, q, dummy_k)
 
         q = q.unflatten(-1, (self.num_heads, self.head_dim))
-        attn_output = self.attn(
-            q,
-            k,
-            v,
-            forward_batch=forward_batch,
-            save_kv_cache=not self.is_kv_shared_layer,
-        )
+        diagnostic_layer_range = None
+        if q.is_cuda and os.environ.get("SGLANG_GEMMA4_ATTENTION_LAYER_NVTX") == "1":
+            diagnostic_layer_range = f"G002L_ATTENTION_LAYER:{self.layer_id}:D={self.head_dim}"
+            torch.cuda.nvtx.range_push(diagnostic_layer_range)
+        try:
+            attn_output = self.attn(
+                q,
+                k,
+                v,
+                forward_batch=forward_batch,
+                save_kv_cache=not self.is_kv_shared_layer,
+            )
+        finally:
+            if diagnostic_layer_range is not None:
+                torch.cuda.nvtx.range_pop()
         if attn_output.dim() == 3:
             attn_output = attn_output.flatten(-2, -1)
         output, _ = self.o_proj(attn_output)
