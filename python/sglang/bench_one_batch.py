@@ -204,6 +204,7 @@ class BenchArgs:
     profile_filename_prefix: str = "profile"
     profile_start_step: Optional[int] = None
     profile_steps: Optional[int] = None
+    prefill_diagnostic_id: str = ""
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser):
@@ -270,6 +271,12 @@ class BenchArgs:
             type=int,
             default=None,
             help="Number of decode steps to profile starting from profile-start-step. If not specified, profiles only one step.",
+        )
+        parser.add_argument(
+            "--prefill-diagnostic-id",
+            type=str,
+            default="",
+            help="Mark the single measured Prefill Forward with this NVTX diagnostic ID.",
         )
 
     @classmethod
@@ -459,6 +466,13 @@ def extend(reqs, model_runner):
         spec_algorithm=SpeculativeAlgorithm.NONE,
     )
     batch.prepare_for_extend()
+    # Standalone benchmark has no scheduler overlap stage to materialize deferred
+    # Prefill IDs; preserve the same token IDs before constructing ForwardBatch.
+    if batch.input_ids is None and batch.prefill_input_ids_cpu is not None:
+        batch.input_ids = batch.prefill_input_ids_cpu.to(
+            batch.device, non_blocking=True
+        )
+        batch.prefill_input_ids_cpu = None
     _maybe_prepare_mlp_sync_batch(batch, model_runner)
     forward_batch = ForwardBatch.init_new(batch, model_runner)
     logits_output = model_runner.forward(forward_batch).logits_output
@@ -687,6 +701,7 @@ def latency_test_run_once(
     tp_rank,
     profile_start_step=None,
     profile_steps=None,
+    prefill_diagnostic_id="",
 ):
     max_batch_size = model_runner.max_batch_size(input_len, output_len)
     if batch_size > max_batch_size:
@@ -722,8 +737,53 @@ def latency_test_run_once(
 
     model_runner.synchronize()
     tic = time.perf_counter()
-    next_token_ids, _, batch = model_runner.extend(reqs)
-    model_runner.synchronize()
+    diagnostic_id = prefill_diagnostic_id
+    if diagnostic_id and profile_stage == "prefill":
+        runner = getattr(model_runner, "torch_runner", None)
+        if runner is None:
+            raise RuntimeError("Prefill diagnostic requires the Torch ModelRunner path")
+        original_forward = runner.forward
+        diagnostic_events = []
+        diagnostic_range_open = False
+
+        def marked_forward(*args, **kwargs):
+            if diagnostic_events:
+                raise RuntimeError("Prefill diagnostic observed more than one Forward")
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+            diagnostic_range = (
+                f"G002I_PREFILL_FORWARD:{diagnostic_id}:M={input_len}:BS={batch_size}"
+            )
+            try:
+                torch.cuda.nvtx.range_push(diagnostic_range)
+                diagnostic_range_open = True
+                start_event.record()
+                output = original_forward(*args, **kwargs)
+                end_event.record()
+                diagnostic_events.append((start_event, end_event))
+                return output
+            finally:
+                if diagnostic_range_open:
+                    torch.cuda.nvtx.range_pop()
+
+        runner.forward = marked_forward
+        try:
+            next_token_ids, _, batch = model_runner.extend(reqs)
+        finally:
+            runner.forward = original_forward
+        model_runner.synchronize()
+        if len(diagnostic_events) != 1:
+            raise RuntimeError(
+                f"Expected exactly one diagnostic Forward, got {len(diagnostic_events)}"
+            )
+        diagnostic_events[0][1].synchronize()
+        diagnostic_event_ms = diagnostic_events[0][0].elapsed_time(
+            diagnostic_events[0][1]
+        )
+        rank_print(f"Prefill diagnostic Event: {diagnostic_event_ms:.6f} ms")
+    else:
+        next_token_ids, _, batch = model_runner.extend(reqs)
+        model_runner.synchronize()
     prefill_latency = time.perf_counter() - tic
 
     if enable_profile_prefill:
@@ -861,6 +921,7 @@ def latency_test(
         tp_rank=tp_rank,
         profile_start_step=None,
         profile_steps=None,
+        prefill_diagnostic_id="",
     )
 
     rank_print("Benchmark ...")
@@ -912,6 +973,7 @@ def latency_test(
             tp_rank,
             bench_args.profile_start_step,
             bench_args.profile_steps,
+            bench_args.prefill_diagnostic_id,
         )
         if ret is not None:
             result_list.append(ret)
