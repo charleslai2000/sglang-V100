@@ -13,7 +13,10 @@ def call(which,r,L,prepared=None):
   qo=torch.tensor([0,L],device=D,dtype=torch.int32);kp=torch.tensor([0,0],device=D,dtype=torch.int32);ki=torch.empty(0,device=D,dtype=torch.int32);dummy=torch.empty((1,2,512),device=D,dtype=q.dtype);o=torch.empty_like(q)
   extend_attention_fwd(q,owner_k,owner_v,o,dummy,dummy,qo,kp,ki,None,True,None,L,1.,1.,sm_scale=1.)
  else:
-  pages=L//16; qp=q.unsqueeze(0).contiguous(); ck=owner_k.reshape(pages,16,2,512).contiguous();cv=owner_v.reshape(pages,16,2,512).contiguous();bt=torch.arange(pages,device=D,dtype=torch.int32)[None,:];sl=torch.tensor([L],device=D,dtype=torch.int32)
+  pages=L//16
+  if prepared is None:
+   qp=q.unsqueeze(0).contiguous(); ck=owner_k.reshape(pages,16,2,512).contiguous();cv=owner_v.reshape(pages,16,2,512).contiguous();bt=torch.arange(pages,device=D,dtype=torch.int32)[None,:];sl=torch.tensor([L],device=D,dtype=torch.int32)
+  else: qp,ck,cv,bt,sl=prepared['wmma']
   flash_attn_prefill_paged(qp,ck,cv,bt,sl,softmax_scale=1.,kv_cache_dtype='auto',causal=True,window=-1)
 
 def elapsed(fn,n=12):
@@ -24,7 +27,9 @@ def elapsed(fn,n=12):
 for L in (1024,4096):
  c=torch.load(f'/data/t011/artifacts/g002n/capture-{L}.pt',map_location=D,weights_only=False);rs=c['attention_inputs'];results={'triton':[],'wmma':[],'prep':[]}
  for r in rs.values():
-  owner=next(x for x in rs.values() if x['layer_id']==r['layer_id'] and not x['shared']);pr={'owner_k':owner['k'],'owner_v':owner['v']}
+  owner=next(x for x in rs.values() if x['layer_id']==r['layer_id'] and not x['shared']); pages=L//16
+  packed={'owner_k':owner['k'],'owner_v':owner['v'],'wmma':(r['q'].unsqueeze(0).contiguous(),owner['k'].reshape(pages,16,2,512).contiguous(),owner['v'].reshape(pages,16,2,512).contiguous(),torch.arange(pages,device=D,dtype=torch.int32)[None,:],torch.tensor([L],device=D,dtype=torch.int32))}
+  pr=packed
   for which in ('triton','wmma'):
    # Warm compile and report per-layer median over interleaved alternating samples.
    call(which,r,L,pr);torch.cuda.synchronize();times=[]

@@ -31,14 +31,14 @@ FP32 reference uses identical Q/K/V, repeats KV heads 4x for GQA, scale 1, and `
 
 ## CUDA Event kernel A/B（非 Forward）
 
-Alternating/interleaved per-layer measurements, medians; seven layer sum:
+Alternating/interleaved per-layer measurements, medians; WMMA layout/cache/page metadata is pre-materialized before kernel-only timing and its separate Event estimate is reported below; seven layer sum:
 
 | 长度 | Triton seven-layer sum | WMMA seven-layer sum | WMMA preparation sum | 离线 net delta (Triton-WMMA-prep) |
 |---:|---:|---:|---:|---:|
 | 1K | 46.423 ms | 12.842 ms | 1.027 ms | +32.554 ms |
 | 4K | 627.790 ms | 146.507 ms | 1.011 ms | +480.272 ms |
 
-WMMA preparation measured Q layout conversion, K/V page view/materialization, block table and sequence metadata construction. This does not include real SGLang cache pool writes, CPU launch/setup overhead or model-forward side effects. These are kernel/replay measurements only.
+WMMA preparation measured Q layout conversion, K/V page view/materialization, block table and sequence metadata construction (separate CUDA Event median sums: 1.028 ms at 1K and 1.070 ms at 4K). It does not include real SGLang cache pool writes, CPU launch/setup overhead or model-forward side effects. Updated interleaved kernel medians are 46.519/11.898 ms Triton/WMMA at 1K and 626.982/145.577 ms at 4K; subtracting measured preparation gives offline kernel-plus-prep deltas +33.593 ms/+480.335 ms. These are not real Forward gains.
 
 ## 有效性边界
 
