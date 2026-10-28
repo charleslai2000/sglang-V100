@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional
 
@@ -9,10 +11,9 @@ import triton.language as tl
 
 from sglang.srt.configs.model_config import AttentionArch
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
-import logging
+from sglang.srt.layers.attention.utils import create_flashinfer_kv_indices_triton
 
 logger = logging.getLogger(__name__)
-from sglang.srt.layers.attention.utils import create_flashinfer_kv_indices_triton
 
 
 def _flatten_paged_kv_cache(buf: torch.Tensor) -> torch.Tensor:
@@ -1110,8 +1111,43 @@ class TritonAttnBackend(AttentionBackend):
             k_descale = 1.0
             v_descale = 1.0
 
+        q_extend = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
+        if (
+            os.environ.get("SGLANG_G002N_SHADOW") == "1"
+            and layer.qk_head_dim == 512
+            and layer.v_head_dim == 512
+            and q_extend.shape[0] == forward_batch.seq_lens_sum
+            and forward_batch.batch_size == 1
+            and forward_batch.extend_prefix_lens_cpu == [0]
+            and forward_batch.extend_seq_lens_cpu == [q_extend.shape[0]]
+            and causal
+            and sliding_window_size == -1
+            and logits_soft_cap == 0
+            and sinks is None
+        ):
+            from sglang.srt.layers.attention.g002n_wmma import shadow_compare_full_prefill
+
+            shadow_compare_full_prefill(
+                q_extend,
+                k,
+                v,
+                layer,
+                self,
+                forward_batch,
+                kv_indptr,
+                kv_indices,
+                layer.scaling,
+                causal,
+                logits_soft_cap,
+                sinks,
+                sliding_window_size,
+                k_descale,
+                v_descale,
+                max_extend_len=self.forward_metadata.max_extend_len,
+            )
+
         self.extend_attention_fwd(
-            q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
+            q_extend,
             k.contiguous(),
             v.contiguous(),
             o.view(-1, layer.tp_q_head_num, layer.v_head_dim),
