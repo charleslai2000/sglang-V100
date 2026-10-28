@@ -1112,8 +1112,9 @@ class TritonAttnBackend(AttentionBackend):
             v_descale = 1.0
 
         q_extend = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
+        g002n_mode = os.environ.get("SGLANG_G002N_MODE", "")
         if (
-            os.environ.get("SGLANG_G002N_SHADOW") == "1"
+            g002n_mode in ("shadow", "dense")
             and layer.qk_head_dim == 512
             and layer.v_head_dim == 512
             and q_extend.shape[0] == forward_batch.seq_lens_sum
@@ -1125,8 +1126,17 @@ class TritonAttnBackend(AttentionBackend):
             and logits_soft_cap == 0
             and sinks is None
         ):
-            from sglang.srt.layers.attention.g002n_wmma import shadow_compare_full_prefill
+            from sglang.srt.layers.attention.g002n_wmma import (
+                dense_full_prefill,
+                shadow_compare_full_prefill,
+            )
 
+            if g002n_mode == "dense":
+                dense_out = dense_full_prefill(
+                    q_extend, layer, self, forward_batch, kv_indptr, kv_indices,
+                    layer.scaling,
+                )
+                return dense_out.view(-1, layer.tp_q_head_num, layer.v_head_dim)
             shadow_compare_full_prefill(
                 q_extend,
                 k,

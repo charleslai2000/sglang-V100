@@ -74,13 +74,17 @@ if os.environ.get("G002N_RUN_FORWARD_AB") == "1":
     for length in lengths:
         ids = (token_ids * ((length + len(token_ids) - 1) // len(token_ids)))[:length]
         rows = []
-        for arm in ("triton", "wmma", "wmma", "triton", "triton", "wmma"):
+        reference_layers = None
+        for arm in ("triton", "dense", "dense", "triton", "triton", "dense"):
             runner.req_to_token_pool.clear()
             runner.token_to_kv_pool_allocator.clear()
             reqs = prepare_synthetic_inputs_for_latency_test(1, length, custom_inputs=[ids])
-            os.environ["SGLANG_G002N_WMMA_PREFILL"] = "1" if arm == "wmma" else "0"
+            mode_override = os.environ.get("G002N_MODE_OVERRIDE")
+            os.environ["SGLANG_G002N_MODE"] = mode_override or ("dense" if arm == "dense" else "")
             os.environ["SGLANG_G002N_CAPTURE"] = "1"
             captured.clear()
+            import sglang.srt.layers.attention.g002n_wmma as dense_adapter
+            dense_adapter.DENSE_TIMINGS.clear()
             torch.cuda.reset_peak_memory_stats()
             tree = TreeCacheNamespace(page_size=runner.server_args.page_size, device=runner.device, token_to_kv_pool_allocator=runner.token_to_kv_pool_allocator)
             batch = ScheduleBatch.init_new(reqs=reqs, req_to_token_pool=runner.req_to_token_pool, token_to_kv_pool_allocator=runner.token_to_kv_pool_allocator, tree_cache=tree, model_config=runner.model_config, enable_overlap=False, spec_algorithm=SpeculativeAlgorithm.NONE)
@@ -97,21 +101,29 @@ if os.environ.get("G002N_RUN_FORWARD_AB") == "1":
             logits = result.logits_output.next_token_logits
             next_ids = runner.sample(result.logits_output, fb)
             end.record(); torch.cuda.synchronize()
+            dense_costs = []
+            for timing in dense_adapter.DENSE_TIMINGS:
+                event_cost = {}
+                for name, (ev_start, ev_end) in timing["events"].items():
+                    event_cost[name + "_ms"] = ev_start.elapsed_time(ev_end)
+                dense_costs.append({"layer": timing["layer"], **event_cost})
             row = {"length": length, "arm": arm, "event_ms": start.elapsed_time(end),
                    "peak_allocated": torch.cuda.max_memory_allocated(),
                    "peak_reserved": torch.cuda.max_memory_reserved(),
                    "logits": logits.detach().cpu(), "next": next_ids.detach().cpu(),
                    "attention": {i:t.cpu() for i,t in captured.items()}}
             rows.append(row)
-            print("AB_SAMPLE", json.dumps({"length":length,"arm":arm,"event_ms":row["event_ms"],"peak_allocated":row["peak_allocated"],"peak_reserved":row["peak_reserved"],"next":row["next"].tolist(),"layers":sorted(row["attention"])}),flush=True)
+            if arm == "triton" and reference_layers is None:
+                reference_layers = {i: t.detach().cpu().clone() for i, t in captured.items()}
+            print("AB_SAMPLE", json.dumps({"length":length,"arm":arm,"event_ms":row["event_ms"],"peak_allocated":row["peak_allocated"],"peak_reserved":row["peak_reserved"],"next":row["next"].tolist(),"layers":sorted(row["attention"]),"dense_costs":dense_costs}),flush=True)
             runner.req_to_token_pool.clear(); runner.token_to_kv_pool_allocator.clear()
         ref = next(r for r in rows if r["arm"] == "triton")
         for row in rows:
-            if row["arm"] != "wmma": continue
+            if row["arm"] != "dense": continue
             diff = (row["logits"].float()-ref["logits"].float()).abs()
             layer_diffs = {}
             for i in row["attention"]:
-                a, b = row["attention"][i].float(), ref["attention"][i].float()
+                a, b = row["attention"][i].float(), reference_layers[i].float()
                 if a.shape != b.shape:
                     layer_diffs[str(i)] = {"shape_candidate": list(a.shape), "shape_baseline": list(b.shape), "status": "SHAPE_MISMATCH"}
                 else:
