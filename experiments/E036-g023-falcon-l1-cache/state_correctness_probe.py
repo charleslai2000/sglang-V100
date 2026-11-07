@@ -2,7 +2,7 @@
 """Real-request cache-enabled Falcon branching/continuation comparison against no-cache decode."""
 import concurrent.futures,hashlib,json,threading,time,requests
 from transformers import AutoTokenizer
-BASE='http://127.0.0.1:30003'; MODEL='/mnt/data/models/Falcon-H1-7B-Instruct-GPTQ-Int4'
+BASE='http://127.0.0.1:30003'; MODEL='/data/t011/hf/Falcon-H1-7B-Instruct-GPTQ-Int4'
 t=AutoTokenizer.from_pretrained(MODEL,local_files_only=True,trust_remote_code=True)
 shared=t.encode('A quiet lighthouse stands above a cold northern sea. ',add_special_tokens=False)
 heads=[t.encode(x,add_special_tokens=False) for x in ('Write about branch alpha: ','Write about branch bravo: ')]

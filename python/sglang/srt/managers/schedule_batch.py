@@ -1077,16 +1077,18 @@ class Req(ReqDllmMixin):
         if tree_cache is not None:
             if cow_mamba is None:
                 cow_mamba = tree_cache.supports_mamba()
+            force_miss = envs.SGLANG_RADIX_FORCE_MISS.get()
             match_result = tree_cache.match_prefix(
                 MatchPrefixParams(
                     key=RadixKey(
-                        token_ids=token_ids_to_match, extra_key=self.extra_key
+                        token_ids=array("q") if force_miss else token_ids_to_match,
+                        extra_key=self.extra_key,
                     ),
                     req=self,
                     cow_mamba=cow_mamba,
                 )
             )
-            if envs.SGLANG_RADIX_FORCE_MISS.get():
+            if force_miss:
                 match_result = zero_match_result(tree_cache, match_result)
             (
                 self.prefix_indices,

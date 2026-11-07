@@ -93,14 +93,18 @@ def match_prefix_for_req(
     if token_ids is None:
         token_ids = req.origin_input_ids + req.output_ids
 
+    force_miss = envs.SGLANG_RADIX_FORCE_MISS.get()
     match_result = tree_cache.match_prefix(
         MatchPrefixParams(
-            key=RadixKey(token_ids=token_ids, extra_key=req.extra_key),
-            cow_mamba=cow_mamba,
+            key=RadixKey(
+                token_ids=array("q") if force_miss else token_ids,
+                extra_key=req.extra_key,
+            ),
+            cow_mamba=cow_mamba and not force_miss,
             req=req if include_req else None,
         )
     )
-    if envs.SGLANG_RADIX_FORCE_MISS.get():
+    if force_miss:
         match_result = zero_match_result(tree_cache, match_result)
     (
         req.prefix_indices,
@@ -247,12 +251,16 @@ class SchedulePolicy:
             # threshold means we cannot use in-batch prefix caching for short prefixes.
             # It is kind of common when the engine is long running (e.g., imagine the prefix "the").
             if len(r.prefix_indices) <= IN_BATCH_PREFIX_CACHING_CHECK_THRESHOLD:
+                force_miss = envs.SGLANG_RADIX_FORCE_MISS.get()
                 match_result = self.waiting_queue_radix_tree.match_prefix(
                     MatchPrefixParams(
-                        key=RadixKey(token_ids=prefix_ids, extra_key=extra_key)
+                        key=RadixKey(
+                            token_ids=array("q") if force_miss else prefix_ids,
+                            extra_key=extra_key,
+                        )
                     )
                 )
-                if envs.SGLANG_RADIX_FORCE_MISS.get():
+                if force_miss:
                     match_result = zero_match_result(
                         self.waiting_queue_radix_tree, match_result
                     )
