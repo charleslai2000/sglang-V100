@@ -41,7 +41,7 @@ for i, layer in enumerate(text.layers):
 rpool=ReqToTokenPool(size=1,max_context_len=8192,device='cuda',enable_memory_saver=False)
 head_dim=mc.hf_text_config.head_dim; swa_dim=getattr(mc.hf_text_config,'swa_head_dim',head_dim); kvheads=mc.hf_text_config.num_key_value_heads; swavdim=getattr(mc.hf_text_config,'swa_v_head_dim',swa_dim)
 kv=SWAKVPool(size=8192,size_swa=8192,page_size=16,dtype=torch.float16,head_num=kvheads,head_dim=head_dim,swa_attention_layer_ids=mc.swa_attention_layer_ids,full_attention_layer_ids=mc.full_attention_layer_ids,enable_kvcache_transpose=False,device='cuda',swa_head_num=kvheads,swa_head_dim=swa_dim,swa_v_head_dim=swavdim,v_head_dim=head_dim,enable_alt_stream=False)
-kv.full_to_swa_index_mapping=torch.arange(8192,dtype=torch.int32,device='cuda')
+kv.full_to_swa_index_mapping=torch.cat([torch.arange(8192,dtype=torch.int32,device='cuda'),torch.tensor([-1],dtype=torch.int32,device='cuda')])
 backend=TorchNativeAttnBackend(type('Runner',(),{'device':torch.device('cuda'),'req_to_token_pool':rpool,'token_to_kv_pool':kv})())
 ids=json.load(open('/data/t011/artifacts/g002f-model-numerics/input_ids.json'))[0]
 for length in (1024,4096):

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Copy a file (or stdin) to the local terminal clipboard using OSC 52.
+set -euo pipefail
+
+usage() {
+  printf 'Usage: %s FILE\n       command | %s -\n' "${0##*/}" "${0##*/}" >&2
+}
+
+if [[ $# -ne 1 ]]; then
+  usage
+  exit 2
+fi
+
+if [[ $1 == - ]]; then
+  input=$(mktemp)
+  trap 'rm -f "$input"' EXIT
+  cat >"$input"
+else
+  if [[ ! -f $1 || ! -r $1 ]]; then
+    printf '%s: not a readable regular file: %s\n' "${0##*/}" "$1" >&2
+    exit 2
+  fi
+  input=$1
+fi
+
+bytes=$(wc -c <"$input" | tr -d '[:space:]')
+# OSC 52 payloads are commonly capped by terminal emulators. Fail rather than
+# silently copy a truncated file; users can raise this after testing their client.
+max_bytes=${OSC52_MAX_BYTES:-100000}
+if (( bytes > max_bytes )); then
+  printf '%s: refusing %s bytes (limit %s); set OSC52_MAX_BYTES after verifying terminal support\n' \
+    "${0##*/}" "$bytes" "$max_bytes" >&2
+  exit 1
+fi
+
+encoded=$(base64 <"$input" | tr -d '\r\n')
+osc=$'\033]52;c;'
+osc+="$encoded"
+osc+=$'\007'
+
+if [[ -n ${TMUX:-} ]]; then
+  # tmux passthrough DCS: double every ESC in the inner OSC 52 sequence.
+  escaped=${osc//$'\033'/$'\033\033'}
+  printf '\033Ptmux;%s\033\\' "$escaped"
+else
+  printf '%s' "$osc"
+fi
+printf 'Copied %s bytes to clipboard via OSC 52.\n' "$bytes" >&2
