@@ -993,6 +993,19 @@ class LogitsProcessor(nn.Module):
         lm_head: VocabParallelEmbedding,
         embedding_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if getattr(lm_head, "_gguf_qweight", None) is not None:
+            from sglang.srt.layers.quantization.gguf import (
+                GGUFConfig,
+                GGUFLinearMethod,
+            )
+
+            return GGUFLinearMethod(GGUFConfig()).apply_tied_embedding(
+                lm_head,
+                hidden_states,
+                embedding_bias,
+                output_vocab_size=self.vocab_size,
+                row_weight=getattr(lm_head, "_gguf_qweight_cuda", None),
+            )
         if hasattr(lm_head, "set_lora") and hasattr(lm_head, "apply_lora"):
             # This is a LoRA-wrapped module, use its forward method
             logits = lm_head(hidden_states)

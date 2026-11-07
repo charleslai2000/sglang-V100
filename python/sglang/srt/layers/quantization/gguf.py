@@ -165,7 +165,10 @@ MMQ_QUANT_TYPES = STANDARD_QUANT_TYPES | KQUANT_TYPES
 
 
 def fused_mul_mat_gguf(
-    x: torch.Tensor, qweight: torch.Tensor, qweight_type: int
+    x: torch.Tensor,
+    qweight: torch.Tensor,
+    qweight_type: int,
+    row: int | None = None,
 ) -> torch.Tensor:
     if qweight_type in IMATRIX_QUANT_TYPES:
         mmvq_safe = 8 if qweight.shape[0] > 5120 else 16
@@ -174,20 +177,21 @@ def fused_mul_mat_gguf(
     # HACK: when doing chunked prefill we don't generate output tokens
     # so input to logits generator is empty which causes invalid parameter
     if x.shape[0] == 0:
-        return torch.empty(x.shape[0], qweight.shape[0], dtype=x.dtype, device=x.device)
+        return torch.empty(x.shape[0], row or qweight.shape[0], dtype=x.dtype, device=x.device)
     # there is no need to call any kernel for fp16/bf16
     if qweight_type in UNQUANTIZED_TYPES:
         return x @ qweight.T
     # enable MMVQ in contiguous batching with batch_size=1
     if x.shape[0] <= mmvq_safe and qweight_type in MMVQ_QUANT_TYPES:
-        y = ggml_mul_mat_vec_a8(qweight, x, qweight_type, qweight.shape[0])
+        y = ggml_mul_mat_vec_a8(qweight, x, qweight_type, row or qweight.shape[0])
     # Use MMQ Kernel if it's available (standard + k-quants)
     elif qweight_type in MMQ_QUANT_TYPES:
-        y = ggml_mul_mat_a8(qweight, x, qweight_type, qweight.shape[0])
+        y = ggml_mul_mat_a8(qweight, x, qweight_type, row or qweight.shape[0])
     # If there is no available MMQ kernel, fallback to dequantize
     elif qweight_type in DEQUANT_TYPES:
         block_size, type_size = gguf.GGML_QUANT_SIZES[qweight_type]
-        shape = (qweight.shape[0], qweight.shape[1] // type_size * block_size)
+        out_rows = row or qweight.shape[0]
+        shape = (out_rows, qweight.shape[1] // type_size * block_size)
         weight = ggml_dequantize(qweight, qweight_type, *shape, x.dtype)
         y = x @ weight.T
     else:
@@ -307,18 +311,71 @@ def apply_gguf_embedding(
     qweight_type: int,
     hidden_size: int,
     dtype: torch.dtype | None = None,
+    row_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     if qweight_type in UNQUANTIZED_TYPES:
         return torch.embedding(qweight, x)
     elif qweight_type in DEQUANT_TYPES:
+        # Embedding lookups only touch selected rows; decode those rows from
+        # packed GGML storage instead of materializing the full vocabulary.
         block_size, type_size = gguf.GGML_QUANT_SIZES[qweight_type]
         x_flat = x.flatten()
-        assert hidden_size == qweight.shape[1] // type_size * block_size
-        quant = torch.index_select(qweight, dim=0, index=x_flat)
-        dequant = ggml_dequantize(
-            quant, qweight_type, hidden_size, x_flat.shape[0], dtype
+        if hidden_size == qweight.shape[1] // type_size * block_size:
+            packed_table = qweight
+            if qweight.device.type == "cpu" and x.device.type == "cuda":
+                packed_table = getattr(qweight, "_gguf_cuda_staging", None)
+                if packed_table is None:
+                    packed_table = qweight.to(device=x.device, non_blocking=True)
+                    qweight._gguf_cuda_staging = packed_table
+            elif qweight.device != x.device:
+                packed_table = qweight.to(device=x.device, non_blocking=True)
+            vocab_ids = x_flat.to(device=packed_table.device, dtype=torch.long)
+            quant = torch.index_select(packed_table, dim=0, index=vocab_ids)
+            dequant = ggml_dequantize(
+                quant.to(device=x.device), qweight_type, hidden_size, x_flat.shape[0], dtype
+            )
+            return dequant.view(*x.shape, hidden_size)
+        # GGUF stores embedding rows directly as [vocab, packed_hidden].
+        if hidden_size == qweight.shape[0] // type_size * block_size:
+            vocab_ids = x_flat.to(device=qweight.device, dtype=torch.long)
+            packed_vocab = qweight.index_select(0, vocab_ids).contiguous()
+            if packed_vocab.device != x.device:
+                packed_vocab = packed_vocab.to(device=x.device)
+            decoded = ggml_dequantize(
+                packed_vocab,
+                qweight_type,
+                hidden_size,
+                x_flat.numel(),
+                dtype,
+            )
+            return decoded.view(*x.shape, hidden_size)
+        # Gemma4 PLE uses a flattened [num_layers, ple_dim] embedding. Its
+        # GGUF Q4_K row consists of consecutive 256-value blocks (one per
+        # layer), whereas ggml_dequantize expects block-major row storage.
+        if (
+            qweight.shape[1] * (block_size // type_size) == hidden_size
+            and hidden_size % block_size == 0
+        ):
+            vocab_ids = x_flat.to(dtype=torch.long)
+            packed_vocab = qweight.index_select(0, vocab_ids).contiguous()
+            num_blocks = hidden_size // block_size
+            packed_row = type_size
+            packed = packed_vocab.view(x_flat.numel(), num_blocks, packed_row)
+            packed = packed.transpose(0, 1).contiguous().view(num_blocks, -1)
+            decoded = ggml_dequantize(
+                packed.to(device=x.device),
+                qweight_type,
+                block_size,
+                x_flat.numel(),
+                dtype,
+            )
+            return decoded.view(num_blocks, x_flat.numel(), block_size).transpose(
+                0, 1
+            ).reshape(*x.shape, hidden_size)
+        raise ValueError(
+            f"GGUF embedding dimensions mismatch: hidden={hidden_size}, "
+            f"packed_shape={tuple(qweight.shape)}, qtype={qweight_type}"
         )
-        return dequant.view(*x.shape, hidden_size)
     else:
         qweight_type = WeightType(qweight_type)
         raise NotImplementedError(f"Unsupported GGUF quantization type: {qweight_type}")
@@ -333,6 +390,7 @@ class GGUFLinearMethod(LinearMethodBase):
 
     def __init__(self, quant_config: GGUFConfig):
         self.quant_config = quant_config
+        self.supports_merged_column_loader = True
 
     def create_weights(
         self,
@@ -345,13 +403,16 @@ class GGUFLinearMethod(LinearMethodBase):
         **extra_weight_attrs,
     ):
         self.params_dtype = params_dtype
+        self.output_partition_sizes = output_partition_sizes
         output_size_per_partition = sum(output_partition_sizes)
+        self.input_size_per_partition = input_size_per_partition
 
         tensor_shape = (output_size_per_partition, input_size_per_partition)
         qweight = GGUFUninitializedParameter(requires_grad=False)
         set_weight_attrs(
             qweight,
             {
+                "output_partition_sizes": output_partition_sizes,
                 "input_dim": 1,
                 "output_dim": 0,
                 "tensor_shape": tensor_shape,
@@ -394,6 +455,8 @@ class GGUFLinearMethod(LinearMethodBase):
     def _create_padded_weight_param(self, layer: torch.nn.Module):
         """Create padded weight parameter for GGUF MergedLinear layer."""
         qweight = layer.qweight
+        if not qweight.data_container:
+            return
         shard_id_map = qweight.shard_id_map
         shard_id = qweight.shard_id
         if len(data_container := qweight.data_container) > 1:
@@ -423,7 +486,25 @@ class GGUFLinearMethod(LinearMethodBase):
             padded_param = Parameter(padded_data, requires_grad=False)
             set_weight_attrs(padded_param, vars(qweight))
             set_weight_attrs(padded_param, {"shard_offset_map": shard_offset_map})
+            set_weight_attrs(qweight, {"shard_offset_map": shard_offset_map})
             layer.register_parameter("qweight", padded_param)
+        elif len(data_container) == 1:
+            loaded = data_container[0]
+            qweight.materialize(loaded.shape, device=loaded.device, dtype=loaded.dtype)
+            qweight.data.copy_(loaded)
+            qweight.shard_offset_map = {
+                shard_id[0]: (0, loaded.size(0), loaded.size(1))
+            }
+            qweight.data_container.clear()
+            if len(shard_id) > 1:
+                layer.register_parameter(
+                    "qweight",
+                    Parameter(qweight.data, requires_grad=False),
+                )
+                set_weight_attrs(layer.qweight, vars(qweight))
+                layer.qweight.shard_offset_map = {
+                    shard_id[0]: (0, loaded.size(0), loaded.size(1))
+                }
 
     def apply(
         self,
@@ -434,13 +515,35 @@ class GGUFLinearMethod(LinearMethodBase):
         shard_id = layer.qweight.shard_id
 
         if shard_id:
+            if all(idx is None for idx in shard_id):
+                shard_id = None
+        if shard_id:
             # dequantize shard weights respectively
-            shard_id = ["q", "k", "v"] if "q" in shard_id else shard_id
+            # Preserve each projection's native shard ID: integer 0/1 for
+            # MergedColumnParallelLinear (gate/up), string q/k/v for QKV.
+            # Converting integer shards to strings silently drops gate/up.
+            if "q" in shard_id and not hasattr(layer.qweight, "shard_offset_map"):
+                return fused_mul_mat_gguf(x, layer.qweight, layer.qweight_type.weight_type)
+            shard_id = [idx for idx in shard_id if idx in layer.qweight.shard_offset_map]
+            # The GGUF iterator visits tensors in file order (Gemma4 files
+            # commonly store K before Q), but QKVParallelLinear consumers
+            # require canonical Q, K, V concatenation. Do not let checkpoint
+            # serialization order redefine the fused projection layout.
+            if set(shard_id) == {"q", "k", "v"}:
+                shard_id = ["q", "k", "v"]
             qweight = layer.qweight
             result = []
             for idx in shard_id:
                 start, end, offset = layer.qweight.shard_offset_map[idx]
-                qweight_type = layer.qweight_type.shard_weight_type[idx]
+                qtype_key = ("q" if idx == "gate" else "v") if idx in ("gate", "up") else idx
+                qweight_type = layer.qweight_type.shard_weight_type.get(
+                    qtype_key, layer.qweight_type.shard_weight_type.get(idx)
+                )
+                if qweight_type is None:
+                    raise RuntimeError(
+                        f"Missing GGUF quantization type for shard {idx!r}; "
+                        f"available={layer.qweight_type.shard_weight_type}"
+                    )
                 result.append(
                     fused_mul_mat_gguf(
                         x, qweight[start:end, :offset].contiguous(), qweight_type
@@ -454,6 +557,67 @@ class GGUFLinearMethod(LinearMethodBase):
         if bias is not None:
             out.add_(bias)
         return out
+
+    def apply_tied_embedding(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: torch.Tensor | None = None,
+        output_vocab_size: int | None = None,
+        row_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Apply a packed GGUF embedding matrix as a vocabulary projection.
+
+        Decode bounded vocabulary chunks to avoid materializing the full
+        dequantized embedding table.
+        """
+        qweight = getattr(layer, "_gguf_qweight", None)
+        qweight_type = getattr(layer, "_gguf_qweight_type", None)
+        if qweight is None or qweight_type is None:
+            raise RuntimeError("Tied GGUF embedding weights are not loaded")
+        if x.shape[-1] != layer.embedding_dim:
+            raise ValueError(
+                f"Tied GGUF head expected hidden size {layer.embedding_dim}, "
+                f"got {x.shape[-1]}"
+            )
+        vocab_size = min(layer.num_embeddings, output_vocab_size or layer.num_embeddings)
+        if qweight_type in UNQUANTIZED_TYPES:
+            return torch.nn.functional.linear(
+                x, qweight[:vocab_size].to(device=x.device, dtype=x.dtype), bias
+            )
+        if qweight_type not in DEQUANT_TYPES:
+            raise NotImplementedError(
+                f"Unsupported tied GGUF embedding type: {WeightType(qweight_type)}"
+            )
+        chunk_size = 128
+        source = getattr(layer, "_gguf_weight_storage", qweight)
+        row_weight = source if source.device == x.device else source.to(
+            device=x.device, non_blocking=True
+        )
+        if row_weight.shape[0] < vocab_size:
+            raise ValueError(
+                f"GGUF tied-head row cache has {row_weight.shape[0]} rows; "
+                f"expected at least {vocab_size}"
+            )
+
+        flat_x = x.reshape(-1, x.shape[-1])
+        logits = torch.empty(
+            (flat_x.shape[0], vocab_size), dtype=x.dtype, device=x.device
+        )
+        # GGUF stores [vocab, packed_hidden]. Decode chunks of this layout;
+        # temporary CUDA copies (if needed) are prepared before graph capture.
+        block_size, type_size = gguf.GGML_QUANT_SIZES[qweight_type]
+        packed_hidden = qweight.shape[1] // type_size * block_size
+        for start in range(0, vocab_size, chunk_size):
+            end = min(start + chunk_size, vocab_size)
+            packed = row_weight[start:end]
+            weight = ggml_dequantize(
+                packed, qweight_type, packed_hidden, end - start, x.dtype
+            ).view(end - start, packed_hidden)[..., : layer.embedding_dim]
+            logits[:, start:end] = flat_x @ weight.T
+        if bias is not None:
+            logits.add_(bias)
+        return logits.reshape(*x.shape[:-1], vocab_size)
 
 
 class GGUFMoEMethod(FusedMoEMethodBase):
@@ -572,10 +736,45 @@ class GGUFEmbeddingMethod(GGUFLinearMethod):
         quant_config: The GGUF quantization config.
     """
 
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        embedding_dim: int,
+        output_partition_sizes: list[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
+        self.params_dtype = params_dtype
+        self.output_partition_sizes = output_partition_sizes
+        num_embeddings = sum(output_partition_sizes)
+        qweight = GGUFUninitializedParameter(requires_grad=False)
+        set_weight_attrs(
+            qweight,
+            {
+                "tensor_shape": (num_embeddings, embedding_dim),
+                "is_gguf_weight": True,
+                "data_container": [],
+                "shard_id": [],
+                "shard_id_map": {},
+            },
+        )
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("qweight", qweight)
+        qweight_type = Parameter(torch.empty(1, dtype=torch.uint8), requires_grad=False)
+        set_weight_attrs(
+            qweight_type,
+            {"is_gguf_weight_type": True, "weight_type": 0, "ignore_warning": True},
+        )
+        layer.register_parameter("qweight_type", qweight_type)
+
     def embedding(self, layer: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
         qweight = layer.qweight
-        qweight_type = layer.qweight_type.weight_type
+        qweight_type = getattr(layer, "_gguf_qweight_type", 0)
         hidden_size = qweight.tensor_shape[1]
+        if qweight.data_container:
+            qweight = qweight.data_container[0]
 
         return apply_gguf_embedding(
             x, qweight, qweight_type, hidden_size, dtype=self.params_dtype

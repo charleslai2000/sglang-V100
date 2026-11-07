@@ -816,12 +816,23 @@ class TritonAttnBackend(AttentionBackend):
         if self.sliding_window_size is not None and self.sliding_window_size > 0:
             if kv_indices_buf is None:
                 self.cuda_graph_window_kv_indices = torch.zeros(
-                    (max_num_tokens * self.sliding_window_size),
+                    (max_num_tokens * (self.sliding_window_size + 1)),
                     dtype=torch.int64,
                     device=self.device,
                 )
             else:
-                self.cuda_graph_window_kv_indices = torch.zeros_like(kv_indices_buf)
+                required_window_capacity = max_num_tokens * (
+                    self.sliding_window_size + 1
+                )
+                if kv_indices_buf.numel() < required_window_capacity:
+                    raise ValueError(
+                        "CUDA graph KV index buffer is too small for the sliding "
+                        f"window: need {required_window_capacity} entries, got "
+                        f"{kv_indices_buf.numel()}"
+                    )
+                self.cuda_graph_window_kv_indices = kv_indices_buf[
+                    :required_window_capacity
+                ]
 
             self.cuda_graph_window_num_kv_splits = torch.full(
                 (max_num_tokens,),
@@ -1042,6 +1053,12 @@ class TritonAttnBackend(AttentionBackend):
             raise ValueError("Both k and v should be None or not None")
         else:
             # Save KV cache first (must do this before unified kernel)
+            if os.environ.get("G003_CAPTURE_OPS") == "1" and layer.layer_id == 0:
+                self._g003_cache_before = {
+                    "kv_loc": forward_batch.out_cache_loc.detach().clone(),
+                    "k": k.detach().clone() if k is not None else None,
+                    "v": v.detach().clone() if v is not None else None,
+                }
             if save_kv_cache:
                 if layer.k_scale is None:
                     self.token_to_kv_pool.set_kv_buffer(
@@ -1112,6 +1129,16 @@ class TritonAttnBackend(AttentionBackend):
             v_descale = 1.0
 
         q_extend = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and layer.layer_id == 0:
+            self._g003_attention_inputs = {
+                "q": q_extend.detach().clone(),
+                "k": k.detach().clone() if k is not None else None,
+                "v": v.detach().clone() if v is not None else None,
+                "kv_indptr": kv_indptr.detach().clone(),
+                "kv_indices": kv_indices.detach().clone(),
+                "window_kv_indptr": self.forward_metadata.window_kv_indptr.detach().clone() if self.forward_metadata.window_kv_indptr is not None else None,
+                "window_kv_indices": self.forward_metadata.window_kv_indices.detach().clone() if self.forward_metadata.window_kv_indices is not None else None,
+            }
         g002n_mode = os.environ.get("SGLANG_G002N_MODE", "")
         if (
             g002n_mode in ("shadow", "dense")
@@ -1340,6 +1367,17 @@ class TritonAttnBackend(AttentionBackend):
 
         logits_soft_cap = logit_capping_mod(layer.logit_capping_method, layer.logit_cap)
 
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and layer.layer_id == 0:
+            self._g003_cache_before = {
+                "kv_loc": forward_batch.out_cache_loc.detach().clone(),
+                "k": k.detach().clone() if k is not None else None,
+                "v": v.detach().clone() if v is not None else None,
+            }
+            try:
+                self._g003_history_k = self.token_to_kv_pool.get_key_buffer(layer).detach().clone()
+                self._g003_history_v = self.token_to_kv_pool.get_value_buffer(layer).detach().clone()
+            except Exception:
+                self._g003_history_k = self._g003_history_v = None
         if save_kv_cache:
             if self.use_mla:
                 if layer.k_scale is not None:
@@ -1376,6 +1414,16 @@ class TritonAttnBackend(AttentionBackend):
             k_descale = 1.0
             v_descale = 1.0
 
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and layer.layer_id == 0:
+            self._g003_attention_inputs = {
+                "q": q.view(-1, layer.tp_q_head_num, layer.qk_head_dim).detach().clone(),
+                "k": k.detach().clone() if k is not None else None,
+                "v": v.detach().clone() if v is not None else None,
+                "kv_indptr": kv_indptr.detach().clone(),
+                "kv_indices": kv_indices.detach().clone(),
+                "window_kv_indptr": self.forward_metadata.window_kv_indptr.detach().clone() if self.forward_metadata.window_kv_indptr is not None else None,
+                "window_kv_indices": self.forward_metadata.window_kv_indices.detach().clone() if self.forward_metadata.window_kv_indices is not None else None,
+            }
         # Select the correctly-sized attn_logits buffer for this layer.
         # The triton kernel's // Lv stride trick requires attn_logits.shape[-1]
         # to exactly match the layer's v_head_dim.
@@ -1654,9 +1702,12 @@ def update_sliding_window_buffer(
     path); omit it (or pass ``None``) to allocate a fresh tensor (eager path,
     requires ``device``).
     """
+    # ``sliding_window_size`` is the exclusive left-context distance used by
+    # SGLang's attention kernels. Include the current token as well, so the
+    # KV index list contains at most window_size + 1 positions.
     window_kv_lens = torch.minimum(
         seq_lens,
-        torch.tensor(sliding_window_size),
+        torch.tensor(sliding_window_size + 1),
     )
     window_kv_indptr[1 : bs + 1] = torch.cumsum(window_kv_lens, dim=0)
     window_kv_indptr = window_kv_indptr[: bs + 1]

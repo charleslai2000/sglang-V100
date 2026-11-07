@@ -607,15 +607,21 @@ class ModelConfig:
 
     def _derive_model_shapes(self):
         # Unify the config keys for hf_text_config
+        if self.hf_config.architectures == ["Gemma4ForCausalLM"]:
+            self.hf_text_config.v_head_dim = getattr(
+                self.hf_text_config, "global_v_head_dim", self.hf_text_config.head_dim
+            )
         self.head_dim = getattr(
             self.hf_text_config,
             "head_dim",
             self.hf_text_config.hidden_size // self.hf_text_config.num_attention_heads,
         )
+        if self.hf_config.architectures == ["Gemma4ForCausalLM"]:
+            self.head_dim = getattr(self.hf_text_config, "global_head_dim", self.head_dim)
         self.v_head_dim = getattr(
             self.hf_text_config,
             "v_head_dim",
-            self.head_dim,
+            getattr(self.hf_text_config, "global_v_head_dim", self.head_dim),
         )
 
         self.swa_head_dim = getattr(

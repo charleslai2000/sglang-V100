@@ -46,7 +46,12 @@ from sglang.srt.layers.moe.ep_moe.layer import get_moe_impl_class
 from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
 from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
+from sglang.srt.layers.quantization.gguf import (
+    GGUFConfig,
+    GGUFUninitializedParameter,
+)
 from sglang.srt.layers.radix_attention import RadixAttention
+from sglang.srt.model_executor.forward_context import get_attn_backend
 from sglang.srt.layers.rotary_embedding import get_rope
 from sglang.srt.layers.utils import PPMissingLayer, get_layer_id
 from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
@@ -69,7 +74,57 @@ def get_attention_sliding_window_size(config):
 
 
 Gemma4MLP = Gemma3MLP
-Gemma4TextScaledWordEmbedding = Gemma3TextScaledWordEmbedding
+
+
+class Gemma4TextScaledWordEmbedding(nn.Module):
+    """Gemma4 embedding that keeps GGUF tables packed instead of dense."""
+
+    def __init__(self, num_embeddings, embedding_dim, padding_idx, embed_scale=1.0):
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.padding_idx = padding_idx
+        self.embed_scale = embed_scale
+        self.weight = nn.Parameter(torch.empty(0), requires_grad=False)
+        self.qweight = GGUFUninitializedParameter(requires_grad=False)
+        self.qweight.tensor_shape = (num_embeddings, embedding_dim)
+        self.qweight.is_gguf_weight = True
+        self.qweight.data_container = []
+        self.qweight.shard_id = []
+        self.qweight.shard_id_map = {}
+
+        def load_packed_weight(param, loaded_weight):
+            param.data_container.append(loaded_weight)
+
+        self.qweight.weight_loader = load_packed_weight
+        self.qweight.ignore_warning = True
+        self.qweight_type = nn.Parameter(
+            torch.empty(1, dtype=torch.uint8), requires_grad=False
+        )
+        self.qweight_type.is_gguf_weight_type = True
+        self.qweight_type.weight_type = 0
+        self.qweight_type.ignore_warning = True
+        self._gguf_qweight = None
+        self._gguf_weight_storage = None
+        self._gguf_qweight_type = None
+        self._gguf_qweight_cuda = None
+
+    def forward(self, input_ids):
+        packed = getattr(self, "_gguf_qweight", None)
+        if packed is not None:
+            from sglang.srt.layers.quantization.gguf import apply_gguf_embedding
+
+            output = apply_gguf_embedding(
+                input_ids,
+                packed,
+                self._gguf_qweight_type,
+                self.embedding_dim,
+                dtype=self.weight.dtype if self.weight.numel() else torch.float16,
+                row_weight=getattr(self, "_gguf_qweight_cuda", None),
+            )
+        else:
+            output = torch.nn.functional.embedding(input_ids, self.weight)
+        return output * self.embed_scale
 
 
 def pp_filter_load_weight(
@@ -291,7 +346,12 @@ class Gemma4Attention(nn.Module):
                 config, "swa_num_key_value_heads", config.num_key_value_heads
             )
         else:
-            self.total_num_kv_heads = config.num_key_value_heads
+            self.total_num_kv_heads = (
+                config.num_global_key_value_heads
+                if getattr(config, "attention_k_eq_v", False)
+                and config.num_global_key_value_heads is not None
+                else config.num_key_value_heads
+            )
 
         self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
 
@@ -302,15 +362,32 @@ class Gemma4Attention(nn.Module):
 
         hidden_size = config.hidden_size
         self.head_dim = head_dim
+        v_head_dim = (
+            getattr(config, "global_v_head_dim", head_dim)
+            if layer_type == "full_attention"
+            else getattr(config, "swa_v_head_dim", head_dim)
+        )
 
+        # KV-sharing layers omit K/V projections in the HF checkpoint.
+        num_kv_shared_layers = getattr(config, "num_kv_shared_layers", 0)
+        first_kv_shared_layer_idx = config.num_hidden_layers - num_kv_shared_layers
+        self.is_kv_shared_layer = (
+            layer_id >= first_kv_shared_layer_idx and num_kv_shared_layers > 0
+        )
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
+        self.v_size = self.num_kv_heads * v_head_dim
 
+        # Transformers omits K/V projections from KV-sharing layers. SGLang's
+        # fused projection is shared across layers, so retain the full physical
+        # QKV shape and ignore K/V outputs for shared layers in forward.
+        qkv_num_kv_heads = self.total_num_kv_heads
         self.qkv_proj = QKVParallelLinear(
             hidden_size,
             self.head_dim,
             self.total_num_heads,
-            self.total_num_kv_heads,
+            qkv_num_kv_heads,
+            v_head_size=v_head_dim,
             bias=config.attention_bias,
             quant_config=quant_config,
             prefix=add_prefix("qkv_proj", prefix),
@@ -344,12 +421,6 @@ class Gemma4Attention(nn.Module):
             )
 
         # KV sharing logic
-        num_kv_shared_layers = getattr(config, "num_kv_shared_layers", 0)
-        first_kv_shared_layer_idx = config.num_hidden_layers - num_kv_shared_layers
-        self.is_kv_shared_layer = (
-            layer_id >= first_kv_shared_layer_idx and num_kv_shared_layers > 0
-        )
-
         self.kv_shared_layer_index = None
         if num_kv_shared_layers > 0 and self.layer_id >= first_kv_shared_layer_idx:
             prev_layers = config.layer_types[:first_kv_shared_layer_idx]
@@ -364,15 +435,38 @@ class Gemma4Attention(nn.Module):
                 len(prev_layers) - 1 - prev_layers[::-1].index(current_layer_type)
             )
 
-        self.rotary_emb = get_rope(
+        rotary_head_dim = getattr(
+            config,
+            "global_head_dim" if layer_type == "full_attention" else "swa_head_dim",
             self.head_dim,
-            rotary_dim=self.head_dim,
-            max_position=max_position_embeddings,
-            base=rope_parameters.get("rope_theta", 10000.0),
-            rope_scaling={"rope_type": rope_parameters.get("rope_type", "default")},
-            partial_rotary_factor=rope_parameters.get("partial_rotary_factor", 1.0),
-            is_neox_style=True,
         )
+        rotary_dim = int(
+            rotary_head_dim * rope_parameters.get("partial_rotary_factor", 1.0)
+        )
+        rope_scaling = {"rope_type": rope_parameters.get("rope_type", "default")}
+        if rope_scaling["rope_type"] == "proportional":
+            from sglang.srt.layers.rotary_embedding.rope_variant import (
+                Gemma4RotaryEmbedding,
+            )
+
+            self.rotary_emb = Gemma4RotaryEmbedding(
+                rotary_head_dim,
+                rotary_dim,
+                max_position_embeddings,
+                rope_parameters.get("rope_theta", 10000.0),
+                True,
+                torch.get_default_dtype(),
+            )
+        else:
+            self.rotary_emb = get_rope(
+                rotary_head_dim,
+                rotary_dim=rotary_dim,
+                max_position=max_position_embeddings,
+                base=rope_parameters.get("rope_theta", 10000.0),
+                rope_scaling=rope_scaling,
+                partial_rotary_factor=rope_parameters.get("partial_rotary_factor", 1.0),
+                is_neox_style=True,
+            )
 
         self.attn = RadixAttention(
             self.num_heads,
@@ -395,22 +489,56 @@ class Gemma4Attention(nn.Module):
         forward_batch: ForwardBatch,
         **kwargs,
     ):
+        is_kv_shared = (
+            self.is_kv_shared_layer and self.kv_shared_layer_index is not None
+        )
         qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
+            self._g003_ops = {"projection_input": hidden_states.detach().clone()}
+            self._g003_ops["projection_output"] = qkv.detach().clone()
+        # G003 diagnostic snapshot: fused Gemma4 QKV RMSNorm below is in-place.
+        # Clone here so the projection boundary remains numerically immutable.
+        if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1":
+            self._g003_qkv_raw = qkv.detach().clone()
+        # Dense checkpoints may still carry a complete QKV projection for KV-sharing
+        # layers; those K/V outputs are ignored below. GGUF fused tensors can be
+        # materialized as Q-only, so accept either physical layout when sharing.
+        expected_sizes = (
+            {self.q_size}
+            if is_kv_shared
+            else {self.q_size + self.kv_size + self.v_size}
+        )
+        if qkv.shape[-1] not in expected_sizes:
+            expected_size = sorted(expected_sizes)
+        if qkv.shape[-1] not in expected_sizes:
+            raise RuntimeError(
+                f"Gemma4 layer {self.layer_id} QKV output mismatch: "
+                f"got {qkv.shape[-1]}, expected {expected_size}; "
+                f"module={self.qkv_proj.output_sizes}, "
+                f"quant_method={type(getattr(self.qkv_proj, 'quant_method', None)).__name__}"
+            )
+        if is_kv_shared:
+            q = qkv
+            k = v = None
+        else:
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.v_size], dim=-1)
 
         # Fused Q/K/V RMSNorm: replaces three separate norm kernels with one.
         # Preconditions for the fused path: tensors on CUDA, q_norm/k_norm use
         # the standard norm*weight (scale_shift==0) and v_norm has weight=ones
         # (with_scale=False) — the canonical Gemma4 attention configuration.
-        is_kv_shared = (
-            self.is_kv_shared_layer and self.kv_shared_layer_index is not None
-        )
         can_fuse_qkv_norm = (
             q.is_cuda
             and self.q_norm.scale_shift == 0.0
             and self.k_norm.scale_shift == 0.0
             and not self.v_norm.with_scale
         )
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
+            self._g003_ops["qkv_pre_norm"] = torch.cat([q.reshape(q.shape[0], -1), k.reshape(k.shape[0], -1), v.reshape(v.shape[0], -1)], dim=-1).detach().clone() if k is not None else q.detach().clone()
+        if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1":
+            self._g003_qkv_pre_norm = torch.cat(
+                [q.reshape(q.shape[0], -1), k.reshape(k.shape[0], -1), v.reshape(v.shape[0], -1)], dim=-1
+            ).detach().clone() if k is not None else q.detach().clone()
         if can_fuse_qkv_norm:
             if is_kv_shared:
                 gemma_qkv_rmsnorm(
@@ -443,7 +571,7 @@ class Gemma4Attention(nn.Module):
                 # Use reshape (not view) since k/v are strided slice views of
                 # the qkv buffer and may not satisfy view's contiguity rules.
                 k = k.reshape(-1, self.num_kv_heads, self.head_dim)
-                v = v.reshape(-1, self.num_kv_heads, self.head_dim)
+                v = v.reshape(-1, self.num_kv_heads, self.v_size // self.num_kv_heads)
         else:
             q = q.unflatten(-1, (self.num_heads, self.head_dim))
             q = self.q_norm(q)
@@ -454,9 +582,18 @@ class Gemma4Attention(nn.Module):
             else:
                 k = k.unflatten(-1, (self.num_kv_heads, self.head_dim))
                 k = self.k_norm(k)
-                v = v.unflatten(-1, (self.num_kv_heads, self.head_dim))
+                v = v.unflatten(-1, (self.num_kv_heads, self.v_size // self.num_kv_heads))
                 v = self.v_norm(v)
 
+        if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1":
+            self._g003_qkv_normed = torch.cat(
+                [q.reshape(q.shape[0], -1), k.reshape(k.shape[0], -1), v.reshape(v.shape[0], -1)], dim=-1
+            ).detach().clone() if k is not None else q.detach().clone()
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
+            self._g003_ops["qkv_post_norm"] = torch.cat([q.reshape(q.shape[0], -1), k.reshape(k.shape[0], -1), v.reshape(v.shape[0], -1)], dim=-1).detach().clone() if k is not None else q.detach().clone()
+            self._g003_ops["norm_q"] = q.detach().clone()
+            self._g003_ops["norm_k"] = k.detach().clone() if k is not None else None
+            self._g003_ops["norm_v"] = v.detach().clone() if v is not None else None
         # Apply rotary embedding
         if k is not None:
             k = k.flatten(-2, -1)
@@ -468,11 +605,25 @@ class Gemma4Attention(nn.Module):
             q, _ = self.rotary_emb(positions, q, dummy_k)
 
         q = q.unflatten(-1, (self.num_heads, self.head_dim))
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
+            self._g003_ops["rotated_q"] = q.detach().clone()
+            self._g003_ops["rotated_k"] = k.detach().clone() if k is not None else None
+            self._g003_ops["attention_output"] = None
+        if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1":
+            self._g003_q_rotated = q.detach().clone()
+            if k is not None:
+                self._g003_k_rotated = k.detach().clone()
         diagnostic_layer_range = None
         if q.is_cuda and os.environ.get("SGLANG_GEMMA4_ATTENTION_LAYER_NVTX") == "1":
             diagnostic_layer_range = f"G002L_ATTENTION_LAYER:{self.layer_id}:D={self.head_dim}"
             torch.cuda.nvtx.range_push(diagnostic_layer_range)
         try:
+            if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
+                self._g003_ops["actual_q"] = q.detach().clone()
+                self._g003_ops["actual_k"] = k.detach().clone() if k is not None else None
+                self._g003_ops["actual_v"] = v.detach().clone() if v is not None else None
+                self._g003_forward_batch = forward_batch
+                self._g003_attn_backend = get_attn_backend()
             attn_output = self.attn(
                 q,
                 k,
@@ -483,6 +634,9 @@ class Gemma4Attention(nn.Module):
         finally:
             if diagnostic_layer_range is not None:
                 torch.cuda.nvtx.range_pop()
+        if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
+            self._g003_ops["attention_output"] = attn_output.detach().clone()
+            self._g003_ops["attention_output_before_oproj"] = attn_output.detach().clone()
         if attn_output.dim() == 3:
             attn_output = attn_output.flatten(-2, -1)
         output, _ = self.o_proj(attn_output)
@@ -510,7 +664,8 @@ class Gemma4DecoderLayer(nn.Module):
         layer_type = config.layer_types[layer_id]
         self.is_full_attention = layer_type == "full_attention"
         if self.is_full_attention:
-            head_dim = config.head_dim  # following sglang naming
+            head_dim = getattr(config, "global_head_dim", config.head_dim)
+            v_head_dim = getattr(config, "global_v_head_dim", head_dim)
         else:
             head_dim = getattr(config, "swa_head_dim", config.head_dim)
 
@@ -542,6 +697,9 @@ class Gemma4DecoderLayer(nn.Module):
             prefix=add_prefix("mlp", prefix),
         )
 
+        # Gemma4 checkpoint norms are multiplicative weights (HF and llama.cpp
+        # both apply RMSNorm(x) * weight). Do not use GemmaRMSNorm's offset
+        # contract or the Gemma3 (1 + weight) convention here.
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
@@ -560,7 +718,11 @@ class Gemma4DecoderLayer(nn.Module):
                 self.hidden_size,
                 self.hidden_size_per_layer_input,
                 bias=False,
-                quant_config=quant_config,
+                quant_config=(
+                    GGUFConfig(modules_to_not_convert=["per_layer_input_gate"])
+                    if quant_config is not None and quant_config.get_name() == "gguf"
+                    else quant_config
+                ),
                 prefix=add_prefix("per_layer_input_gate", prefix),
             )
             # Projection: projects gated per-layer input back → hidden size
@@ -568,7 +730,11 @@ class Gemma4DecoderLayer(nn.Module):
                 self.hidden_size_per_layer_input,
                 self.hidden_size,
                 bias=False,
-                quant_config=quant_config,
+                quant_config=(
+                    GGUFConfig(modules_to_not_convert=["per_layer_projection"])
+                    if quant_config is not None and quant_config.get_name() == "gguf"
+                    else quant_config
+                ),
                 prefix=add_prefix("per_layer_projection", prefix),
             )
             self.post_per_layer_input_norm = Gemma4RMSNorm(
@@ -629,11 +795,6 @@ class Gemma4DecoderLayer(nn.Module):
         # 1. input_norm(x) -> attn -> post_attn_norm -> ADD residual
         # 2. pre_ff_norm -> mlp -> post_ff_norm -> ADD residual
         #
-        # Optimization: fuse "post_attn_norm(h) + residual; pre_ff_norm(...)"
-        # into "post_attn_norm(h); pre_ff_norm(h, residual)" using
-        # gemma_fused_add_rmsnorm which computes:
-        #   residual = h + residual (in-place)
-        #   h = gemma_norm(residual)
         residual = hidden_states
 
         # Apply input layernorm
@@ -644,13 +805,11 @@ class Gemma4DecoderLayer(nn.Module):
             forward_batch=forward_batch,
         )
         hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = residual + hidden_states
 
         if self.enable_moe_block:
-            # Fuse: hidden_states + residual -> residual; pre_ff_norm(residual) -> hidden_states
-            # Also need raw (unfused) residual for router and pre_ff_norm_2
-            hidden_states, residual = self.pre_feedforward_layernorm(
-                hidden_states, residual
-            )
+            residual = hidden_states
+            hidden_states = self.pre_feedforward_layernorm(hidden_states)
             # For MoE: router and pre_ff_norm_2 need the unfused residual
             # (which is now updated to post_attn_out + old_residual)
             moe_input = residual
@@ -692,37 +851,24 @@ class Gemma4DecoderLayer(nn.Module):
             # Combine branches
             hidden_states = hidden_states_1 + hidden_states_2
         else:
-            # Fuse: hidden_states + residual -> residual; pre_ff_norm(residual) -> hidden_states
-            hidden_states, residual = self.pre_feedforward_layernorm(
-                hidden_states, residual
-            )
+            residual = hidden_states
+            hidden_states = self.pre_feedforward_layernorm(hidden_states)
             hidden_states = self.mlp(hidden_states)
 
-        if not self.has_ple and hidden_states.is_cuda and hidden_states.dim() == 2:
-            # Fused: (post_ff_norm(h) + residual) * layer_scalar in one kernel
-            norm = self.post_feedforward_layernorm
-            hidden_states = gemma_rmsnorm_residual_scalar(
-                hidden_states,
-                norm.weight.data,
-                residual,
-                self.layer_scalar,
-                norm.variance_epsilon,
+        hidden_states = self.post_feedforward_layernorm(hidden_states)
+        hidden_states = hidden_states + residual
+
+        if self.has_ple and per_layer_input is not None:
+            gate, _ = self.per_layer_input_gate(hidden_states)
+            gate = torch.nn.functional.gelu(gate, approximate="tanh")
+            gated_per_layer = gate * per_layer_input
+            per_layer_contribution, _ = self.per_layer_projection(gated_per_layer)
+            per_layer_contribution = self.post_per_layer_input_norm(
+                per_layer_contribution
             )
-        else:
-            hidden_states = self.post_feedforward_layernorm(hidden_states)
-            hidden_states = hidden_states + residual
+            hidden_states = hidden_states + per_layer_contribution
 
-            if self.has_ple and per_layer_input is not None:
-                gate, _ = self.per_layer_input_gate(hidden_states)
-                gate = torch.nn.functional.gelu(gate, approximate="tanh")
-                gated_per_layer = gate * per_layer_input
-                per_layer_contribution, _ = self.per_layer_projection(gated_per_layer)
-                per_layer_contribution = self.post_per_layer_input_norm(
-                    per_layer_contribution
-                )
-                hidden_states = hidden_states + per_layer_contribution
-
-            hidden_states = hidden_states * self.layer_scalar
+        hidden_states = hidden_states * self.layer_scalar
         return hidden_states, None
 
 
@@ -739,6 +885,7 @@ class Gemma4TextModel(PreTrainedModel):
         self.vocab_size = config.vocab_size
         self.padding_idx = getattr(config, "pad_token_id", None)
         self.pp_group = get_pp_group()
+        self.quant_config = quant_config
 
         # Token / per-layer embedding tables and the per-layer projection only
         # produce activations consumed at the model entry, so they live on the
@@ -781,6 +928,10 @@ class Gemma4TextModel(PreTrainedModel):
                 self.padding_idx,
                 embed_scale=self.config.hidden_size**0.5,  # embedded normalizer
             )
+            if quant_config is not None and quant_config.get_name() == "gguf":
+                self.embed_tokens.qweight.quant_method = quant_config.get_quant_method(
+                    self.embed_tokens, "model.embed_tokens"
+                )
         else:
             self.embed_tokens = PPMissingLayer()
 
@@ -795,12 +946,23 @@ class Gemma4TextModel(PreTrainedModel):
                 self.padding_idx,
                 embed_scale=self.hidden_size_per_layer_input**0.5,
             )
+            if quant_config is not None and quant_config.get_name() == "gguf":
+                self.embed_tokens_per_layer.qweight.quant_method = (
+                    quant_config.get_quant_method(
+                        self.embed_tokens_per_layer,
+                        "model.embed_tokens_per_layer",
+                    )
+                )
 
             self.per_layer_model_projection = ReplicatedLinear(
                 self.hidden_size,
                 config.num_hidden_layers * self.hidden_size_per_layer_input,
                 bias=False,
-                quant_config=quant_config,
+                quant_config=(
+                    GGUFConfig(modules_to_not_convert=["per_layer_model_projection"])
+                    if quant_config is not None and quant_config.get_name() == "gguf"
+                    else quant_config
+                ),
                 prefix=add_prefix("per_layer_model_projection", prefix),
             )
 
@@ -859,7 +1021,6 @@ class Gemma4TextModel(PreTrainedModel):
             per_layer_inputs_mask, input_ids, torch.zeros_like(input_ids)
         )
 
-        # Get packed per-layer embeddings: (num_tokens, total_ple_dim)
         per_layer_embeds = self.embed_tokens_per_layer(per_layer_inputs_tokens)
 
         # Apply embed_scale (sqrt of per-layer hidden dim)
@@ -895,7 +1056,9 @@ class Gemma4TextModel(PreTrainedModel):
         per_layer_projection, _ = self.per_layer_model_projection(inputs_embeds)
 
         # Apply w_scale (HF: Gemma4ScaledLinear with w_scale=hidden_size^{-0.5})
-        per_layer_projection = per_layer_projection * self.per_layer_projection_scale
+        per_layer_projection = per_layer_projection * self.per_layer_projection_scale.to(
+            device=per_layer_projection.device, dtype=per_layer_projection.dtype
+        )
 
         # Reshape to (num_tokens, num_layers, hidden_size_per_layer_input)
         per_layer_projection = per_layer_projection.reshape(
@@ -905,13 +1068,22 @@ class Gemma4TextModel(PreTrainedModel):
         )
 
         # Normalize
+        if self.per_layer_projection_norm.weight.device != per_layer_projection.device:
+            self.per_layer_projection_norm.weight.data = (
+                self.per_layer_projection_norm.weight.data.to(per_layer_projection.device)
+            )
+        self.per_layer_projection_norm._forward_method = (
+            self.per_layer_projection_norm.forward_native
+        )
         per_layer_projection = self.per_layer_projection_norm(per_layer_projection)
 
         if per_layer_inputs is None:
             return per_layer_projection
 
         # Combine: (projection + per_layer_inputs) * scale
-        return (per_layer_projection + per_layer_inputs) * self.per_layer_input_scale
+        return (per_layer_projection + per_layer_inputs) * self.per_layer_input_scale.to(
+            device=per_layer_projection.device, dtype=per_layer_projection.dtype
+        )
 
     def forward(
         self,
@@ -1061,6 +1233,8 @@ class Gemma4ForCausalLM(PreTrainedModel):
         # checkpoint's embed_tokens.weight into it during load_weights.
         if self.pp_group.world_size == 1 and self.config.tie_word_embeddings:
             self.lm_head = self.model.embed_tokens
+            if quant_config is not None and quant_config.get_name() == "gguf":
+                self.logits_processor._gguf_tied_embedding_head = True
         elif self.pp_group.is_last_rank:
             self.lm_head = ParallelLMHead(
                 config.vocab_size,
@@ -1149,6 +1323,7 @@ class Gemma4ForCausalLM(PreTrainedModel):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
+        is_gguf = self.quant_config is not None and self.quant_config.get_name() == "gguf"
 
         fused_expert_params_mapping = [
             # (param_name, ckpt_weight_name, shard_ids)
@@ -1184,6 +1359,10 @@ class Gemma4ForCausalLM(PreTrainedModel):
 
         params_dict = dict(self.named_parameters())
         params_dict.update(dict(self.named_buffers()))
+        module_map = dict(self.named_modules())
+        self._gguf_embedding_weights = {}
+        self._gguf_cpu_weights = {}
+        self._gguf_cpu_weight_targets = {}
         non_persistent_buffers: Set[str] = set()
         for mod_name, mod in self.named_modules():
             for buf_name in getattr(mod, "_non_persistent_buffers_set", set()):
@@ -1191,6 +1370,12 @@ class Gemma4ForCausalLM(PreTrainedModel):
                 non_persistent_buffers.add(full)
 
         loaded_params: Set[str] = set()
+        if is_gguf:
+            shared_kv_start = self.config.num_hidden_layers - getattr(
+                self.config, "num_kv_shared_layers", 0
+            )
+            for layer_id in range(shared_kv_start, self.config.num_hidden_layers):
+                loaded_params.add(f"model.layers.{layer_id}.self_attn.k_norm.weight")
         for name, loaded_weight in weights:
             name = name.replace("model.language_model.", "model.")
 
@@ -1229,6 +1414,129 @@ class Gemma4ForCausalLM(PreTrainedModel):
                 and (m := re.search(r"layers\.(\d+)\.", name)) is not None
                 and int(m.group(1)) in k_eq_v_layers
             )
+
+            if is_gguf and name == "model.per_layer_model_projection.weight":
+                self._gguf_cpu_weights[name] = loaded_weight
+                self._gguf_cpu_weight_targets[name] = params_dict.get(
+                    "model.per_layer_model_projection.qweight",
+                    params_dict.get(name),
+                )
+                loaded_params.add(name)
+                continue
+
+            # GGUF stores QKV and gate/up projections as independent tensors;
+            # pass these through GGUF's shard-aware loader instead of the
+            # standard dense weight_loader, which cannot materialize packed
+            # UninitializedParameters.
+            if is_gguf and name.endswith(".qweight"):
+                if name.startswith("model.embed_tokens_per_layer.qweight"):
+                    self._gguf_embedding_weights.setdefault("model.embed_tokens_per_layer", {})["qweight"] = loaded_weight
+                    param = params_dict.get("model.embed_tokens_per_layer.qweight")
+                    if param is not None:
+                        param.data_container.append(loaded_weight)
+                    loaded_params.add("model.embed_tokens_per_layer.weight")
+                    continue
+                if name.startswith("model.embed_tokens.qweight"):
+                    self._gguf_embedding_weights.setdefault("model.embed_tokens", {})["qweight"] = loaded_weight
+                    param = params_dict.get("model.embed_tokens.qweight")
+                    if param is not None:
+                        param.data_container.append(loaded_weight)
+                    loaded_params.add("model.embed_tokens.weight")
+                    continue
+                base_name = name
+                shard_id = None
+                for component, fused, shard in (
+                    ("q_proj", "qkv_proj", "q"),
+                    ("k_proj", "qkv_proj", "k"),
+                    ("v_proj", "qkv_proj", "v"),
+                    ("gate_proj", "gate_up_proj", 0),
+                    ("up_proj", "gate_up_proj", 1),
+                ):
+                    marker = "." + component + ".qweight"
+                    if marker in base_name:
+                        base_name = base_name.replace(marker, "." + fused + ".qweight")
+                        shard_id = shard
+                        break
+                param = params_dict.get(base_name)
+                if param is None:
+                    continue
+                module_name = base_name[: -len(".qweight")]
+                param_name = module_name + ".qweight"
+                module = module_map.get(module_name)
+                if module_name in ("model.embed_tokens", "model.embed_tokens_per_layer"):
+                    # Gemma embeddings are plain nn.Embedding modules; stash
+                    # their quantized bytes for the GGUF embedding lookup.
+                    raw = self._gguf_embedding_weights.setdefault(module_name, {})
+                    raw["qweight"] = loaded_weight
+                    if module is not None and getattr(param, "is_gguf_weight", False):
+                        module.weight_loader(param, loaded_weight)
+                    loaded_params.add(module_name + ".weight")
+                elif module is not None and getattr(param, "is_gguf_weight", False):
+                    try:
+                        module.weight_loader(param, loaded_weight, shard_id) if shard_id is not None else module.weight_loader(param, loaded_weight)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Failed loading GGUF tensor {name!r} into {base_name!r}; "
+                            f"module={type(module).__name__}, shard={shard_id!r}, "
+                            f"parameter_initialized={not isinstance(param, torch.nn.parameter.UninitializedParameter)}, "
+                            f"loaded_shape={tuple(loaded_weight.shape)}"
+                        ) from exc
+                elif module is None:
+                    default_weight_loader(param, loaded_weight)
+                else:
+                    module.weight_loader(param, loaded_weight, shard_id) if shard_id is not None else module.weight_loader(param, loaded_weight)
+                loaded_params.add(param_name)
+                continue
+            if is_gguf and name.endswith(".qweight_type"):
+                name = name.replace(".qweight_type", ".qweight_type")
+                if name.startswith("model.embed_tokens_per_layer.qweight_type"):
+                    qtype = int(loaded_weight.item())
+                    self._gguf_embedding_weights.setdefault("model.embed_tokens_per_layer", {})["qweight_type"] = qtype
+                    self.model.embed_tokens_per_layer.qweight_type.weight_type = qtype
+                    loaded_params.add("model.embed_tokens_per_layer.weight")
+                    continue
+                if name.startswith("model.embed_tokens.qweight_type"):
+                    qtype = int(loaded_weight.item())
+                    self._gguf_embedding_weights.setdefault("model.embed_tokens", {})["qweight_type"] = qtype
+                    self.model.embed_tokens.qweight_type.weight_type = qtype
+                    self.model.embed_tokens._gguf_qweight_type = qtype
+                    loaded_params.add("model.embed_tokens.weight")
+                    continue
+                base_name = name
+                shard_id = None
+                for component, fused, shard in (
+                    ("q_proj", "qkv_proj", "q"),
+                    ("k_proj", "qkv_proj", "k"),
+                    ("v_proj", "qkv_proj", "v"),
+                    ("gate_proj", "gate_up_proj", 0),
+                    ("up_proj", "gate_up_proj", 1),
+                ):
+                    marker = "." + component + ".qweight_type"
+                    if marker in base_name:
+                        base_name = base_name.replace(marker, "." + fused + ".qweight_type")
+                        shard_id = shard
+                        break
+                module_name = base_name[: -len(".qweight_type")]
+                module = dict(self.named_modules()).get(module_name)
+                if module is not None and hasattr(module, "qweight_type") and getattr(module.qweight_type, "is_gguf_weight_type", False):
+                    if shard_id in ("k", "v") and len(module.qweight_type.data) == 2:
+                        # Gemma4 shares K/V weights in full-attention layers;
+                        # both logical projections are backed by the same K tensor.
+                        module.qweight_type.data[1] = loaded_weight
+                        module.qweight_type.shard_weight_type[shard_id] = int(loaded_weight.item())
+                        loaded_params.add(base_name)
+                        continue
+                    if shard_id is None:
+                        module.qweight_type.weight_type = int(loaded_weight.item())
+                    elif isinstance(shard_id, str):
+                        slot = {"q": 0, "k": 1, "v": 2}[shard_id]
+                        module.qweight_type.data[slot] = loaded_weight
+                        module.qweight_type.shard_weight_type[shard_id] = int(loaded_weight.item())
+                    else:
+                        module.qweight_type.data[shard_id] = loaded_weight
+                        module.qweight_type.shard_weight_type[shard_id] = int(loaded_weight.item())
+                    loaded_params.add(base_name)
+                continue
 
             # MoE expert weights checked first (gate_up_proj contains "up_proj"
             # which would false-match the stacked dense MLP mapping).
@@ -1285,6 +1593,8 @@ class Gemma4ForCausalLM(PreTrainedModel):
                 else:
                     for param_name, weight_name, shard_id in stacked_params_mapping:
                         name = orig_name
+                        if is_gguf and weight_name in ("q_proj", "k_proj", "v_proj", "gate_proj", "up_proj"):
+                            continue
                         if weight_name not in name:
                             continue
                         name = name.replace(weight_name, param_name)
@@ -1299,6 +1609,10 @@ class Gemma4ForCausalLM(PreTrainedModel):
                         break
                     else:
                         name = orig_name
+                        if is_gguf and name.endswith(".weight"):
+                            candidate = name[: -len(".weight")] + ".qweight"
+                            if candidate in params_dict:
+                                name = candidate
                         if name.endswith(".bias") and name not in params_dict:
                             continue
                         name = maybe_remap_kv_scale_name(name, params_dict)
@@ -1310,8 +1624,41 @@ class Gemma4ForCausalLM(PreTrainedModel):
                         weight_loader = getattr(
                             param, "weight_loader", default_weight_loader
                         )
-                        weight_loader(param, loaded_weight)
+                        if is_gguf and isinstance(param, torch.nn.parameter.UninitializedParameter):
+                            raise RuntimeError(
+                                f"Uninitialized parameter {name!r} received tensor {orig_name!r} "
+                                f"with shape {tuple(loaded_weight.shape)}"
+                            )
+                        if is_gguf and name.endswith(".qweight"):
+                            module_name = name[: -len(".qweight")]
+                            module = module_map.get(module_name)
+                            if module is not None and getattr(param, "is_gguf_weight", False):
+                                module.weight_loader(param, loaded_weight)
+                            elif isinstance(param, torch.nn.parameter.UninitializedParameter):
+                                raise RuntimeError(
+                                    f"GGUF packed tensor {name!r} maps to an uninitialized "
+                                    f"non-GGUF parameter ({type(module).__name__ if module else None})"
+                                )
+                            else:
+                                weight_loader(param, loaded_weight)
+                        else:
+                            try:
+                                weight_loader(param, loaded_weight)
+                            except Exception as exc:
+                                raise RuntimeError(
+                                    f"Failed loading GGUF tensor {orig_name!r} "
+                                    f"into parameter {name!r}; shape="
+                                    f"{tuple(loaded_weight.shape)}"
+                                ) from exc
                         loaded_params.add(name)
+        if is_gguf:
+            loaded_params.update(
+                name
+                for name in params_dict
+                if name.startswith(
+                    ("model.embed_tokens.qweight", "model.embed_tokens_per_layer.qweight")
+                )
+            )
         unloaded_params = params_dict.keys() - loaded_params
         if unloaded_params:
             param_names = set(dict(self.named_parameters()).keys())
@@ -1333,6 +1680,29 @@ class Gemma4ForCausalLM(PreTrainedModel):
                 names = sorted(p for p in unloaded_params if pred(p))
                 if names:
                     logger.log(level, "%s: %s", msg, names)
+        if is_gguf:
+            for name, weight in self._gguf_cpu_weights.items():
+                target = self._gguf_cpu_weight_targets[name]
+                if isinstance(target, torch.nn.parameter.UninitializedParameter):
+                    target.materialize(weight.shape, device=weight.device, dtype=weight.dtype)
+                target.data.copy_(weight)
+                target.data = target.data.to(device=torch.device("cuda"), dtype=weight.dtype)
+                module_name = name[: -len(".weight")]
+                if module_name in module_map:
+                    module_map[module_name].weight = target
+            for module_name, packed in self._gguf_embedding_weights.items():
+                embedding = module_map[module_name]
+                if "qweight" in packed and "qweight_type" in packed:
+                    # Embedding lookup runs inside CUDA graph capture; keep
+                    # packed rows on the device so CUDA token IDs never drive
+                    # an index_select against host-resident weights.
+                    embedding._gguf_qweight = packed["qweight"]
+                    embedding._gguf_weight_storage = packed["qweight"]
+                    embedding._gguf_qweight_cuda = None
+                    embedding._gguf_qweight_type = packed["qweight_type"]
+                    embedding.qweight_type.weight_type = packed["qweight_type"]
+                # GGUF embeddings use direct packed lookup; avoid interpreting
+                # the placeholder nn.Embedding weights as checkpoint data.
         return loaded_params
 
     def _shard_weight(self, weight: torch.Tensor) -> torch.Tensor:

@@ -532,11 +532,33 @@ class Gemma3TextScaledWordEmbedding(nn.Embedding):
         padding_idx: int,
         embed_scale: Optional[float] = 1.0,
     ):
-        super().__init__(num_embeddings, embedding_dim, padding_idx)
+        # GGUF embedding weights are kept in packed storage and attached after
+        # construction; avoid allocating the full dense vocabulary table.
+        if getattr(self, "_gguf_packed_embedding", False):
+            nn.Module.__init__(self)
+            self.num_embeddings = num_embeddings
+            self.embedding_dim = embedding_dim
+            self.padding_idx = padding_idx
+            self.register_parameter("weight", nn.Parameter(torch.empty(0), requires_grad=False))
+        else:
+            super().__init__(num_embeddings, embedding_dim, padding_idx)
         self.embed_scale = embed_scale
 
     def forward(self, input_ids: torch.Tensor):
-        return super().forward(input_ids) * self.embed_scale
+        packed = getattr(self, "_gguf_qweight", None)
+        if packed is not None:
+            from sglang.srt.layers.quantization.gguf import apply_gguf_embedding
+
+            output = apply_gguf_embedding(
+                input_ids,
+                packed,
+                self._gguf_qweight_type,
+                self.embedding_dim,
+                dtype=self.weight.dtype,
+            )
+        else:
+            output = super().forward(input_ids)
+        return output * self.embed_scale
 
 
 class Gemma3TextModel(PreTrainedModel):

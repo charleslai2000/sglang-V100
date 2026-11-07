@@ -2033,6 +2033,49 @@ class BitsAndBytesModelLoader(BaseModelLoader):
         return model.eval()
 
 
+def build_gemma4_gguf_name_map(config) -> Dict[str, str]:
+    """Map Gemma 4 GGUF text tensors onto SGLang's Gemma4ForCausalLM."""
+    mapping = {
+        "token_embd.weight": "model.embed_tokens.weight",
+        "output_norm.weight": "model.norm.weight",
+        "output.weight": "lm_head.weight",
+        "per_layer_model_proj.weight": "model.per_layer_model_projection.weight",
+        "per_layer_proj_norm.weight": "model.per_layer_projection_norm.weight",
+        "per_layer_token_embd.weight": "model.embed_tokens_per_layer.weight",
+    }
+    layers = getattr(config, "layer_types", None)
+    if layers is None:
+        raise ValueError("Gemma4 GGUF mapping requires config.layer_types")
+    kv_shared = set(range(len(layers) - getattr(config, "num_kv_shared_layers", 0), len(layers)))
+    for i, layer_type in enumerate(layers):
+        prefix = f"blk.{i}."
+        target = f"model.layers.{i}."
+        mapping[prefix + "attn_norm.weight"] = target + "input_layernorm.weight"
+        mapping[prefix + "post_attention_norm.weight"] = target + "post_attention_layernorm.weight"
+        mapping[prefix + "ffn_norm.weight"] = target + "pre_feedforward_layernorm.weight"
+        mapping[prefix + "post_ffw_norm.weight"] = target + "post_feedforward_layernorm.weight"
+        mapping[prefix + "inp_gate.weight"] = target + "per_layer_input_gate.weight"
+        mapping[prefix + "proj.weight"] = target + "per_layer_projection.weight"
+        mapping[prefix + "post_norm.weight"] = target + "post_per_layer_input_norm.weight"
+        mapping[prefix + "layer_output_scale.weight"] = target + "layer_scalar"
+        mapping[prefix + "router.weight"] = target + "router.proj.weight"
+        mapping[prefix + "router.scale"] = target + "router.scale"
+        mapping[prefix + "ffn_gate.weight"] = target + "mlp.gate_proj.weight"
+        mapping[prefix + "ffn_up.weight"] = target + "mlp.up_proj.weight"
+        mapping[prefix + "ffn_down.weight"] = target + "mlp.down_proj.weight"
+        # Gemma4 uses attention (Full or SWA) in every decoder layer. Only
+        # layers configured to share KV omit K/V tensors in the checkpoint.
+        for src, dst in (("attn_q", "q_proj"), ("attn_output", "o_proj")):
+            mapping[prefix + src + ".weight"] = target + "self_attn." + dst + ".weight"
+        mapping[prefix + "attn_q_norm.weight"] = target + "self_attn.q_norm.weight"
+        mapping[prefix + "attn_k_norm.weight"] = target + "self_attn.k_norm.weight"
+        mapping[prefix + "attn_v_norm.weight"] = target + "self_attn.v_norm.weight"
+        if i not in kv_shared:
+            for src, dst in (("attn_k", "k_proj"), ("attn_v", "v_proj")):
+                mapping[prefix + src + ".weight"] = target + "self_attn." + dst + ".weight"
+    return mapping
+
+
 class GGUFModelLoader(BaseModelLoader):
     """
     Model loader that can load GGUF files. This is useful for loading models
@@ -2074,8 +2117,76 @@ class GGUFModelLoader(BaseModelLoader):
                 "Please install gguf via `pip install gguf` to use gguf quantizer."
             ) from err
 
+        self._gemma4_gguf_path = model_config.model_path
         config = model_config.hf_config
         model_type = config.model_type
+        # Gemma 4 QUASAR text checkpoints use GGUF's "gemma4" architecture
+        # but only the SGLang Gemma4ForCausalLM text backbone is loaded.
+        if model_type in ("gemma4", "gemma4_text") and config.architectures == ["Gemma4ForCausalLM"]:
+            from gguf import GGUFReader
+
+            name_map = build_gemma4_gguf_name_map(config)
+            reader = GGUFReader(self._gemma4_gguf_path)
+            missing = [
+                tensor.name
+                for tensor in reader.tensors
+                if tensor.name != "rope_freqs.weight" and tensor.name not in name_map
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"Gemma4 GGUF tensors have no runtime mapping: {missing[:12]}"
+                )
+            packed_names = {}
+            for gguf_name, hf_name in name_map.items():
+                if hf_name.endswith(".weight"):
+                    if hf_name in (
+                        "model.embed_tokens.weight",
+                        "model.embed_tokens_per_layer.weight",
+                    ):
+                        packed_names[gguf_name] = hf_name.replace(".weight", ".qweight")
+                        packed_names[
+                            gguf_name.replace(".weight", ".qweight_type")
+                        ] = hf_name.replace(".weight", ".qweight_type")
+                        continue
+                    if hf_name == "model.per_layer_model_projection.weight":
+                        packed_names[gguf_name] = hf_name
+                        continue
+                    packed_names[gguf_name] = (
+                        hf_name.replace(".weight", ".qweight")
+                        if (
+                            hf_name.startswith(("model.layers.", "model.embed_tokens"))
+                            and "norm.weight" not in hf_name
+                            and hf_name != "model.per_layer_model_projection.weight"
+                            and not any(
+                                marker in gguf_name
+                                for marker in ("inp_gate", "proj.weight", "layer_output_scale")
+                            )
+                        )
+                        else hf_name
+                    )
+                    if (
+                        hf_name.startswith("model.layers.")
+                        and hf_name != "model.per_layer_model_projection.weight"
+                        and not hf_name.endswith("norm.weight")
+                        and not any(
+                            marker in gguf_name
+                            for marker in ("inp_gate", "proj.weight", "layer_output_scale")
+                        )
+                    ):
+                        packed_names[gguf_name.replace(".weight", ".qweight_type")] = hf_name.replace(".weight", ".qweight_type")
+                elif hf_name.endswith(".qweight"):
+                    if not hf_name.startswith("model.embed_tokens"):
+                        packed_names[gguf_name.replace(".weight", ".qweight_type")] = hf_name.replace(".qweight", ".qweight_type")
+            reader_names = {tensor.name for tensor in reader.tensors}
+            return {
+                gguf_name: hf_name
+                for gguf_name, hf_name in name_map.items()
+                if gguf_name in reader_names
+            } | {
+                key: value
+                for key, value in packed_names.items()
+                if key.endswith(".qweight_type") or key in reader_names
+            }
         # hack: ggufs have a different name than transformers
         if model_type == "cohere":
             model_type = "command-r"
@@ -2121,6 +2232,9 @@ class GGUFModelLoader(BaseModelLoader):
         # we can only know if tie word embeddings after mapping weights
         if "lm_head.weight" in get_gguf_extra_tensor_names(
             local_model_path, gguf_weights_map
+        ) and not (
+            model_config.hf_config.architectures == ["Gemma4ForCausalLM"]
+            and model_config.hf_config.tie_word_embeddings
         ):
             model_config.hf_config.update({"tie_word_embeddings": True})
 
@@ -2138,6 +2252,11 @@ class GGUFModelLoader(BaseModelLoader):
                 if quant_method is not None:
                     with device_loading_context(module, target_device):
                         quant_method.process_weights_after_loading(module)
+            if model_config.hf_config.architectures == ["Gemma4ForCausalLM"]:
+                for _, module in model.named_modules():
+                    for param in module.parameters(recurse=False):
+                        if param.device.type != target_device.type:
+                            param.data = param.data.to(target_device)
         return model
 
 

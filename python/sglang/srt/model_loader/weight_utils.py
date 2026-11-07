@@ -1211,6 +1211,8 @@ def gguf_quant_weights_iterator(
             pattern in tensor_name for pattern in MOE_WEIGHT_PATTERNS.keys()
         )
 
+        if tensor_name == "rope_freqs.weight":
+            continue
         if is_moe_weight:
             # MoE weights need special handling - extract layer_id and weight type
             # Format: blk.{layer_id}.ffn_gate_exps.weight
@@ -1233,9 +1235,20 @@ def gguf_quant_weights_iterator(
             # Normal weight handling
             name = gguf_to_hf_name_map[tensor_name]
 
-            if weight_type.name != "F32":
-                weight_type_name = name.replace("weight", "qweight_type")
-                yield weight_type_name, torch.tensor(weight_type)
+            if weight_type.name not in ("F32", "F16", "BF16"):
+                if name.startswith(("model.embed_tokens.qweight", "model.embed_tokens_per_layer.qweight")):
+                    yield name + "_type", torch.as_tensor(int(weight_type), dtype=torch.uint8)
+                else:
+                    if name.endswith(".qweight"):
+                        weight_type_name = name.replace(".qweight", ".qweight_type")
+                    elif name.endswith(".weight"):
+                        weight_type_name = name.replace(".weight", ".qweight_type")
+                    else:
+                        weight_type_name = name
+                    if weight_type_name.endswith(".qweight_type") and not (
+                        weight_type.name in ("F32", "F16", "BF16")
+                    ):
+                        yield weight_type_name, torch.as_tensor(int(weight_type), dtype=torch.uint8)
 
     # Second pass: yield actual weights
     for tensor in reader.tensors:
@@ -1269,14 +1282,14 @@ def gguf_quant_weights_iterator(
                         else:
                             hf_name = f"model.layers.{layer_id}.mlp.experts.{expert_id}.{hf_weight_name}.weight"
 
-                        yield hf_name, torch.tensor(expert_weight)
+                        yield hf_name, torch.from_numpy(expert_weight.copy())
         elif tensor_name in gguf_to_hf_name_map:
             # Normal weight handling
             name = gguf_to_hf_name_map[tensor_name]
 
-            if weight_type.name != "F32":
-                name = name.replace("weight", "qweight")
-            param = torch.tensor(weight)
+            if weight_type.name not in ("F32", "F16", "BF16") and not name.endswith(".qweight"):
+                name = name.replace(".weight", ".qweight")
+            param = torch.from_numpy(weight.copy())
             yield name, param
 
 

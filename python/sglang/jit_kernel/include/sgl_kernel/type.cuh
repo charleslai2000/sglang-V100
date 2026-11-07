@@ -73,7 +73,7 @@ SGL_DEVICE fp32x2_t bf16x2_to_float2_sm70(const bf16x2_t& value) {
 }
 
 SGL_DEVICE bf16x2_t float2_to_bf16x2_sm70(const fp32x2_t& value) {
-  return __halves2bfloat162(__float2bfloat16_rn(value.x), __float2bfloat16_rn(value.y));
+  return bf16x2_t{__float2bfloat16_rn(value.x), __float2bfloat16_rn(value.y)};
 }
 #endif
 

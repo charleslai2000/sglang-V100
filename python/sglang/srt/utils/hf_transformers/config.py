@@ -212,6 +212,46 @@ def get_config(
 ):
     is_gguf = check_gguf_file(model)
     if is_gguf:
+        from gguf import GGUFReader
+
+        reader = GGUFReader(model)
+        arch_field = reader.fields.get("general.architecture")
+        architecture = arch_field.contents() if arch_field is not None else None
+        if architecture == "gemma4":
+            sidecar = Path(model).parent / "sidecar"
+            if not (sidecar / "config.json").is_file():
+                sidecar = Path(model).parent
+            config = AutoConfig.from_pretrained(sidecar, trust_remote_code=trust_remote_code)
+            # The GGUF contains only the text model weights. SGLang has a
+            # dedicated Gemma4ForCausalLM implementation; avoid initializing
+            # multimodal projectors and use its text config directly.
+            from copy import deepcopy
+
+            config = deepcopy(config.text_config)
+            config.architectures = ["Gemma4ForCausalLM"]
+            config.model_type = "gemma4_text"
+            config.tie_word_embeddings = True
+            config.model_type = "gemma4"
+            # Apply the same full/SWA head geometry normalization used for
+            # normal Gemma4 checkpoints, on the selected text config itself.
+            config.swa_head_dim = config.head_dim
+            config.swa_v_head_dim = config.head_dim
+            config.swa_num_key_value_heads = config.num_key_value_heads
+            if config.global_head_dim is not None:
+                config.global_v_head_dim = config.global_head_dim
+                config.v_head_dim = config.global_head_dim
+            config.rope_parameters = config.rope_parameters or {}
+            for rope_kind, theta in (
+                ("sliding_attention", 10000.0),
+                ("full_attention", 1000000.0),
+            ):
+                rope = dict(config.rope_parameters.get(rope_kind) or {})
+                rope.setdefault("rope_theta", theta)
+                rope.setdefault("rope_type", "default")
+                if rope_kind == "full_attention":
+                    rope.setdefault("partial_rotary_factor", 0.25)
+                config.rope_parameters[rope_kind] = rope
+            return config
         if model_config_parser not in ("auto", "hf"):
             raise ValueError(
                 f"model_config_parser={model_config_parser!r} is incompatible "
