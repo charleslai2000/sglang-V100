@@ -101,6 +101,8 @@ python -m pip install \
   grpcio==1.81.1 grpcio-health-checking==1.81.1 \
   grpcio-reflection==1.81.1 protobuf==6.33.6 tilelang==0.1.8 \
   cuda-tile==1.5.0
+log "Applying the pinned TileLang 0.1.8 SM70 BF16 helper compatibility patch"
+python "$REPO_ROOT/scripts/patch_tilelang_sm70.py"
 python -m pip install -e "$REPO_ROOT/python[diffusion-v100]"
 
 prepare_patched_repo() {

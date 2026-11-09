@@ -1,0 +1,35 @@
+--- a/src/tl_templates/cuda/common.h
++++ b/src/tl_templates/cuda/common.h
+@@ -65,4 +65,5 @@
+ // using cutlass abs function for bfloat_t
+ TL_PATCH TL_DEVICE bfloat16_t __habs(const bfloat16_t x) {
+-  return bfloat16_t(__habs(x.to_nv_bfloat16()));
++  // BF16 is emulated on SM70; avoid the SM80-only CUDA BF16 intrinsic.
++  return cutlass::abs(x);
+ }
+--- a/src/tl_templates/cuda/reduce.h
++++ b/src/tl_templates/cuda/reduce.h
+@@ -38,7 +38,11 @@
+   }
+ 
+   TL_DEVICE bfloat16_t operator()(bfloat16_t const &x, bfloat16_t const &y) {
++#if __CUDA_ARCH__ >= 800
+     return bfloat16_t(__hmax(x.to_nv_bfloat16(), y.to_nv_bfloat16()));
++#else
++    return cutlass::fast_max(x, y);
++#endif
+   }
+ 
+   TL_DEVICE half_t operator()(half_t const &x, half_t const &y) {
+@@ -53,7 +57,11 @@
+ 
+   TL_DEVICE cutlass::bfloat16_t operator()(bfloat16_t const &x,
+                                            bfloat16_t const &y) {
++#if __CUDA_ARCH__ >= 800
+     return bfloat16_t(__hmin(x.to_nv_bfloat16(), y.to_nv_bfloat16()));
++#else
++    return cutlass::fast_min(x, y);
++#endif
+   }
+ 
+   TL_DEVICE half_t operator()(half_t const &x, half_t const &y) {
