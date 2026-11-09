@@ -833,6 +833,26 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                     else None
                 ),
                 "req": forward_batch.req_pool_indices.detach().cpu().tolist(),
+                "ssm_h_src": (
+                    self.forward_metadata.track_ssm_h_src.detach().cpu().tolist()
+                    if self.forward_metadata.track_ssm_h_src is not None
+                    else None
+                ),
+                "ssm_h_dst": (
+                    self.forward_metadata.track_ssm_h_dst.detach().cpu().tolist()
+                    if self.forward_metadata.track_ssm_h_dst is not None
+                    else None
+                ),
+                "ssm_final_src": (
+                    self.forward_metadata.track_ssm_final_src.detach().cpu().tolist()
+                    if self.forward_metadata.track_ssm_final_src is not None
+                    else None
+                ),
+                "ssm_final_dst": (
+                    self.forward_metadata.track_ssm_final_dst.detach().cpu().tolist()
+                    if self.forward_metadata.track_ssm_final_dst is not None
+                    else None
+                ),
             }
             for slot in sorted(
                 {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
