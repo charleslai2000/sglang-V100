@@ -28,6 +28,7 @@ import torch
 from numpy import float64
 
 from sglang.srt.distributed import get_tensor_model_parallel_rank
+from sglang.srt.environ import envs
 from sglang.srt.mem_cache.allocator import (
     PagedTokenToKVPoolAllocator,
     TokenToKVPoolAllocator,
@@ -515,7 +516,9 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
     def cache_finished_req(self, req: Req, is_insert: bool = True) -> None:
         """Cache request when it finishes."""
         kv_committed_len = req.pop_committed_kv_cache()
-        if self.disable:
+        if self.disable or envs.SGLANG_RADIX_FORCE_MISS.get():
+            # Forced misses are a no-cache reference: do not insert completed
+            # KV/Mamba state into the radix tree or donate ping-pong slots.
             kv_indices = self.req_to_token_pool.req_to_token[
                 req.req_pool_idx, :kv_committed_len
             ]
@@ -618,7 +621,7 @@ class MambaRadixCache(KVCacheEventMixin, BasePrefixCache):
             if self.enable_mamba_extra_buffer
             else len(token_ids)
         )
-        if self.disable or cache_len is None:
+        if self.disable or envs.SGLANG_RADIX_FORCE_MISS.get() or cache_len is None:
             return _skip_cache_unfinished_req(req)
 
         kv_indices_orig = self.req_to_token_pool.req_to_token[

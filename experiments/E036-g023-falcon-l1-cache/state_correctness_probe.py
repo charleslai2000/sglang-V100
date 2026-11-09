@@ -86,28 +86,32 @@ def request(label, ids, max_new_tokens=256):
 
 # Build the checkpoint with exactly the shared prefix so its final recurrent
 # state is the reference boundary, not an intermediate state from a longer prompt.
-prime_ids = prefix
-prime = request(
-    "cache-builder",
-    prime_ids,
-    max_new_tokens=int(os.environ.get("G023_BUILDER_NEW_TOKENS", "1")),
-)
 sequence = os.environ.get("G023_SEQUENCE", "ababa")
-if sequence == "single":
+needs_builder = not sequence.startswith("fresh-")
+rows = []
+if needs_builder:
+    prime = request(
+        "cache-builder",
+        prefix,
+        max_new_tokens=int(os.environ.get("G023_BUILDER_NEW_TOKENS", "1")),
+    )
+    rows.append(prime)
+base_sequence = sequence.removeprefix("fresh-")
+if base_sequence == "single":
     first = request("branch-alpha-first", prompts[0])
-    rows = [prime, first]
-elif sequence == "repeat":
+    rows.append(first)
+elif base_sequence == "repeat":
     first = request("branch-alpha-first", prompts[0])
     repeat = request("branch-alpha-repeat", prompts[0])
-    rows = [prime, first, repeat]
-elif sequence == "ababa":
+    rows.extend([first, repeat])
+elif base_sequence == "ababa":
     first = request("branch-alpha-first", prompts[0])
     repeat = request("branch-alpha-repeat", prompts[0])
     branch = request("branch-bravo", prompts[1])
     interleave = request("branch-alpha-after-bravo", prompts[0])
-    rows = [prime, first, repeat, branch, interleave]
+    rows.extend([first, repeat, branch, interleave])
 else:
-    raise SystemExit("G023_SEQUENCE must be single, repeat, or ababa")
+    raise SystemExit("G023_SEQUENCE must be [fresh-]single, repeat, or ababa")
 report = {
     "mode": MODE,
     "base": BASE,
@@ -119,23 +123,28 @@ report = {
     "prompt_ids_sha256": [r["input_ids_sha256"] for r in rows],
     "expected_cached_tokens": EXPECTED_CACHED[MODE],
     "all_cached_tokens_validated": all(
-        r["cached_tokens"] == (0 if MODE == "hit" and r["label"] == "cache-builder" else EXPECTED_CACHED[MODE])
+        r["cached_tokens"]
+        == (
+            0
+            if MODE == "hit" and r["label"] == "cache-builder"
+            else EXPECTED_CACHED[MODE]
+        )
         for r in rows
     ),
     "greedy_outputs_repeat_exact": (
         first["output_ids"] == repeat["output_ids"]
-        if sequence in ("repeat", "ababa")
+        if base_sequence in ("repeat", "ababa")
         else None
     ),
     "greedy_outputs_after_branch_exact": (
-        first["output_ids"] == interleave["output_ids"] if sequence == "ababa" else None
+        first["output_ids"] == interleave["output_ids"] if base_sequence == "ababa" else None
     ),
     "first_logprob_repeat_max_abs_delta": max(
         (
             abs(a[0] - b[0])
             for a, b in zip(
                 first["output_token_logprobs"],
-                repeat["output_token_logprobs"] if sequence in ("repeat", "ababa") else [],
+                repeat["output_token_logprobs"] if base_sequence in ("repeat", "ababa") else [],
             )
             if a[0] is not None and b[0] is not None
         ),
@@ -146,7 +155,7 @@ report = {
             abs(a[0] - b[0])
             for a, b in zip(
                 first["output_token_logprobs"],
-                interleave["output_token_logprobs"] if sequence == "ababa" else [],
+                interleave["output_token_logprobs"] if base_sequence == "ababa" else [],
             )
             if a[0] is not None and b[0] is not None
         ),
@@ -158,7 +167,7 @@ report = {
             for i, (a, b) in enumerate(
                 zip(
                     first["output_ids"],
-                    repeat["output_ids"] if sequence in ("repeat", "ababa") else [],
+                    repeat["output_ids"] if base_sequence in ("repeat", "ababa") else [],
                 )
             )
             if a != b
@@ -171,7 +180,7 @@ report = {
             for i, (a, b) in enumerate(
                 zip(
                     first["output_ids"],
-                    interleave["output_ids"] if sequence == "ababa" else [],
+                    interleave["output_ids"] if base_sequence == "ababa" else [],
                 )
             )
             if a != b
@@ -180,11 +189,11 @@ report = {
     ),
     "same_prompt_outputs_repeat_equal": (
         first["output_ids"] == repeat["output_ids"]
-        if sequence in ("repeat", "ababa")
+        if base_sequence in ("repeat", "ababa")
         else None
     ),
     "same_prompt_outputs_interleave_equal": (
-        first["output_ids"] == interleave["output_ids"] if sequence == "ababa" else None
+        first["output_ids"] == interleave["output_ids"] if base_sequence == "ababa" else None
     ),
     "records": rows,
 }
