@@ -36,7 +36,7 @@ suffixes = [
 ]
 prompts = [prefix + suffix for suffix in suffixes]
 
-def request(label, ids):
+def request(label, ids, max_new_tokens=256):
     started = time.perf_counter()
     response = requests.post(
         BASE + "/generate",
@@ -45,7 +45,7 @@ def request(label, ids):
             "rid": f"g023-{MODE}-{label}-{time.time_ns()}",
             "sampling_params": {
                 "temperature": 0,
-                "max_new_tokens": 256,
+                "max_new_tokens": max_new_tokens,
                 "ignore_eos": True,
                 "sampling_seed": 908172,
             },
@@ -70,8 +70,10 @@ def request(label, ids):
         "wall_seconds": time.perf_counter() - started,
         "meta": meta,
     }
-    if len(row["output_ids"]) != 256:
-        raise AssertionError(f"{label}: expected 256 output tokens")
+    if len(row["output_ids"]) != max_new_tokens:
+        raise AssertionError(
+            f"{label}: expected {max_new_tokens} output tokens, got {len(row['output_ids'])}"
+        )
     expected = 0 if MODE == "hit" and label == "cache-builder" else EXPECTED_CACHED[MODE]
     if row["cached_tokens"] != expected:
         raise AssertionError(
@@ -82,7 +84,11 @@ def request(label, ids):
 # Build the checkpoint with exactly the shared prefix so its final recurrent
 # state is the reference boundary, not an intermediate state from a longer prompt.
 prime_ids = prefix
-prime = request("cache-builder", prime_ids)
+prime = request(
+    "cache-builder",
+    prime_ids,
+    max_new_tokens=int(os.environ.get("G023_BUILDER_NEW_TOKENS", "1")),
+)
 first = request("branch-alpha-first", prompts[0])
 repeat = request("branch-alpha-repeat", prompts[0])
 branch = request("branch-bravo", prompts[1])

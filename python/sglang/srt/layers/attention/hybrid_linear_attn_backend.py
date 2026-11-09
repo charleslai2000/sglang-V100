@@ -1,4 +1,7 @@
+import hashlib
+import json
 import logging
+import os
 from typing import Optional, Union
 
 import torch
@@ -25,6 +28,34 @@ from sglang.srt.speculative.eagle_info import EagleDraftInput, EagleVerifyInput
 from sglang.srt.speculative.spec_info import SpecInput
 
 logger = logging.getLogger(__name__)
+
+
+def _g023_slot_fingerprint(tensor: torch.Tensor, slot: int) -> str:
+    torch.cuda.synchronize(tensor.device)
+    data = tensor[slot].detach().contiguous().cpu().numpy().tobytes()
+    return hashlib.sha256(data).hexdigest()
+
+
+def _g023_log_state(
+    layer_id: int, phase: str, slot: int, cache, active_slots=None
+) -> None:
+    path = os.environ.get("G023_LIFECYCLE_TRACE")
+    if layer_id != 0:
+        return
+    if path is None:
+        return
+    row = {
+        "phase": phase,
+        "layer": layer_id,
+        "slot": slot,
+        "conv_ptr": cache.conv[0].data_ptr(),
+        "ssm_ptr": cache.temporal.data_ptr(),
+        "conv_sha256": _g023_slot_fingerprint(cache.conv[0], slot),
+        "ssm_sha256": _g023_slot_fingerprint(cache.temporal, slot),
+        "active_slots": active_slots,
+    }
+    with open(path, "a") as trace:
+        trace.write(json.dumps(row) + "\n")
 
 
 # Kernel to track mamba states if needed based on track mask
@@ -172,9 +203,20 @@ class MambaAttnBackendBase(AttentionBackend):
             forward_batch.mamba_cow_src_indices is not None
             and len(forward_batch.mamba_cow_src_indices) > 0
         ):
+            trace_path = os.environ.get("G023_LIFECYCLE_TRACE")
+            if trace_path is not None:
+                src = forward_batch.mamba_cow_src_indices.detach().cpu().tolist()
+                dst = forward_batch.mamba_cow_dst_indices.detach().cpu().tolist()
+                cache = self.req_to_token_pool.mamba2_layer_cache(0)
+                for slot in src + dst:
+                    _g023_log_state(0, "cow_before", slot, cache)
             self.req_to_token_pool.mamba_pool.copy_from(
                 forward_batch.mamba_cow_src_indices, forward_batch.mamba_cow_dst_indices
             )
+            if trace_path is not None:
+                cache = self.req_to_token_pool.mamba2_layer_cache(0)
+                for slot in src + dst:
+                    _g023_log_state(0, "cow_after", slot, cache)
         forward_batch.mamba_clear_indices = None
         forward_batch.mamba_cow_src_indices = None
         forward_batch.mamba_cow_dst_indices = None
@@ -771,6 +813,33 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
     ):
         assert isinstance(self.forward_metadata, Mamba2Metadata)
         layer_cache = self.req_to_token_pool.mamba2_layer_cache(layer_id)
+        trace_enabled = (
+            layer_id == 0
+            and os.environ.get("G023_LIFECYCLE_TRACE") is not None
+            and not torch.cuda.is_current_stream_capturing()
+        )
+        if trace_enabled:
+            trace_slot = int(os.environ.get("G023_TRACE_SLOT", "5"))
+            active_slots = {
+                "cache": self.forward_metadata.mamba_cache_indices.detach().cpu().tolist(),
+                "track": (
+                    forward_batch.mamba_track_indices.detach().cpu().tolist()
+                    if forward_batch.mamba_track_indices is not None
+                    else None
+                ),
+                "mask": (
+                    forward_batch.mamba_track_mask.detach().cpu().tolist()
+                    if forward_batch.mamba_track_mask is not None
+                    else None
+                ),
+                "req": forward_batch.req_pool_indices.detach().cpu().tolist(),
+            }
+            for slot in sorted(
+                {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
+            ):
+                _g023_log_state(
+                    layer_id, "before_mixer", slot, layer_cache, active_slots
+                )
         intermediate_states = mixer.forward(
             hidden_states=hidden_states,
             output=output,
@@ -803,6 +872,14 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                     forward_batch.mamba_track_mask[-num_decodes:],
                     forward_batch.mamba_track_indices[-num_decodes:],
                     num_decodes,
+                )
+
+        if trace_enabled:
+            for slot in sorted(
+                {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
+            ):
+                _g023_log_state(
+                    layer_id, "after_tracking", slot, layer_cache, active_slots
                 )
 
     def forward_decode(self, *args, **kwargs):
