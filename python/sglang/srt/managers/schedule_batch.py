@@ -1090,6 +1090,7 @@ class Req(ReqDllmMixin):
             )
             if force_miss:
                 match_result = zero_match_result(tree_cache, match_result)
+                self.mamba_branching_seqlen = None
             (
                 self.prefix_indices,
                 self.last_node,
@@ -2091,6 +2092,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
 
         mask = req.extend_input_len >= mamba_cache_chunk_size
         track_index = req.mamba_ping_pong_track_buffer[req.mamba_next_track_idx].item()
+        force_miss = envs.SGLANG_RADIX_FORCE_MISS.get()
         mamba_track_seqlen = -1
         if mask:
             # mamba_track_seqlen is used to calculate the indices to track in

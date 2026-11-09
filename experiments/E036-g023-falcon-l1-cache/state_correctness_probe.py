@@ -50,6 +50,7 @@ def request(label, ids, max_new_tokens=256):
                 "sampling_seed": 908172,
             },
             "return_logprob": True,
+            "top_logprobs_num": int(os.environ.get("G023_TOP_LOGPROBS", "0")),
         },
         timeout=240,
     )
@@ -64,6 +65,8 @@ def request(label, ids, max_new_tokens=256):
         "output_ids": result["output_ids"],
         "input_token_logprobs": meta.get("input_token_logprobs"),
         "output_token_logprobs": meta.get("output_token_logprobs"),
+        "output_top_logprobs": meta.get("output_top_logprobs"),
+        "output_top_logprobs_indices": meta.get("output_top_logprobs_indices"),
         "cached_tokens": meta.get("cached_tokens"),
         "prefill_tokens": meta.get("prompt_tokens"),
         "ttft": meta.get("e2e_latency"),
@@ -89,11 +92,22 @@ prime = request(
     prime_ids,
     max_new_tokens=int(os.environ.get("G023_BUILDER_NEW_TOKENS", "1")),
 )
-first = request("branch-alpha-first", prompts[0])
-repeat = request("branch-alpha-repeat", prompts[0])
-branch = request("branch-bravo", prompts[1])
-interleave = request("branch-alpha-after-bravo", prompts[0])
-rows = [prime, first, repeat, branch, interleave]
+sequence = os.environ.get("G023_SEQUENCE", "ababa")
+if sequence == "single":
+    first = request("branch-alpha-first", prompts[0])
+    rows = [prime, first]
+elif sequence == "repeat":
+    first = request("branch-alpha-first", prompts[0])
+    repeat = request("branch-alpha-repeat", prompts[0])
+    rows = [prime, first, repeat]
+elif sequence == "ababa":
+    first = request("branch-alpha-first", prompts[0])
+    repeat = request("branch-alpha-repeat", prompts[0])
+    branch = request("branch-bravo", prompts[1])
+    interleave = request("branch-alpha-after-bravo", prompts[0])
+    rows = [prime, first, repeat, branch, interleave]
+else:
+    raise SystemExit("G023_SEQUENCE must be single, repeat, or ababa")
 report = {
     "mode": MODE,
     "base": BASE,
@@ -101,18 +115,28 @@ report = {
     "chunked_prefill_size": 2048,
     "dtype": "float16",
     "input_prefix_tokens": 768,
+    "sequence": sequence,
     "prompt_ids_sha256": [r["input_ids_sha256"] for r in rows],
     "expected_cached_tokens": EXPECTED_CACHED[MODE],
     "all_cached_tokens_validated": all(
         r["cached_tokens"] == (0 if MODE == "hit" and r["label"] == "cache-builder" else EXPECTED_CACHED[MODE])
         for r in rows
     ),
-    "greedy_outputs_repeat_exact": first["output_ids"] == repeat["output_ids"],
-    "greedy_outputs_after_branch_exact": first["output_ids"] == interleave["output_ids"],
+    "greedy_outputs_repeat_exact": (
+        first["output_ids"] == repeat["output_ids"]
+        if sequence in ("repeat", "ababa")
+        else None
+    ),
+    "greedy_outputs_after_branch_exact": (
+        first["output_ids"] == interleave["output_ids"] if sequence == "ababa" else None
+    ),
     "first_logprob_repeat_max_abs_delta": max(
         (
             abs(a[0] - b[0])
-            for a, b in zip(first["output_token_logprobs"], repeat["output_token_logprobs"])
+            for a, b in zip(
+                first["output_token_logprobs"],
+                repeat["output_token_logprobs"] if sequence in ("repeat", "ababa") else [],
+            )
             if a[0] is not None and b[0] is not None
         ),
         default=0.0,
@@ -120,19 +144,48 @@ report = {
     "first_logprob_interleave_max_abs_delta": max(
         (
             abs(a[0] - b[0])
-            for a, b in zip(first["output_token_logprobs"], interleave["output_token_logprobs"])
+            for a, b in zip(
+                first["output_token_logprobs"],
+                interleave["output_token_logprobs"] if sequence == "ababa" else [],
+            )
             if a[0] is not None and b[0] is not None
         ),
         default=0.0,
     ),
     "first_repeat_divergence": next(
-        (i for i, (a, b) in enumerate(zip(first["output_ids"], repeat["output_ids"])) if a != b), None
+        (
+            i
+            for i, (a, b) in enumerate(
+                zip(
+                    first["output_ids"],
+                    repeat["output_ids"] if sequence in ("repeat", "ababa") else [],
+                )
+            )
+            if a != b
+        ),
+        None,
     ),
     "first_interleave_divergence": next(
-        (i for i, (a, b) in enumerate(zip(first["output_ids"], interleave["output_ids"])) if a != b), None
+        (
+            i
+            for i, (a, b) in enumerate(
+                zip(
+                    first["output_ids"],
+                    interleave["output_ids"] if sequence == "ababa" else [],
+                )
+            )
+            if a != b
+        ),
+        None,
     ),
-    "same_prompt_outputs_repeat_equal": first["output_ids"] == repeat["output_ids"],
-    "same_prompt_outputs_interleave_equal": first["output_ids"] == interleave["output_ids"],
+    "same_prompt_outputs_repeat_equal": (
+        first["output_ids"] == repeat["output_ids"]
+        if sequence in ("repeat", "ababa")
+        else None
+    ),
+    "same_prompt_outputs_interleave_equal": (
+        first["output_ids"] == interleave["output_ids"] if sequence == "ababa" else None
+    ),
     "records": rows,
 }
 Path = __import__("pathlib").Path

@@ -106,6 +106,7 @@ def match_prefix_for_req(
     )
     if force_miss:
         match_result = zero_match_result(tree_cache, match_result)
+        req.mamba_branching_seqlen = None
     (
         req.prefix_indices,
         req.last_node,

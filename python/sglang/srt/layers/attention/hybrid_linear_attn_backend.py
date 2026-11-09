@@ -37,7 +37,7 @@ def _g023_slot_fingerprint(tensor: torch.Tensor, slot: int) -> str:
 
 
 def _g023_log_state(
-    layer_id: int, phase: str, slot: int, cache, active_slots=None
+    layer_id: int, phase: str, slot: int, cache, active_slots=None, forward_mode=None
 ) -> None:
     path = os.environ.get("G023_LIFECYCLE_TRACE")
     if layer_id != 0:
@@ -46,6 +46,7 @@ def _g023_log_state(
         return
     row = {
         "phase": phase,
+        "forward_mode": forward_mode,
         "layer": layer_id,
         "slot": slot,
         "conv_ptr": cache.conv[0].data_ptr(),
@@ -606,7 +607,11 @@ class MambaAttnBackendBase(AttentionBackend):
         # Make sure forward metadata is correctly handled for padding reqs
         req_pool_indices[bs - num_padding :] = 0
         mamba_indices = self.req_to_token_pool.get_mamba_indices(req_pool_indices)
-        mamba_indices[bs - num_padding :] = -1
+        # Padded CUDA-graph rows use reserved request slot 0. Their Mamba
+        # index must also be the reserved state slot 0: -1 aliases the last
+        # physical state slot in advanced indexing and can corrupt a live
+        # request when the batch is padded.
+        mamba_indices[bs - num_padding :] = 0
         self.state_indices_list[bs - 1][: len(mamba_indices)].copy_(mamba_indices)
         if forward_mode.is_decode_or_idle():
             if num_padding == 0:
@@ -901,7 +906,12 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                 {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
             ):
                 _g023_log_state(
-                    layer_id, "before_mixer", slot, layer_cache, active_slots
+                    layer_id,
+                    "before_mixer",
+                    slot,
+                    layer_cache,
+                    active_slots,
+                    forward_batch.forward_mode.name,
                 )
         if mixer_debug:
             active_source = self.forward_metadata.mamba_cache_indices[: self.forward_metadata.num_prefills]
@@ -979,7 +989,12 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                 {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
             ):
                 _g023_log_state(
-                    layer_id, "after_tracking", slot, layer_cache, active_slots
+                    layer_id,
+                    "after_tracking",
+                    slot,
+                    layer_cache,
+                    active_slots,
+                    forward_batch.forward_mode.name,
                 )
         if mixer_debug and self.forward_metadata.track_ssm_final_src is not None:
             torch.cuda.synchronize(layer_cache.temporal.device)
