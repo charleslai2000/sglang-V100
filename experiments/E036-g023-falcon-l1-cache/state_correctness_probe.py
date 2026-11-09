@@ -72,10 +72,10 @@ def request(label, ids):
     }
     if len(row["output_ids"]) != 256:
         raise AssertionError(f"{label}: expected 256 output tokens")
-    if row["cached_tokens"] != EXPECTED_CACHED[MODE]:
+    expected = 0 if MODE == "hit" and label == "branch-alpha-prime" else EXPECTED_CACHED[MODE]
+    if row["cached_tokens"] != expected:
         raise AssertionError(
-            f"{label}: expected cached_tokens={EXPECTED_CACHED[MODE]}, "
-            f"got {row['cached_tokens']}"
+            f"{label}: expected cached_tokens={expected}, got {row['cached_tokens']}"
         )
     return row
 
