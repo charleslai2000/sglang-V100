@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -604,7 +606,32 @@ class MambaMixer2(torch.nn.Module):
 
             # update ssm states
             # - varlen state is a (num_prefills, nheads, headdim, dstate) tensor
+            mixer_debug = (
+                os.environ.get("G023_MIXER_DEBUG") == "1"
+                and forward_batch.mamba_track_mask is not None
+                and forward_batch.mamba_track_mask.any()
+                and not torch.cuda.is_current_stream_capturing()
+            )
+            if mixer_debug:
+                torch.cuda.synchronize(ssm_state.device)
+                source = state_indices_tensor_p.detach().cpu().tolist()
+                logger.warning(
+                    "G023_MIXER_DEBUG_BEFORE layer=%s cache=%s final_hash=%s state_ptr=%s",
+                    self.prefix,
+                    source,
+                    hashlib.sha256(ssm_state[state_indices_tensor_p].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    ssm_state.data_ptr(),
+                )
             ssm_state[state_indices_tensor_p] = varlen_state
+            if mixer_debug:
+                torch.cuda.synchronize(ssm_state.device)
+                logger.warning(
+                    "G023_MIXER_DEBUG_AFTER layer=%s final_hash=%s varlen_hash=%s state_ptr=%s",
+                    self.prefix,
+                    hashlib.sha256(ssm_state[state_indices_tensor_p].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    hashlib.sha256(varlen_state.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    ssm_state.data_ptr(),
+                )
 
         # Process decode requests
         if has_decode:

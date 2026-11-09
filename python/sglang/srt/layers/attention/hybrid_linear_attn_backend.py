@@ -718,6 +718,32 @@ class MambaAttnBackendBase(AttentionBackend):
         """
         if forward_metadata.has_mamba_track_mask:
             h = h.squeeze(0)
+        elif (
+            os.environ.get("G023_MIXER_DEBUG") == "1"
+            and forward_batch.mamba_track_mask is not None
+            and bool(forward_batch.mamba_track_mask.any())
+            and forward_metadata.track_ssm_final_src is not None
+        ):
+            # The debug trace makes the metadata gate decision explicit without
+            # changing allocation, copy selection, or indexing behavior.
+            with open(
+                os.environ.get("G023_TRACK_GATE_TRACE", "/data/t011/artifacts/g023-track-gate.jsonl"),
+                "a",
+            ) as trace:
+                trace.write(
+                    json.dumps(
+                        {
+                            "phase": "extend_gate",
+                            "metadata_has_mask": forward_metadata.has_mamba_track_mask,
+                            "batch_mask": forward_batch.mamba_track_mask.detach().cpu().tolist(),
+                            "h_shape": list(h.shape),
+                            "src": forward_metadata.track_ssm_final_src.detach().cpu().tolist(),
+                            "dst": forward_metadata.track_ssm_final_dst.detach().cpu().tolist(),
+                            "ssm_ptr": ssm_states.data_ptr(),
+                        }
+                    )
+                    + "\n"
+                )
 
             if forward_metadata.track_ssm_h_src.numel() > 0:
                 ssm_states[forward_metadata.track_ssm_h_dst] = h[
@@ -813,6 +839,14 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
     ):
         assert isinstance(self.forward_metadata, Mamba2Metadata)
         layer_cache = self.req_to_token_pool.mamba2_layer_cache(layer_id)
+        mixer_debug = (
+            layer_id == 0
+            and os.environ.get("G023_MIXER_DEBUG") == "1"
+            and self.forward_metadata.num_prefills > 0
+            and forward_batch.mamba_track_mask is not None
+            and bool(forward_batch.mamba_track_mask.any())
+            and not torch.cuda.is_current_stream_capturing()
+        )
         trace_enabled = (
             layer_id == 0
             and os.environ.get("G023_LIFECYCLE_TRACE") is not None
@@ -820,6 +854,17 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
         )
         if trace_enabled:
             trace_slot = int(os.environ.get("G023_TRACE_SLOT", "5"))
+            if mixer_debug and self.forward_metadata.track_ssm_final_src is not None:
+                logger.warning(
+                    "G023_TRACK_DEBUG layer=%s cache=%s mask=%s track=%s final_src=%s final_dst=%s state_ptr=%s",
+                    layer_id,
+                    self.forward_metadata.mamba_cache_indices.detach().cpu().tolist(),
+                    forward_batch.mamba_track_mask.detach().cpu().tolist(),
+                    forward_batch.mamba_track_indices.detach().cpu().tolist(),
+                    self.forward_metadata.track_ssm_final_src.detach().cpu().tolist(),
+                    self.forward_metadata.track_ssm_final_dst.detach().cpu().tolist(),
+                    layer_cache.temporal.data_ptr(),
+                )
             active_slots = {
                 "cache": self.forward_metadata.mamba_cache_indices.detach().cpu().tolist(),
                 "track": (
@@ -860,6 +905,20 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                 _g023_log_state(
                     layer_id, "before_mixer", slot, layer_cache, active_slots
                 )
+        if mixer_debug:
+            active_source = self.forward_metadata.mamba_cache_indices[: self.forward_metadata.num_prefills]
+            torch.cuda.synchronize(layer_cache.temporal.device)
+            source_hash = hashlib.sha256(
+                layer_cache.temporal[active_source]
+                .detach()
+                .contiguous()
+                .cpu()
+                .numpy()
+                .tobytes()
+            ).hexdigest()
+            logger.warning(
+                "G023_TRACK_SOURCE_IN layer=%s hash=%s", layer_id, source_hash
+            )
         intermediate_states = mixer.forward(
             hidden_states=hidden_states,
             output=output,
@@ -871,6 +930,29 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
         )
 
         if forward_batch.mamba_track_mask is not None:
+            if mixer_debug and self.forward_metadata.track_ssm_final_src is not None:
+                source = self.forward_metadata.track_ssm_final_src
+                destination = self.forward_metadata.track_ssm_final_dst
+                logger.warning(
+                    "G023_TRACK_DEBUG_SOURCE layer=%s source=%s destination=%s",
+                    layer_id,
+                    source.detach().cpu().tolist(),
+                    destination.detach().cpu().tolist(),
+                )
+            if mixer_debug:
+                logger.warning(
+                    "G023_TRACK_DISPATCH layer=%s intermediate_none=%s has_mask=%s metadata_has_mask=%s final_src=%s final_dst=%s",
+                    layer_id,
+                    intermediate_states is None,
+                    forward_batch.mamba_track_mask is not None,
+                    self.forward_metadata.has_mamba_track_mask,
+                    self.forward_metadata.track_ssm_final_src.detach().cpu().tolist()
+                    if self.forward_metadata.track_ssm_final_src is not None
+                    else None,
+                    self.forward_metadata.track_ssm_final_dst.detach().cpu().tolist()
+                    if self.forward_metadata.track_ssm_final_dst is not None
+                    else None,
+                )
             if (
                 intermediate_states is not None
                 and forward_batch.mamba_track_mask is not None
@@ -901,6 +983,23 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                 _g023_log_state(
                     layer_id, "after_tracking", slot, layer_cache, active_slots
                 )
+        if mixer_debug and self.forward_metadata.track_ssm_final_src is not None:
+            torch.cuda.synchronize(layer_cache.temporal.device)
+            destination_hash = hashlib.sha256(
+                layer_cache.temporal[
+                    self.forward_metadata.track_ssm_final_dst
+                ]
+                .detach()
+                .contiguous()
+                .cpu()
+                .numpy()
+                .tobytes()
+            ).hexdigest()
+            logger.warning(
+                "G023_TRACK_DEBUG_DESTINATION layer=%s destination_hash=%s",
+                layer_id,
+                destination_hash,
+            )
 
     def forward_decode(self, *args, **kwargs):
         raise NotImplementedError(
