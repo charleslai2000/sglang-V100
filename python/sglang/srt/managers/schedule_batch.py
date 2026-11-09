@@ -1085,7 +1085,7 @@ class Req(ReqDllmMixin):
                         extra_key=self.extra_key,
                     ),
                     req=self,
-                    cow_mamba=cow_mamba,
+                    cow_mamba=cow_mamba and not force_miss,
                 )
             )
             if force_miss:
