@@ -254,6 +254,7 @@ class Mamba2Metadata(ForwardMetadata):
             num_decodes=num_decodes,
             is_target_verify=forward_batch.forward_mode.is_target_verify(),
             draft_token_num=draft_token_num,
+            has_mamba_track_mask=forward_metadata.has_mamba_track_mask,
             mixed_metadata=cls.MixedMetadata(
                 has_initial_states=has_initial_states,
                 prep_initial_states=prep_initial_states,

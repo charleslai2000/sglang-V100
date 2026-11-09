@@ -718,14 +718,21 @@ class MambaAttnBackendBase(AttentionBackend):
         """
         if forward_metadata.has_mamba_track_mask:
             h = h.squeeze(0)
+            if forward_metadata.track_ssm_h_src.numel() > 0:
+                ssm_states[forward_metadata.track_ssm_h_dst] = h[
+                    forward_metadata.track_ssm_h_src
+                ].to(ssm_states.dtype, copy=False)
+            if forward_metadata.track_ssm_final_src.numel() > 0:
+                ssm_states[forward_metadata.track_ssm_final_dst] = ssm_states[
+                    forward_metadata.track_ssm_final_src
+                ]
         elif (
             os.environ.get("G023_MIXER_DEBUG") == "1"
             and forward_batch.mamba_track_mask is not None
             and bool(forward_batch.mamba_track_mask.any())
             and forward_metadata.track_ssm_final_src is not None
         ):
-            # The debug trace makes the metadata gate decision explicit without
-            # changing allocation, copy selection, or indexing behavior.
+            # Record why state tracking was skipped without changing normal behavior.
             with open(
                 os.environ.get("G023_TRACK_GATE_TRACE", "/data/t011/artifacts/g023-track-gate.jsonl"),
                 "a",
@@ -733,7 +740,7 @@ class MambaAttnBackendBase(AttentionBackend):
                 trace.write(
                     json.dumps(
                         {
-                            "phase": "extend_gate",
+                            "phase": "extend_gate_skipped",
                             "metadata_has_mask": forward_metadata.has_mamba_track_mask,
                             "batch_mask": forward_batch.mamba_track_mask.detach().cpu().tolist(),
                             "h_shape": list(h.shape),
@@ -744,15 +751,6 @@ class MambaAttnBackendBase(AttentionBackend):
                     )
                     + "\n"
                 )
-
-            if forward_metadata.track_ssm_h_src.numel() > 0:
-                ssm_states[forward_metadata.track_ssm_h_dst] = h[
-                    forward_metadata.track_ssm_h_src
-                ].to(ssm_states.dtype, copy=False)
-            if forward_metadata.track_ssm_final_src.numel() > 0:
-                ssm_states[forward_metadata.track_ssm_final_dst] = ssm_states[
-                    forward_metadata.track_ssm_final_src
-                ]
 
 
 class Mamba2AttnBackend(MambaAttnBackendBase):
