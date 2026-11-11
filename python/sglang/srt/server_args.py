@@ -1332,16 +1332,20 @@ class ServerArgs:
         except (AttributeError, IndexError, TypeError):
             model_arch = None
         if model_arch == "FalconH1ForCausalLM":
-            # Falcon-H1 FP16 dense GEMMs on SM70 produce anomalous results
-            # with reduced-precision FP16 accumulation for some row counts.
-            # Set once at startup; the policy is shared by CUDA GEMMs in
-            # Prefill, Decode and graph replay for this server process.
-            import torch
+            # This opt-in is scoped to Falcon-H1 on SM70 and applied once at
+            # startup. The resulting process-wide CUDA GEMM policy is used in
+            # Prefill, Decode and graph replay; there is no Forward-time toggle.
+            from sglang.srt.environ import envs
 
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-            logger.info(
-                "SM70 Falcon-H1: disabling reduced-precision FP16 GEMM reduction"
-            )
+            disabled = False
+            if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 7:
+                disabled = envs.SGLANG_FALCON_H1_SM70_DISABLE_FP16_REDUCED_PRECISION_REDUCTION.get()
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = not disabled
+                logger.info(
+                    "SM70 Falcon-H1 FP16 reduced-precision reduction: %s (disable opt-in env=%s)",
+                    not disabled,
+                    envs.SGLANG_FALCON_H1_SM70_DISABLE_FP16_REDUCED_PRECISION_REDUCTION.name,
+                )
         if self.attention_backend is None:
             try:
                 import tilelang  # noqa: F401
