@@ -1332,6 +1332,19 @@ class ServerArgs:
         except (AttributeError, IndexError, TypeError):
             model_arch = None
         if model_arch == "FalconH1ForCausalLM":
+            import hashlib
+            from pathlib import Path
+
+            import torch
+
+            source_path = Path(__file__).resolve()
+            source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            logger.info(
+                "Falcon-H1 SM70 policy source: path=%s sha256=%s",
+                source_path,
+                source_sha256,
+            )
+
             # This opt-in is scoped to Falcon-H1 on SM70 and applied once at
             # startup. The resulting process-wide CUDA GEMM policy is used in
             # Prefill, Decode and graph replay; there is no Forward-time toggle.
