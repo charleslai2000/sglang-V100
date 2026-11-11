@@ -1327,6 +1327,21 @@ class ServerArgs:
             return
         if get_device_sm() != 70:
             return
+        try:
+            model_arch = self.get_model_config().hf_config.architectures[0]
+        except (AttributeError, IndexError, TypeError):
+            model_arch = None
+        if model_arch == "FalconH1ForCausalLM":
+            # Falcon-H1 FP16 dense GEMMs on SM70 produce anomalous results
+            # with reduced-precision FP16 accumulation for some row counts.
+            # Set once at startup; the policy is shared by CUDA GEMMs in
+            # Prefill, Decode and graph replay for this server process.
+            import torch
+
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+            logger.info(
+                "SM70 Falcon-H1: disabling reduced-precision FP16 GEMM reduction"
+            )
         if self.attention_backend is None:
             try:
                 import tilelang  # noqa: F401
