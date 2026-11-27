@@ -1,0 +1,36 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+void cutlass::Kernel2<cutlass_70_wmma_tensorop_f16_s...         0.00%       0.000us         0.00%       0.000us       0.000us      25.554ms        39.90%      25.554ms      86.917us           294  
+                             _fwd_grouped_kernel_stage1         0.00%       0.000us         0.00%       0.000us       0.000us      13.541ms        21.14%      13.541ms     205.172us            66  
+void cutlass::Kernel2<cutlass_70_wmma_tensorop_s1616...         0.00%       0.000us         0.00%       0.000us       0.000us       8.252ms        12.88%       8.252ms      23.310us           354  
+void (anonymous namespace)::rmsnorm_hf_scalar_kernel...         0.00%       0.000us         0.00%       0.000us       0.000us       2.145ms         3.35%       2.145ms       3.685us           582  
+void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       1.324ms         2.07%       1.324ms       4.413us           300  
+void cublasLt::splitKreduce_kernel<32, 16, int, floa...         0.00%       0.000us         0.00%       0.000us       0.000us       1.304ms         2.04%       1.304ms       3.685us           354  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     985.539us         1.54%     985.539us       2.986us           330  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us     932.639us         1.46%     932.639us       4.572us           204  
+void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     797.570us         1.25%     797.570us      10.225us            78  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     699.562us         1.09%     699.562us       2.429us           288  
+void at::native::(anonymous namespace)::indexSelectS...         0.00%       0.000us         0.00%       0.000us       0.000us     630.981us         0.99%     630.981us       8.090us            78  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     616.483us         0.96%     616.483us       4.670us           132  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     555.714us         0.87%     555.714us       7.125us            78  
+void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     519.000us         0.81%     519.000us       3.932us           132  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     453.695us         0.71%     453.695us       6.874us            66  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     452.892us         0.71%     452.892us       5.806us            78  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     447.558us         0.70%     447.558us       6.781us            66  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     446.306us         0.70%     446.306us       3.381us           132  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     434.717us         0.68%     434.717us       3.293us           132  
+void (anonymous namespace)::rmsnorm_hf_warp_kernel<1...         0.00%       0.000us         0.00%       0.000us       0.000us     417.891us         0.65%     417.891us       3.166us           132  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     410.146us         0.64%     410.146us       3.107us           132  
+void (anonymous namespace)::act_and_mul_kernel<__hal...         0.00%       0.000us         0.00%       0.000us       0.000us     403.876us         0.63%     403.876us       2.805us           144  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     369.729us         0.58%     369.729us       5.602us            66  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us     340.417us         0.53%     340.417us       3.546us            96  
+                                     _fwd_kernel_stage2         0.00%       0.000us         0.00%       0.000us       0.000us     269.409us         0.42%     269.409us       4.082us            66  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     266.685us         0.42%     266.685us       2.020us           132  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     216.450us         0.34%     216.450us      36.075us             6  
+void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     190.658us         0.30%     190.658us       5.296us            36  
+                                       Memset (Unknown)         0.00%       0.000us         0.00%       0.000us       0.000us     168.514us         0.26%     168.514us       1.170us           144  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us     164.576us         0.26%     164.576us       3.048us            54  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 60.052ms
+Self CUDA time total: 64.049ms

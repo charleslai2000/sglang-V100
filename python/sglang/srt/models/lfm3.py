@@ -423,6 +423,7 @@ class Lfm3ShortConv(nn.Module):
         num_prefills = metadata.num_prefills
         starts = metadata.query_start_loc[: num_prefills + 1].tolist()
         slots = mamba_indices[:num_prefills].tolist()
+        layer_cache = get_req_to_token_pool().mamba2_layer_cache(self.layer_id)
 
         state_len = conv_state.shape[-1]
         chunks = []

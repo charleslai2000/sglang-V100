@@ -256,6 +256,25 @@ class TestDefaultRadixCacheFactory(CustomTestCase):
             SWA.assert_called_once_with(params=ctx.params)
             self.assertIs(result, SWA.return_value)
 
+    def test_unified_radix_cache_when_hybrid_swa_and_hybrid_ssm(self):
+        # Models that are both SWA and recurrent (e.g. LFM3) need the mamba state
+        # in the same tree as the sliding-window KV, otherwise a prefix hit keeps
+        # the stale working state instead of the cached conv state.
+        from sglang.srt.mem_cache.unified_cache_components import ComponentType
+
+        ctx = _make_ctx(is_hybrid_swa=True, is_hybrid_ssm=True)
+        with patch(
+            "sglang.srt.mem_cache.unified_radix_cache.UnifiedRadixCache"
+        ) as Unified:
+            Unified.return_value = MagicMock()
+            result = default_radix_cache_factory(ctx)
+            Unified.assert_called_once_with(ctx.params)
+            self.assertIs(result, Unified.return_value)
+            self.assertEqual(
+                ctx.params.tree_components,
+                (ComponentType.FULL, ComponentType.SWA, ComponentType.MAMBA),
+            )
+
     def test_mamba_radix_cache_when_hybrid_ssm(self):
         ctx = _make_ctx(is_hybrid_ssm=True)
         with patch("sglang.srt.mem_cache.mamba_radix_cache.MambaRadixCache") as Mamba:

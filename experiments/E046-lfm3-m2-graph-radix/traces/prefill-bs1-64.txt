@@ -1,0 +1,21 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+void cutlass::Kernel2<cutlass_70_wmma_tensorop_f16_s...         0.00%       0.000us         0.00%       0.000us       0.000us      31.744ms        42.04%      31.744ms     110.223us           288  
+                                            _fwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      27.075ms        35.86%      27.075ms     615.332us            44  
+            volta_fp16_s884gemm_fp16_128x64_ldg8_f2f_tn         0.00%       0.000us         0.00%       0.000us       0.000us       3.339ms         4.42%       3.339ms      23.852us           140  
+void cutlass::Kernel2<cutlass_70_wmma_tensorop_f16_s...         0.00%       0.000us         0.00%       0.000us       0.000us       2.461ms         3.26%       2.461ms     615.127us             4  
+void (anonymous namespace)::rmsnorm_hf_scalar_kernel...         0.00%       0.000us         0.00%       0.000us       0.000us       1.677ms         2.22%       1.677ms       4.323us           388  
+void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     953.017us         1.26%     953.017us       4.038us           236  
+void cublasLt::splitKreduce_kernel<32, 16, int, __ha...         0.00%       0.000us         0.00%       0.000us       0.000us     791.549us         1.05%     791.549us       4.302us           184  
+void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     738.249us         0.98%     738.249us       4.988us           148  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     678.858us         0.90%     678.858us       3.086us           220  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us     588.000us         0.78%     588.000us       4.324us           136  
+void (anonymous namespace)::act_and_mul_kernel<__hal...         0.00%       0.000us         0.00%       0.000us       0.000us     520.174us         0.69%     520.174us       5.418us            96  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     488.814us         0.65%     488.814us       5.555us            88  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     487.599us         0.65%     487.599us       2.540us           192  
+                                    conv1D_NCHW_general         0.00%       0.000us         0.00%       0.000us       0.000us     370.452us         0.49%     370.452us       7.124us            52  
+void (anonymous namespace)::rmsnorm_hf_warp_kernel<1...         0.00%       0.000us         0.00%       0.000us       0.000us     362.347us         0.48%     362.347us       4.118us            88  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 49.916ms
+Self CUDA time total: 75.508ms
