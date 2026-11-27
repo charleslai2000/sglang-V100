@@ -36,6 +36,51 @@ def _g023_slot_fingerprint(tensor: torch.Tensor, slot: int) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _g023_log_slots(layer_id: int, phase: str, slots, cache, forward_batch=None, extra=None):
+    path = os.environ.get("G023_LIFECYCLE_TRACE")
+    if layer_id != 0 or path is None:
+        return
+    if isinstance(slots, torch.Tensor):
+        slots = slots.detach().cpu().reshape(-1).tolist()
+    for slot in sorted({int(x) for x in slots if x is not None}):
+        row = {
+            "phase": phase,
+            "timestamp_ns": __import__("time").time_ns(),
+            "run_id": os.environ.get("G023_RUN_ID"),
+            "request_ids": list(forward_batch.rids or []) if forward_batch is not None else None,
+            "forward_mode": forward_batch.forward_mode.name if forward_batch is not None else None,
+            "slot": slot,
+            "conv_ptr": cache.conv[0].data_ptr(),
+            "ssm_ptr": cache.temporal.data_ptr(),
+            "conv_sha256": _g023_slot_fingerprint(cache.conv[0], slot),
+            "ssm_sha256": _g023_slot_fingerprint(cache.temporal, slot),
+        }
+        if extra:
+            row.update(extra)
+        with open(path, "a") as trace:
+            trace.write(json.dumps(row) + "\n")
+
+
+def _g023_log_tracking_metadata(layer_id: int, forward_batch, metadata, active_slots):
+    path = os.environ.get("G023_LIFECYCLE_TRACE")
+    if layer_id != 0 or path is None:
+        return
+    row = {
+        "phase": "track_metadata",
+        "timestamp_ns": __import__("time").time_ns(),
+        "run_id": os.environ.get("G023_RUN_ID"),
+        "request_ids": list(forward_batch.rids or []),
+        "forward_mode": forward_batch.forward_mode.name,
+        "prefix_lens": forward_batch.extend_prefix_lens_cpu,
+        "mamba_cache_indices": active_slots.get("mamba_cache_indices"),
+        "track_seqlens": forward_batch.mamba_track_seqlens.detach().cpu().tolist()
+        if forward_batch.mamba_track_seqlens is not None else None,
+        **active_slots,
+    }
+    with open(path, "a") as trace:
+        trace.write(json.dumps(row) + "\n")
+
+
 def _g023_log_state(
     layer_id: int, phase: str, slot: int, cache, active_slots=None, forward_mode=None
 ) -> None:
@@ -48,6 +93,8 @@ def _g023_log_state(
         "phase": phase,
         "forward_mode": forward_mode,
         "layer": layer_id,
+        "timestamp_ns": __import__("time").time_ns(),
+        "run_id": os.environ.get("G023_RUN_ID"),
         "slot": slot,
         "conv_ptr": cache.conv[0].data_ptr(),
         "ssm_ptr": cache.temporal.data_ptr(),
@@ -209,15 +256,13 @@ class MambaAttnBackendBase(AttentionBackend):
                 src = forward_batch.mamba_cow_src_indices.detach().cpu().tolist()
                 dst = forward_batch.mamba_cow_dst_indices.detach().cpu().tolist()
                 cache = self.req_to_token_pool.mamba2_layer_cache(0)
-                for slot in src + dst:
-                    _g023_log_state(0, "cow_before", slot, cache)
+                _g023_log_slots(0, "cow_before", src + dst, cache, forward_batch, {"src": src, "dst": dst})
             self.req_to_token_pool.mamba_pool.copy_from(
                 forward_batch.mamba_cow_src_indices, forward_batch.mamba_cow_dst_indices
             )
             if trace_path is not None:
                 cache = self.req_to_token_pool.mamba2_layer_cache(0)
-                for slot in src + dst:
-                    _g023_log_state(0, "cow_after", slot, cache)
+                _g023_log_slots(0, "cow_after", src + dst, cache, forward_batch, {"src": src, "dst": dst})
         forward_batch.mamba_clear_indices = None
         forward_batch.mamba_cow_src_indices = None
         forward_batch.mamba_cow_dst_indices = None
@@ -237,6 +282,11 @@ class MambaAttnBackendBase(AttentionBackend):
         mamba_cache_indices = self.req_to_token_pool.get_mamba_indices(
             forward_batch.req_pool_indices
         )
+        if os.environ.get("G023_LIFECYCLE_TRACE") is not None and not torch.cuda.is_current_stream_capturing():
+            cache = self.req_to_token_pool.mamba2_layer_cache(0)
+            for req_idx, slot in enumerate(mamba_cache_indices.detach().cpu().tolist()):
+                rid = (forward_batch.rids or [])[req_idx] if req_idx < len(forward_batch.rids or []) else None
+                _g023_log_slots(0, "request_state_before_forward", [slot], cache, forward_batch, {"request_index": req_idx, "request_id": rid})
 
         if forward_batch.forward_mode.is_decode_or_idle():
             query_start_loc = torch.arange(
@@ -856,6 +906,14 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
             and not torch.cuda.is_current_stream_capturing()
         )
         if trace_enabled:
+            track_slots = (
+                forward_batch.mamba_track_indices[forward_batch.mamba_track_mask]
+                if forward_batch.mamba_track_mask is not None
+                and bool(forward_batch.mamba_track_mask.any())
+                else None
+            )
+            if track_slots is not None:
+                _g023_log_slots(0, "track_destination_before", track_slots, layer_cache, forward_batch)
             trace_slot = int(os.environ.get("G023_TRACE_SLOT", "5"))
             if mixer_debug and self.forward_metadata.track_ssm_final_src is not None:
                 logger.warning(
@@ -901,18 +959,25 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                     if self.forward_metadata.track_ssm_final_dst is not None
                     else None
                 ),
+                "track_seqlens": forward_batch.mamba_track_seqlens.detach().cpu().tolist()
+                if forward_batch.mamba_track_seqlens is not None else None,
+                "prefix_lens": forward_batch.extend_prefix_lens_cpu,
             }
-            for slot in sorted(
-                {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
-            ):
-                _g023_log_state(
-                    layer_id,
-                    "before_mixer",
-                    slot,
-                    layer_cache,
-                    active_slots,
-                    forward_batch.forward_mode.name,
-                )
+            _g023_log_tracking_metadata(
+                layer_id, forward_batch, self.forward_metadata, active_slots
+            )
+            before_slots = {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
+            if forward_batch.forward_mode.is_extend():
+                before_slots.update(self.forward_metadata.track_ssm_final_src.detach().cpu().tolist() if self.forward_metadata.track_ssm_final_src is not None else [])
+                before_slots.update(self.forward_metadata.track_ssm_final_dst.detach().cpu().tolist() if self.forward_metadata.track_ssm_final_dst is not None else [])
+            _g023_log_slots(
+                layer_id,
+                "before_mixer",
+                before_slots,
+                layer_cache,
+                forward_batch,
+                active_slots,
+            )
         if mixer_debug:
             active_source = self.forward_metadata.mamba_cache_indices[: self.forward_metadata.num_prefills]
             torch.cuda.synchronize(layer_cache.temporal.device)
@@ -927,6 +992,7 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
             logger.warning(
                 "G023_TRACK_SOURCE_IN layer=%s hash=%s", layer_id, source_hash
             )
+        self.forward_metadata.layer_id = layer_id
         intermediate_states = mixer.forward(
             hidden_states=hidden_states,
             output=output,
@@ -985,17 +1051,28 @@ class Mamba2AttnBackend(MambaAttnBackendBase):
                 )
 
         if trace_enabled:
-            for slot in sorted(
-                {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])}
-            ):
-                _g023_log_state(
-                    layer_id,
-                    "after_tracking",
-                    slot,
-                    layer_cache,
-                    active_slots,
-                    forward_batch.forward_mode.name,
-                )
+            if track_slots is not None:
+                _g023_log_slots(0, "track_destination_after", track_slots, layer_cache, forward_batch)
+            if forward_batch.forward_mode.is_extend():
+                final_src = self.forward_metadata.track_ssm_final_src
+                final_dst = self.forward_metadata.track_ssm_final_dst
+                if final_src is not None and final_src.numel():
+                    _g023_log_slots(0, "track_source_after", final_src, layer_cache, forward_batch)
+                if final_dst is not None and final_dst.numel():
+                    _g023_log_slots(0, "track_destination_after", final_dst, layer_cache, forward_batch)
+            tracking = dict(active_slots)
+            tracking["mamba_cache_indices"] = self.forward_metadata.mamba_cache_indices.detach().cpu().tolist()
+            _g023_log_tracking_metadata(
+                layer_id, forward_batch, self.forward_metadata, tracking
+            )
+            _g023_log_slots(
+                layer_id,
+                "after_tracking",
+                {trace_slot, *active_slots["cache"], *(active_slots["track"] or [])},
+                layer_cache,
+                forward_batch,
+                active_slots,
+            )
         if mixer_debug and self.forward_metadata.track_ssm_final_src is not None:
             torch.cuda.synchronize(layer_cache.temporal.device)
             destination_hash = hashlib.sha256(

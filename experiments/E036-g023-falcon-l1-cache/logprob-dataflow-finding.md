@@ -1,0 +1,34 @@
+# G023 first-token logprob dataflow
+
+## Finding
+
+The reported delta is explained before the sampler: the hit and force-miss first-token sampler inputs are different. Sampler normalization and request/API transport preserve each side's own value. The earlier claim that these complete Prefill logits matched was based on a bad trace join: it joined the first unfiltered `forward_logits` row (health/checkpoint or a different run RID), not the target branch request. Do not use that equality claim.
+
+## Aligned evidence
+
+Fresh exact-c57 service runs used separate process/RID records, `chunk=2048`, the same 789 input token IDs, `extra_buffer`, `return_logprob=true`; the requests generated two tokens, so the first sampled token came from EXTEND/Prefill at token position 788 (generation index 0). CUDA Graph decode was not exercised in this short targeted trace; it is irrelevant to this first-token logprob path.
+
+| Boundary | Force-miss | Cache-hit |
+|---|---:|---:|
+| RID / forward input | `g023-miss-branch-alpha-first-1794339412136741981`, 789 new, 0 cached | `g023-hit-branch-alpha-first-1794339480490170347`, 21 new, 768 cached |
+| Forward logits → Sampler input | SHA256 `80e2c3aa186aeb71acc699950472f00e4d6fb42135aac5f802e17bcc9423b8af`; exact within run | SHA256 `9819c5ef3d0c6e19f4515b1212ef112fd3b9b55b1fe688370eb803571861eb35`; exact within run |
+| Sampler params | temp=1, top_k=1, top_p=1, min_p=0, greedy, no penalties/bias/mask/custom processor, `SGLANG_RETURN_ORIGINAL_LOGPROB=false` | same |
+| Row / position / selected token | batch row 0 / pos 788 / token 1221 | batch row 0 / pos 788 / token 1221 |
+| Selected logprob at Sampler, pre-CPU, request stream, API | `-1.0024816989898682` | `-1.0181455612182617` |
+| Independent FP64 `log_softmax(frozen_sampler_input)[1221]` | `-1.0024818717145905` | `-1.0181455765920397` |
+
+The complete forward-logit vectors are not equal: 130,046/130,049 elements differ; max absolute delta `0.2622909546`, mean absolute delta `0.0411331697`. The selected raw logits are respectively `-1.5285131931` and `-1.5580713749`. Thus the normalized selected-token delta is expected from the inputs. For both requests, forward logits and the pre-mutation Sampler snapshot have identical bytes/hash. The Sampler-selected value reaches scheduler append, stream output and API unchanged. No result-row/RID remapping or GPU→CPU corruption is indicated.
+
+The client sends temperature 0, which `SamplingParams` normalizes to temperature 1/top_k 1; therefore the all-greedy sampler branch computes `log_softmax` on the original logits. No temperature scaling, penalty, top-p filtering, logit bias or mask is active. `SGLANG_RETURN_ORIGINAL_LOGPROB` is false, but this makes no difference here because effective temperature is 1.
+
+## Numerical diagnosis and state checks
+
+Request-ID aligned boundary captures now locate the first numerical delta. The target miss Prefill has 789 new rows; hit has 21 new rows with 768 cached. Comparing the shared 768-token prefix's cache-builder Prefill against the target miss Prefill, layer-0 input hidden at positions 0 and 767 is byte-identical. However, the batched pre-RoPE Q/K/V differ (position 0: Q 512 elements, K 84, V 92 differ; max `0.0078125`; position 767: Q 536, K 73, V 87 differ; max `0.015625`). Recomputing the same projection for each sampled row as a one-row call (`qkv_single`) is byte-identical across the two Prefills. **Correction: this is not GPTQ.** Falcon-H1 attention QKV is an unquantized FP16 `QKVParallelLinear` (`UnquantizedLinearMethod`, weight `[2048,3072]`); only the MLP projections use GPTQ. A separate V100 run confirmed the early MLP gate/up projection is GPTQ Q4, group size 128, `desc_act=true`, and its active path uses `use_shuffle=false`; it compared the native GPTQ output against `gptq_gemm_fp32_groupwise`, but used synthetic random inputs rather than the trace's actual MLP activation and therefore does not attribute the observed QKV discrepancy. So the data establishes batch-shape-sensitive FP16 dense GEMM output, not a GPTQ defect. At position 0, subsequent layer-0 attention output differs in 1,280/3,072 elements (max `0.00390625`, mean `5.60e-5`), combined attention+Mamba differs in 635 (max `0.001953125`), and MLP/layer output differs in 2,972 (max `0.033203125`, mean `0.00241`). The measured pathway is consistent with FP16 dense projection rounding propagating through attention, but does not yet distinguish ordinary shape-dependent rounding from a kernel defect or establish correctness acceptability.
+
+For the target's final input token at absolute position 788, layer-0 input hidden is byte-identical between hit and miss. The batched QKV and independently rerun one-row QKV are also byte-identical. Layer-0 attention differs by max `4.88e-4` (mean `1.81e-5`), consistent with the request attending to prefix KV rows whose builder-vs-miss values differ; MLP/layer output differs by max `0.00403` (mean `7.67e-4`), and later layer boundaries increase (layer 43 input max `1.0`, mean `0.0580`). Exact same-index cache-hit and force-miss first-decode KV traces independently show 0/768 shared-prefix K rows and V rows identical, while 22/22 suffix/decode rows are identical. This is consistent with each path carrying its own FP16 prefill-produced prefix KV, not slot mis-mapping. It does not yet prove the cached KV matches a same-shape oracle or independently verify the recurrent Mamba cache state. A separate first-decode KV capture found all 768 prefix rows differed and 22 suffix/decode rows matched. The 768-token chunk diagnostic produced matching 256 greedy IDs and selected logprobs, but does not qualify exact-c57/chunk2048.
+
+Artifacts: `/data/t011/artifacts/g023-layer-samples-{hit,miss}.jsonl` plus matching flow/service logs. Pair keys are target RID and absolute position; the hit prefix uses the cache-builder RID and must be compared to the miss target RID. Target RIDs are `g023-miss-branch-alpha-first-1794340362033683180` and `g023-hit-branch-alpha-first-1794340427667797249`; builder RID is `g023-hit-cache-builder-1794340426051438744`.
+
+Therefore the contradiction is resolved at the Sampler-input boundary, not in `log_softmax`, GPU→CPU, request aggregation, or API transport. This does **not** make G023 correct: exact-c57 cached-vs-uncached logits still differ and the numerical mechanism's acceptability is unqualified. G023/T001 remains BLOCKED; do not inspect further cache lifecycle or run performance qualification until the prefill batch-shape numerical discrepancy is explained/accepted against the correctness requirement. No production fix, commit, push, or READY claim is made.
+
+Artifacts: `/data/t011/artifacts/g023-aligned-logprob-{hit,miss}.jsonl`, corresponding `*-flow.jsonl`, request JSON, and service logs. Earlier full trace contained multiple service RIDs (health, builder, target); only the exact target RID joins above are valid.

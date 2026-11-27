@@ -1,5 +1,9 @@
+import hashlib
+import json
 import logging
 import os
+import threading
+import time
 from typing import Any, Iterable, List, Optional, Set, Tuple
 
 import torch
@@ -41,6 +45,15 @@ from sglang.srt.utils import add_prefix, is_cuda, make_layers
 
 logger = logging.getLogger(__name__)
 _is_cuda = is_cuda()
+_G023_TRACE_LOCK = threading.Lock()
+_G023_PROMPT_LENS = {}
+_G023_DECODE_STEPS = {}
+
+
+def _g023_trace(path, row):
+    with _G023_TRACE_LOCK, open(path, "a") as trace:
+        trace.write(json.dumps(row, sort_keys=True) + "\n")
+        trace.flush()
 
 
 class FalconH1MLP(nn.Module):
@@ -92,10 +105,23 @@ class FalconH1MLP(nn.Module):
         forward_batch=None,
         use_reduce_scatter: bool = False,
     ):
+        if forward_batch is not None and forward_batch.forward_mode.is_decode() and self.layer_id == 0 and forward_batch.rids:
+            self.gate_up_proj._g023_last_rids = list(forward_batch.rids)
+        g023_trace = os.environ.get("G023_CAPTURE_PATH") if forward_batch is not None and forward_batch.forward_mode.is_decode() and self.layer_id == 0 and forward_batch.rids and not torch.cuda.is_current_stream_capturing() else None
+        step = None
+        if g023_trace is not None:
+            seq_len = int(forward_batch.seq_lens.detach().cpu()[0].item())
+            step = seq_len - _G023_PROMPT_LENS.setdefault(forward_batch.rids[0], seq_len) + 1
+            if step == 1:
+                _g023_trace(g023_trace, {"request_id": list(forward_batch.rids), "forward_mode": forward_batch.forward_mode.name, "decode_step": [step], "execution": "eager", "kind": "layer0_mlp_input", "values": x.detach().float().cpu().flatten().tolist()})
         gate_up, _ = self.gate_up_proj(x)
+        if g023_trace is not None and step == 1:
+            _g023_trace(g023_trace, {"request_id": list(forward_batch.rids), "forward_mode": forward_batch.forward_mode.name, "decode_step": [step], "execution": "eager", "kind": "layer0_mlp_gate_up", "values": gate_up.detach().float().cpu().flatten().tolist(), "weight_sha256": hashlib.sha256(self.gate_up_proj.qweight.detach().contiguous().cpu().numpy().tobytes()).hexdigest(), "scales_sha256": hashlib.sha256(self.gate_up_proj.scales.detach().contiguous().cpu().numpy().tobytes()).hexdigest(), "g_idx_sha256": hashlib.sha256(self.gate_up_proj.g_idx.detach().contiguous().cpu().numpy().tobytes()).hexdigest(), "scheme": type(getattr(self.gate_up_proj, 'scheme', None)).__name__, "kernel": type(getattr(getattr(self.gate_up_proj, 'scheme', None), 'kernel', None)).__name__})
         gate_up[:, : self.intermediate_size // self.tp_size] *= self.gate_multiplier
 
         x = self.act_fn(gate_up)
+        if g023_trace is not None and step == 1:
+            _g023_trace(g023_trace, {"request_id": list(forward_batch.rids), "forward_mode": forward_batch.forward_mode.name, "decode_step": [step], "execution": "eager", "kind": "layer0_mlp_activation", "values": x.detach().float().cpu().flatten().tolist()})
         if self.prefill_q4_tc and forward_batch is not None and forward_batch.forward_mode.is_extend():
             from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import apply_t012_prefill_q4
             output = apply_t012_prefill_q4(self.down_proj, x)
@@ -343,10 +369,132 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        capture_path = os.environ.get("G023_CAPTURE_PATH")
+        if (
+            capture_path
+            and self.layer_id == 0
+            and forward_batch.rids
+            and forward_batch.forward_mode.is_extend()
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            pos_cpu = positions.detach().cpu().reshape(-1).tolist()
+            for request_id in forward_batch.rids:
+                for position in (0, 767, 768):
+                    matches = [i for i, value in enumerate(pos_cpu) if int(value) == position]
+                    if matches:
+                        i = matches[0]
+                        qkv_single, _ = self.qkv_proj(hidden_states[i : i + 1])
+                        _g023_trace(capture_path, {
+                            "request_id": [request_id],
+                            "forward_mode": forward_batch.forward_mode.name,
+                            "decode_step": None,
+                            "execution": "eager",
+                            "kind": "layer0_prefill_qkv_sample",
+                            "position": position,
+                            "hidden_hash": hashlib.sha256(hidden_states[i].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                            "hidden": hidden_states[i].detach().float().cpu().flatten().tolist(),
+                            "rope_position": int(positions[i].item()),
+                            "position_hidden_norm": float(hidden_states[i].float().norm().item()),
+                            "position_hidden_sum": float(hidden_states[i].float().sum().item()),
+                            "q": q[i].detach().float().cpu().flatten().tolist(),
+                            "k": k[i].detach().float().cpu().flatten().tolist(),
+                            "v": v[i].detach().float().cpu().flatten().tolist(),
+                            "qkv_single": qkv_single[0].detach().float().cpu().flatten().tolist(),
+                        })
         k = k * self.key_multiplier
         q, k = self.rotary_emb(positions, q, k)
+        capture_path = os.environ.get("G023_CAPTURE_PATH")
+        if (
+            capture_path
+            and self.layer_id == 0
+            and forward_batch.forward_mode.is_decode()
+            and forward_batch.rids
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
+            steps = [
+                int(length) - _G023_PROMPT_LENS.setdefault(rid, int(length)) + 1
+                for rid, length in zip(forward_batch.rids, seq_lens)
+            ]
+            if all(step == 1 for step in steps):
+                _g023_trace(capture_path, {
+                    "request_id": list(forward_batch.rids),
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "decode_step": steps,
+                    "execution": "eager",
+                    "kind": "layer0_attention_qkv",
+                    "positions": positions.detach().cpu().tolist(),
+                    "input_hash": hashlib.sha256(hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "q": q.detach().float().cpu().flatten().tolist(),
+                    "k": k.detach().float().cpu().flatten().tolist(),
+                    "v": v.detach().float().cpu().flatten().tolist(),
+                })
 
         attn_output = self.attn(q, k, v, forward_batch)
+        if (
+            os.environ.get("G023_CAPTURE_PATH")
+            and self.layer_id == 0
+            and forward_batch.forward_mode.is_decode()
+            and forward_batch.rids
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            req_ids = list(forward_batch.rids)
+            seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
+            steps = [
+                int(length) - _G023_PROMPT_LENS.setdefault(rid, int(length)) + 1
+                for rid, length in zip(req_ids, seq_lens)
+            ]
+            if all(step == 1 for step in steps):
+                backend = get_attn_backend()
+                req_pool = backend.req_to_token_pool.req_to_token
+                kv_slots = req_pool[
+                    forward_batch.req_pool_indices[:1], : int(seq_lens[0])
+                ].reshape(-1)
+                key = backend.token_to_kv_pool.get_key_buffer(self.layer_id)
+                value = backend.token_to_kv_pool.get_value_buffer(self.layer_id)
+                if key.ndim == 4:
+                    key = key.view(-1, key.shape[-2], key.shape[-1])
+                    value = value.view(-1, value.shape[-2], value.shape[-1])
+                key_rows = key.index_select(0, kv_slots.to(torch.long))
+                value_rows = value.index_select(0, kv_slots.to(torch.long))
+                _g023_trace(os.environ["G023_CAPTURE_PATH"], {
+                    "request_id": req_ids,
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "decode_step": steps,
+                    "execution": "eager",
+                    "kind": "layer0_attention_kv_rows",
+                    "all_kv": os.environ.get("G023_CAPTURE_ALL_KV") == "1",
+                    "seq_len": int(seq_lens[0]),
+                    "kv_slots_sha256": hashlib.sha256(kv_slots.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "kv_slots_head": kv_slots[:8].detach().cpu().tolist(),
+                    "kv_slots_tail": kv_slots[-8:].detach().cpu().tolist(),
+                    "kv_slot_samples": {
+                        str(index): int(kv_slots[index].item())
+                        for index in sorted({0, 1, min(767, kv_slots.numel() - 1), min(768, kv_slots.numel() - 1), kv_slots.numel() - 1})
+                    },
+                    "cached_k": hashlib.sha256(key_rows.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "cached_v": hashlib.sha256(value_rows.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "kv_rows": (
+                        {
+                            "k": key_rows.detach().float().cpu().flatten().tolist(),
+                            "v": value_rows.detach().float().cpu().flatten().tolist(),
+                        }
+                        if os.environ.get("G023_CAPTURE_ALL_KV") == "1"
+                        else None
+                    ),
+                    "kv_sample_hashes": {
+                        str(index): {
+                            "slot": int(kv_slots[index].item()),
+                            "k": hashlib.sha256(key_rows[index].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                            "v": hashlib.sha256(value_rows[index].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                        }
+                        for index in sorted({0, 1, min(767, key_rows.shape[0] - 1), min(768, key_rows.shape[0] - 1), key_rows.shape[0] - 1})
+                    },
+                    "q": hashlib.sha256(q.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "k": hashlib.sha256(k.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "v": hashlib.sha256(v.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "attn_output": hashlib.sha256(attn_output.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                })
 
         output, _ = self.o_proj(attn_output)
         return output
@@ -359,6 +507,52 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
         forward_batch: ForwardBatch,
         **kwargs: Any,
     ):
+        capture_path = os.environ.get("G023_CAPTURE_PATH")
+        capture_extend = (
+            capture_path is not None
+            and self.layer_id in (0, 1, 43)
+            and forward_batch.forward_mode.is_extend()
+            and forward_batch.rids
+            and not torch.cuda.is_current_stream_capturing()
+        )
+        capture_sample = None
+        if capture_extend:
+            positions_cpu = positions.detach().cpu().reshape(-1).tolist()
+            prefix_len = max(forward_batch.extend_prefix_lens_cpu or [0])
+            sample_positions = sorted(
+                {
+                    0,
+                    max(0, prefix_len - 1),
+                    prefix_len,
+                    int(max(positions_cpu)),
+                }
+            )
+            capture_sample = {
+                request_id: {
+                    position: [i for i, value in enumerate(positions_cpu) if int(value) == position]
+                    for position in sample_positions
+                }
+                for request_id in forward_batch.rids
+            }
+            for request_id, samples in capture_sample.items():
+                for position, indices in samples.items():
+                    if indices:
+                        index = indices[0]
+                        _g023_trace(capture_path, {
+                            "request_id": [request_id],
+                            "forward_mode": forward_batch.forward_mode.name,
+                            "decode_step": None,
+                            "execution": "eager",
+                            "kind": "falcon_layer_input_sample",
+                            "layer": self.layer_id,
+                            "position": position,
+                            "row_index": index,
+                            "prefix_len": prefix_len,
+                            "hidden": hidden_states[index].detach().float().cpu().tolist(),
+                            "residual": residual[index].detach().float().cpu().tolist() if residual is not None else None,
+                            "forward_iter": forward_batch.forward_iter,
+                        })
+
         hidden_states, residual = self.layer_communicator.prepare_attn(
             hidden_states, residual, forward_batch
         )
@@ -371,15 +565,65 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
                 forward_batch=forward_batch,
             )
             attention_hidden_states = attention_hidden_states * self.attn_out_multiplier
+            if capture_sample:
+                for request_id, samples in capture_sample.items():
+                    for position, indices in samples.items():
+                        if indices:
+                            index = indices[0]
+                            _g023_trace(capture_path, {
+                                "request_id": [request_id],
+                                "forward_mode": forward_batch.forward_mode.name,
+                                "decode_step": None,
+                                "execution": "eager",
+                                "kind": "falcon_attention_output_sample",
+                                "layer": self.layer_id,
+                                "position": position,
+                                "row_index": index,
+                                "values": attention_hidden_states[index].detach().float().cpu().tolist(),
+                            })
 
             attn_backend = get_attn_backend()
             assert isinstance(attn_backend, HybridLinearAttnBackend)
             assert isinstance(attn_backend.linear_attn_backend, Mamba2AttnBackend)
             # Mamba block
+            mamba_input = hidden_states * self.ssm_in_multiplier
+            capture_path = os.environ.get("G023_CAPTURE_PATH")
+            decode_steps = None
+            if forward_batch.forward_mode.is_decode() and not torch.cuda.is_current_stream_capturing():
+                seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
+                for rid, seq_len in zip(forward_batch.rids or [], seq_lens):
+                    _G023_PROMPT_LENS.setdefault(rid, int(seq_len))
+                decode_steps = [
+                    int(length) - _G023_PROMPT_LENS[rid] + 1
+                    for rid, length in zip(forward_batch.rids or [], seq_lens)
+                ]
+            if (
+                capture_path
+                and forward_batch.forward_mode.is_decode()
+                and self.layer_id == 0
+                and decode_steps
+                and all(step == 1 for step in decode_steps)
+                and not torch.cuda.is_current_stream_capturing()
+            ):
+                for rid, step in zip(forward_batch.rids or [], decode_steps):
+                    _G023_DECODE_STEPS[rid] = step
+                row = {
+                    "request_id": list(forward_batch.rids or []) or ["<synthetic-forward>"],
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "decode_step": decode_steps,
+                    "execution": "eager",
+                    "kind": "falcon_layer_input",
+                    "layer": self.layer_id,
+                    "mamba_input": hashlib.sha256(mamba_input.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "mamba_input_values": mamba_input.detach().float().cpu().flatten().tolist(),
+                    "attention_output": hashlib.sha256(attention_hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "attention_output_values": attention_hidden_states.detach().float().cpu().flatten().tolist(),
+                }
+                _g023_trace(capture_path, row)
             mamba_hidden_states = torch.empty_like(hidden_states)
             attn_backend.linear_attn_backend.forward(
                 self.mamba,
-                hidden_states * self.ssm_in_multiplier,
+                mamba_input,
                 mamba_hidden_states,
                 layer_id=self.layer_id,
                 forward_batch=forward_batch,
@@ -388,6 +632,34 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
             mamba_hidden_states = mamba_hidden_states * self.ssm_out_multiplier
 
             hidden_states = attention_hidden_states + mamba_hidden_states
+            if capture_sample:
+                for request_id, samples in capture_sample.items():
+                    for position, indices in samples.items():
+                        if indices:
+                            index = indices[0]
+                            _g023_trace(capture_path, {
+                                "request_id": [request_id],
+                                "forward_mode": forward_batch.forward_mode.name,
+                                "decode_step": None,
+                                "execution": "eager",
+                                "kind": "falcon_combined_output_sample",
+                                "layer": self.layer_id,
+                                "position": position,
+                                "row_index": index,
+                                "values": hidden_states[index].detach().float().cpu().tolist(),
+                            })
+            if capture_path and self.layer_id == 0 and decode_steps and all(step == 1 for step in decode_steps) and not torch.cuda.is_current_stream_capturing():
+                _g023_trace(capture_path, {
+                    "request_id": list(forward_batch.rids or []),
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "decode_step": decode_steps,
+                    "execution": "eager",
+                    "kind": "layer0_mamba_output",
+                    "mamba_hidden": hashlib.sha256(mamba_hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "mamba_hidden_values": mamba_hidden_states.detach().float().cpu().flatten().tolist(),
+                    "combined_hidden": hashlib.sha256(hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "combined_hidden_values": hidden_states.detach().float().cpu().flatten().tolist(),
+                })
 
         # Fully Connected
         hidden_states, residual = self.layer_communicator.prepare_mlp(
@@ -399,10 +671,43 @@ class FalconH1HybridAttentionDecoderLayer(nn.Module):
         hidden_states = self.feed_forward(
             hidden_states, forward_batch, use_reduce_scatter
         )
+        if capture_sample:
+            for request_id, samples in capture_sample.items():
+                for position, indices in samples.items():
+                    if indices:
+                        index = indices[0]
+                        _g023_trace(capture_path, {
+                            "request_id": [request_id],
+                            "forward_mode": forward_batch.forward_mode.name,
+                            "decode_step": None,
+                            "execution": "eager",
+                            "kind": "falcon_mlp_output_sample",
+                            "layer": self.layer_id,
+                            "position": position,
+                            "row_index": index,
+                            "values": hidden_states[index].detach().float().cpu().tolist(),
+                        })
 
         hidden_states, residual = self.layer_communicator.postprocess_layer(
             hidden_states, residual, forward_batch
         )
+        if capture_sample:
+            for request_id, samples in capture_sample.items():
+                for position, indices in samples.items():
+                    if indices:
+                        index = indices[0]
+                        _g023_trace(capture_path, {
+                            "request_id": [request_id],
+                            "forward_mode": forward_batch.forward_mode.name,
+                            "decode_step": None,
+                            "execution": "eager",
+                            "kind": "falcon_layer_output_sample",
+                            "layer": self.layer_id,
+                            "position": position,
+                            "row_index": index,
+                            "hidden": hidden_states[index].detach().float().cpu().tolist(),
+                            "residual": residual[index].detach().float().cpu().tolist() if residual is not None else None,
+                        })
 
         return hidden_states, residual
 
@@ -466,6 +771,28 @@ class FalconH1Model(nn.Module):
         else:
             hidden_states = self.embed_tokens(input_ids) * self.embedding_multiplier
 
+        capture_path = os.environ.get("G023_CAPTURE_PATH")
+        capture_enabled = capture_path is not None and not torch.cuda.is_current_stream_capturing()
+        request_meta = None
+        if capture_enabled and not forward_batch.rids:
+            _g023_trace(capture_path, {"request_id": ["<synthetic-forward>"], "forward_mode": forward_batch.forward_mode.name, "decode_step": None, "execution": "eager", "kind": "synthetic_forward", "forward_iter": forward_batch.forward_iter})
+        if capture_enabled and forward_batch.rids:
+            request_ids = list(forward_batch.rids)
+            decode_mode = forward_batch.forward_mode.is_decode()
+            seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
+            if decode_mode:
+                decode_steps = [int(seq_len) - _G023_PROMPT_LENS.get(rid, int(seq_len)) + 1 for rid, seq_len in zip(request_ids, seq_lens)]
+            else:
+                decode_steps = None
+            request_meta = {
+                "request_id": request_ids,
+                "forward_mode": forward_batch.forward_mode.name,
+                "decode_step": decode_steps,
+                "execution": "eager",
+                "forward_iter": forward_batch.forward_iter,
+                "req_pool_indices": forward_batch.req_pool_indices.detach().cpu().tolist(),
+            }
+            _g023_trace(capture_path, {**request_meta, "kind": "forward_begin", "input_ids": input_ids.detach().cpu().tolist() if input_ids is not None else None})
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
@@ -476,6 +803,27 @@ class FalconH1Model(nn.Module):
                 residual=residual,
                 forward_batch=forward_batch,
             )
+            if capture_enabled and forward_batch.rids and (
+                (forward_batch.forward_mode.is_decode() and decode_steps and all(step == 1 for step in decode_steps))
+                or (forward_batch.forward_mode.is_extend() and i in (0, 43))
+            ):
+                row = {
+                    **request_meta,
+                    "kind": "falcon_layer",
+                    "time_ns": time.time_ns(),
+                    "layer": i,
+                    "input_token_ids": input_ids.detach().cpu().tolist() if i == 0 and input_ids is not None else None,
+                    "embedding_hidden": hashlib.sha256(hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest() if i == 0 else None,
+                    "hidden_values": hidden_states.detach().float().cpu().flatten().tolist() if forward_batch.forward_mode.is_decode() and all(step == 1 for step in decode_steps or []) else None,
+                    "positions": positions.detach().cpu().tolist() if i == 0 else None,
+                    "seq_lens": forward_batch.seq_lens.detach().cpu().tolist() if i == 0 else None,
+                    "hidden_shape": list(hidden_states.shape),
+                    "hidden_dtype": str(hidden_states.dtype),
+                    "hidden": hashlib.sha256(hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                    "residual": None if residual is None else hashlib.sha256(residual.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                "residual_values": residual.detach().float().cpu().flatten().tolist() if residual is not None and forward_batch.forward_mode.is_decode() and all(step == 1 for step in decode_steps or []) else None,
+                }
+                _g023_trace(capture_path, row)
 
         if not forward_batch.forward_mode.is_idle():
             if residual is None:
@@ -483,6 +831,8 @@ class FalconH1Model(nn.Module):
             else:
                 hidden_states, _ = self.final_layernorm(hidden_states, residual)
 
+        if capture_enabled and request_meta is not None:
+            _g023_trace(capture_path, {**request_meta, "kind": "forward_end"})
         return hidden_states
 
 

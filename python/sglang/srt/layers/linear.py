@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import itertools
+import json
 import logging
+import os
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import torch
@@ -283,7 +285,16 @@ class ReplicatedLinear(LinearBase):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         bias = self.bias if not self.skip_bias_add else None
         assert self.quant_method is not None
+        capture_g003_q = (
+            os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1"
+            and getattr(self, "prefix", "") == "model.layers.0.self_attn.qkv_proj"
+        )
+        if capture_g003_q:
+            self._g003_actual_projection_input = x.detach().clone()
+            self._g003_actual_projection_weight = self.qweight.detach().clone()
         output = self.quant_method.apply(self, x, bias)
+        if capture_g003_q:
+            self._g003_actual_projection_output = output.detach().clone()
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
 
@@ -475,7 +486,17 @@ class ColumnParallelLinear(LinearBase):
 
         # Matrix multiply.
         assert self.quant_method is not None
-        output_parallel = self.quant_method.apply(self, input_, bias)
+        if os.environ.get("G023_CAPTURE_PATH") and getattr(self, "prefix", "").endswith("layers.0.mlp.gate_up_proj") and input_.shape[0] == 1 and not torch.cuda.is_current_stream_capturing():
+            import hashlib, json
+            x_hash = hashlib.sha256(input_.detach().contiguous().cpu().numpy().tobytes()).hexdigest()
+            first = self.quant_method.apply(self, input_, bias)
+            second = self.quant_method.apply(self, input_, bias)
+            for rid in getattr(self, "_g023_last_rids", ["kernel-probe"]):
+                with open(os.environ["G023_CAPTURE_PATH"], "a") as trace:
+                    trace.write(json.dumps({"request_id": [rid], "forward_mode": "DECODE", "decode_step": [1], "execution": "eager", "kind": "gptq_same_input_repeat", "layer": self.prefix, "input_hash": x_hash, "first_output_hash": hashlib.sha256(first.detach().contiguous().cpu().numpy().tobytes()).hexdigest(), "second_output_hash": hashlib.sha256(second.detach().contiguous().cpu().numpy().tobytes()).hexdigest(), "first_values": first.detach().float().cpu().flatten().tolist(), "second_values": second.detach().float().cpu().flatten().tolist()}) + "\n")
+            output_parallel = first
+        else:
+            output_parallel = self.quant_method.apply(self, input_, bias)
         if self.gather_output:
             # All-gather across the partitions.
             output = tensor_model_parallel_all_gather(output_parallel)

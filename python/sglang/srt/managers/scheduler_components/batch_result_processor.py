@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -610,6 +612,14 @@ class SchedulerBatchResultProcessor:
             result.can_run_cuda_graph,
         )
 
+        if os.environ.get("G023_LOGPROB_TRACE_PATH") and batch.return_logprob and logits_output.next_token_logprobs is not None:
+            values = logits_output.next_token_logprobs.detach().cpu().tolist() if isinstance(logits_output.next_token_logprobs, torch.Tensor) else logits_output.next_token_logprobs
+            with open(os.environ["G023_LOGPROB_TRACE_PATH"], "a") as f:
+                for row, req in enumerate(batch.reqs):
+                    if req.rid.startswith("g023-"):
+                        f.write(json.dumps({"kind":"pre_cpu_logprob","request_id":req.rid,"batch_row":row,"generation_index":len(req.logprob.output_token_logprobs_idx),"value":float(values[row])},sort_keys=True)+"\n")
+                f.flush()
+
         next_token_ids, next_token_logprobs = self._normalize_decode_outputs(
             batch=batch,
             result=result,
@@ -763,6 +773,22 @@ class SchedulerBatchResultProcessor:
             max_accept = 1
 
         for j, tok_id in enumerate(accepted_ids):
+            if os.environ.get("G023_LOGPROB_TRACE_PATH") and req.rid.startswith("g023-"):
+                trace = {
+                    "kind": "request_logprob_append",
+                    "request_id": req.rid,
+                    "batch_row": i,
+                    "generation_index": len(req.logprob.output_token_logprobs_idx),
+                    "token_id": int(tok_id),
+                    "next_token_id": int(next_token_id) if isinstance(next_token_id, int) else None,
+                    "captured_selected_logprob": float(accepted_logprobs[j]),
+                    "batch_selected_token_ids": [int(x) for x in batch.output_ids] if hasattr(batch, "output_ids") and batch.output_ids is not None else None,
+                    "logits_output_selected_logprobs": logits_output.next_token_logprobs.detach().cpu().reshape(-1).tolist() if isinstance(logits_output.next_token_logprobs, torch.Tensor) else None,
+                    "batch_rids": [r.rid for r in batch.reqs],
+                }
+                with open(os.environ["G023_LOGPROB_TRACE_PATH"], "a") as f:
+                    f.write(json.dumps(trace, sort_keys=True) + "\n")
+                    f.flush()
             req.logprob.output_token_logprobs_val.append(accepted_logprobs[j])
             req.logprob.output_token_logprobs_idx.append(tok_id)
             if req.logprob.top_logprobs_num > 0:

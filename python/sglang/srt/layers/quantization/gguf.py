@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from typing import TYPE_CHECKING, Any, List, Optional
 
@@ -512,6 +513,12 @@ class GGUFLinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if (
+            os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1"
+            and getattr(layer, "prefix", "") == "model.layers.0.self_attn.qkv_proj"
+        ):
+            layer._g003_actual_projection_input = x.detach().clone()
+            layer._g003_actual_projection_weight = layer.qweight.detach().clone()
         shard_id = layer.qweight.shard_id
 
         if shard_id:
@@ -556,6 +563,11 @@ class GGUFLinearMethod(LinearMethodBase):
             out = fused_mul_mat_gguf(x, qweight, qweight_type)
         if bias is not None:
             out.add_(bias)
+        if (
+            os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1"
+            and getattr(layer, "prefix", "") == "model.layers.0.self_attn.qkv_proj"
+        ):
+            layer._g003_actual_projection_output = out.detach().clone()
         return out
 
     def apply_tied_embedding(

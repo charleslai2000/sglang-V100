@@ -493,6 +493,14 @@ class Gemma4Attention(nn.Module):
             self.is_kv_shared_layer and self.kv_shared_layer_index is not None
         )
         qkv, _ = self.qkv_proj(hidden_states)
+        if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1" and self.layer_id == 0:
+            self._g003_projection_input = hidden_states.detach().clone()
+            self._g003_projection_weight = self.qkv_proj.qweight.detach().clone()
+            self._g003_projection_shard_map = dict(getattr(self.qkv_proj.qweight, "shard_offset_map", {}))
+            self._g003_projection_shard_ids = list(self.qkv_proj.qweight.shard_id)
+            self._g003_projection_types = dict(getattr(self.qkv_proj.qweight_type, "shard_weight_type", {}))
+            self._g003_projection_input_compute = hidden_states.detach().clone()
+            self._g003_projection_output_compute = qkv.detach().clone()
         if os.environ.get("G003_CAPTURE_OPS") == "1" and self.layer_id == 0:
             self._g003_ops = {"projection_input": hidden_states.detach().clone()}
             self._g003_ops["projection_output"] = qkv.detach().clone()
@@ -1104,9 +1112,14 @@ class Gemma4TextModel(PreTrainedModel):
             if input_ids is not None:
                 input_embeds = self.embed_tokens(input_ids)
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
+                if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1":
+                    self._g003_input_embeds = input_embeds.detach().clone()
+                    self._g003_per_layer_embeddings = per_layer_inputs.detach().clone()
             per_layer_inputs = self.project_per_layer_inputs(
                 input_embeds, per_layer_inputs
             )
+            if os.environ.get("SGLANG_G003_CAPTURE_QKV") == "1":
+                self._g003_projected_per_layer_inputs = per_layer_inputs.detach().clone()
             hidden_states = input_embeds
         else:
             assert (

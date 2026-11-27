@@ -1,4 +1,8 @@
+import hashlib
+import json
 import logging
+import os
+import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
@@ -50,6 +54,16 @@ if is_npu():
     import torch_npu
 
 logger = logging.getLogger(__name__)
+_G023_LOGPROB_LOCK = threading.Lock()
+
+
+def _g023_logprob_trace(kind: str, payload: dict) -> None:
+    path = os.environ.get("G023_LOGPROB_TRACE_PATH")
+    if path:
+        with _G023_LOGPROB_LOCK, open(path, "a") as trace:
+            trace.write(json.dumps({"kind": kind, **payload}, sort_keys=True) + "\n")
+            trace.flush()
+
 
 SYNC_TOKEN_IDS_ACROSS_TP = get_bool_env_var("SYNC_TOKEN_IDS_ACROSS_TP")
 SGLANG_RETURN_ORIGINAL_LOGPROB = get_bool_env_var("SGLANG_RETURN_ORIGINAL_LOGPROB")
@@ -105,9 +119,106 @@ class Sampler(nn.Module):
                 to get the unique seed for each position.
         """
         logits = logits_output.next_token_logits
+        trace_path = os.environ.get("G023_LOGPROB_TRACE_PATH")
+        trace_batch = None
+        if (
+            trace_path
+            and logits is not None
+            and not torch.cuda.is_current_stream_capturing()
+        ):
+            # Snapshot before the sampler mutates next_token_logits in place.
+            request_ids = list(getattr(sampling_info, "_g023_request_ids", []) or [])
+            if any(str(rid).startswith("g023-") for rid in request_ids):
+                trace_batch = {
+                    "request_ids": request_ids,
+                    "positions": positions.detach().cpu().reshape(-1).tolist(),
+                    "sampling_info_rids_before": list(
+                        getattr(sampling_info, "rids", None) or []
+                    ),
+                    "input_dtype": str(logits.dtype),
+                    "input_shape": list(logits.shape),
+                    "input_sha256": hashlib.sha256(
+                        logits.detach().contiguous().cpu().numpy().tobytes()
+                    ).hexdigest(),
+                    "input_values": None,
+                    "temperatures": sampling_info.temperatures.detach()
+                    .cpu()
+                    .reshape(-1)
+                    .tolist(),
+                    "top_ks": sampling_info.top_ks.detach().cpu().reshape(-1).tolist(),
+                    "top_ps": sampling_info.top_ps.detach().cpu().reshape(-1).tolist(),
+                    "min_ps": sampling_info.min_ps.detach().cpu().reshape(-1).tolist(),
+                    "is_all_greedy": bool(sampling_info.is_all_greedy),
+                    "need_top_p_sampling": bool(sampling_info.need_top_p_sampling),
+                    "need_top_k_sampling": bool(sampling_info.need_top_k_sampling),
+                    "need_min_p_sampling": bool(sampling_info.need_min_p_sampling),
+                    "return_logprob": bool(return_logprob),
+                    "original_logprob": bool(SGLANG_RETURN_ORIGINAL_LOGPROB),
+                    "sampling_backend": get_global_server_args().sampling_backend,
+                    "sampling_seed": (
+                        sampling_info.sampling_seed.detach()
+                        .cpu()
+                        .reshape(-1)
+                        .tolist()
+                        if isinstance(sampling_info.sampling_seed, torch.Tensor)
+                        else sampling_info.sampling_seed
+                    ),
+                    "additive_penalty_sha256": (
+                        hashlib.sha256(
+                            sampling_info.acc_additive_penalties.detach()
+                            .contiguous()
+                            .cpu()
+                            .numpy()
+                            .tobytes()
+                        ).hexdigest()
+                        if sampling_info.acc_additive_penalties is not None
+                        else None
+                    ),
+                    "scaling_penalty_sha256": (
+                        hashlib.sha256(
+                            sampling_info.acc_scaling_penalties.detach()
+                            .contiguous()
+                            .cpu()
+                            .numpy()
+                            .tobytes()
+                        ).hexdigest()
+                        if sampling_info.acc_scaling_penalties is not None
+                        else None
+                    ),
+                    "logit_bias_sha256": (
+                        hashlib.sha256(
+                            sampling_info.logit_bias.detach()
+                            .contiguous()
+                            .cpu()
+                            .numpy()
+                            .tobytes()
+                        ).hexdigest()
+                        if sampling_info.logit_bias is not None
+                        else None
+                    ),
+                    "vocab_mask_sha256": (
+                        hashlib.sha256(
+                            sampling_info.vocab_mask.detach()
+                            .contiguous()
+                            .cpu()
+                            .numpy()
+                            .tobytes()
+                        ).hexdigest()
+                        if sampling_info.vocab_mask is not None
+                        else None
+                    ),
+                    "custom_processor": bool(
+                        sampling_info.has_custom_logit_processor
+                    ),
+                }
 
         # Preprocess logits (custom processors and NaN handling)
         logits = self._preprocess_logits(logits, sampling_info)
+        if trace_batch is not None:
+            trace_batch["processed_logits_sha256"] = hashlib.sha256(logits.detach().contiguous().cpu().numpy().tobytes()).hexdigest()
+            trace_batch["processed_logits_values"] = None
+            trace_batch["sampler_input_sha256"] = trace_batch["processed_logits_sha256"]
+            trace_batch["sampler_input_values"] = None
 
         if sampling_info.is_all_greedy:
             if _use_aiter:
@@ -193,6 +304,40 @@ class Sampler(nn.Module):
                 sampling_info,
                 batch_next_token_ids,
             )
+
+        if trace_batch is not None:
+            selected_ids = batch_next_token_ids.detach().cpu().reshape(-1).tolist()
+            selected_logprobs = logits_output.next_token_logprobs
+            trace_batch.update(
+                {
+                    "selected_token_ids": selected_ids,
+                    "mutated_logits_sha256": hashlib.sha256(
+                        logits.detach().contiguous().cpu().numpy().tobytes()
+                    ).hexdigest(),
+                    "mutated_logits_values": None,
+                    "selected_logprobs": (
+                        selected_logprobs.detach().cpu().reshape(-1).tolist()
+                        if selected_logprobs is not None
+                        else None
+                    ),
+                    "selected_logprobs_f64_from_input": None,
+                    "selected_logprob_sha256": (
+                        hashlib.sha256(
+                            selected_logprobs.detach()
+                            .contiguous()
+                            .cpu()
+                            .numpy()
+                            .tobytes()
+                        ).hexdigest()
+                        if selected_logprobs is not None
+                        else None
+                    ),
+                    "sampling_info_rids": list(
+                        getattr(sampling_info, "rids", None) or []
+                    ),
+                }
+            )
+            _g023_logprob_trace("sampler", trace_batch)
 
         self._sync_token_ids_across_tp(batch_next_token_ids, sampling_info)
 

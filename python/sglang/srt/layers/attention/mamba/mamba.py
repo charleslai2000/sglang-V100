@@ -1,10 +1,14 @@
 import hashlib
+import json
 import logging
 import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+
+_G023_PROMPT_LENS = {}
+_G023_DECODE_STEPS = {}
 
 from sglang.srt.configs.mamba_utils import (
     Mamba2CacheParams,
@@ -441,6 +445,47 @@ class MambaMixer2(torch.nn.Module):
 
         query_start_loc = metadata.query_start_loc
 
+        capture_path = os.environ.get("G023_CAPTURE_PATH")
+        g023_capture = (
+            capture_path
+            if metadata.layer_id == 0 and forward_batch.rids and forward_batch.forward_mode.is_decode() and not torch.cuda.is_current_stream_capturing()
+            else None
+        )
+        if g023_capture is not None:
+            request_ids = list(forward_batch.rids or [])
+            seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
+            if forward_batch.forward_mode.is_decode():
+                for rid, seq_len in zip(request_ids, seq_lens):
+                    _G023_PROMPT_LENS.setdefault(rid, int(seq_len))
+            decode_steps = (
+                [int(length) - _G023_PROMPT_LENS[rid] + 1 for rid, length in zip(request_ids, seq_lens)]
+                if forward_batch.forward_mode.is_decode()
+                else None
+            )
+            if decode_steps is not None:
+                for rid, step in zip(request_ids, decode_steps):
+                    _G023_DECODE_STEPS[rid] = step
+            g023_identity = {
+                "request_id": request_ids,
+                "forward_mode": forward_batch.forward_mode.name,
+                "decode_step": decode_steps,
+                "execution": "eager",
+                "req_pool_indices": forward_batch.req_pool_indices.detach().cpu().tolist(),
+                "cache_indices": state_indices_tensor.detach().cpu().tolist(),
+            }
+            slot = int(state_indices_tensor[0].item())
+            row = {
+                **g023_identity,
+                "kind": "mamba_state_before",
+                "layer": 0,
+                "hidden_input": hashlib.sha256(hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                "conv": hashlib.sha256(conv_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                "ssm": hashlib.sha256(ssm_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                "conv_shape": list(conv_state[slot].shape),
+                "ssm_shape": list(ssm_state[slot].shape),
+            }
+            with open(g023_capture, "a") as trace:
+                trace.write(json.dumps(row, sort_keys=True) + "\n")
         # 1. Gated MLP's linear projection
         projected_states, _ = self.in_proj(hidden_states)
 
@@ -770,6 +815,21 @@ class MambaMixer2(torch.nn.Module):
         # 5. Final linear projection
         output[:num_actual_tokens], _ = self.out_proj(hidden_states)
 
+        if g023_capture is not None and forward_batch.rids:
+            slot = int(state_indices_tensor[0].item())
+            row = {
+                **g023_identity,
+                "kind": "mamba_state_after",
+                "layer": 0,
+                "intermediate": hashlib.sha256(intermediate_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest() if intermediate_states is not None else None,
+                "intermediate_values": intermediate_states.detach().float().cpu().flatten().tolist() if intermediate_states is not None else None,
+                "conv": hashlib.sha256(conv_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                "ssm": hashlib.sha256(ssm_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
+                "conv_shape": list(conv_state[slot].shape),
+                "ssm_shape": list(ssm_state[slot].shape),
+            }
+            with open(g023_capture, "a") as trace:
+                trace.write(json.dumps(row, sort_keys=True) + "\n")
         return intermediate_states
 
     @property

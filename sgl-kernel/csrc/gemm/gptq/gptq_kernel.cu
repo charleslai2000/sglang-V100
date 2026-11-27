@@ -1558,9 +1558,13 @@ void gemm_half_q_half_cuda(
   if (use_shuffle) {
     use_reconstruct = ((bit == 8 && size_m > MAX_Q_GEMM_ROWS_8BIT) || (bit != 8 && size_m > MAX_Q_GEMM_ROWS));
   } else {
-    // The 2/3-bit kernels are somehow slower than dequant + gemm baseline, so
-    // we disabled them for now.
+    // The SM70 Q4 alternative kernel K-splits into FP16 atomicAdd partial
+    // sums. CTA arrival order changes rounding, so use cuBLAS on SM70.
+#if defined(SGL_KERNEL_V100_ONLY)
+    use_reconstruct = (bit < 4 || bit == 4 || size_m > MAX_ALT_GEMM_ROWS);
+#else
     use_reconstruct = (bit < 4 || size_m > MAX_ALT_GEMM_ROWS);
+#endif
   }
   if (use_reconstruct) {
     // Reconstruct FP16 matrix, then cuBLAS

@@ -20,6 +20,7 @@ import datetime
 import gc
 import hashlib
 import inspect
+import json
 import logging
 import os
 import socket
@@ -301,6 +302,7 @@ UNBALANCED_MODEL_LOADING_TIMEOUT_S = 480  # leave more time for post data proces
 
 
 logger = logging.getLogger(__name__)
+_G023_PROMPT_LENGTHS = {}
 
 _UNSET: Any = object()
 
@@ -3565,6 +3567,12 @@ class ModelRunner(ModelRunnerKVCacheMixin):
                 and self.graph_runner
                 and self.graph_runner.can_run(forward_batch)
             )
+            if (
+                can_run_graph
+                and forward_batch.forward_mode.is_decode()
+                and os.environ.get("G023_DISABLE_DECODE_CUDA_GRAPH") == "1"
+            ):
+                can_run_graph = False
 
             # Hisparse coordinator — backends now read it from self.model_runner.
             if (
@@ -3579,11 +3587,19 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
             # Replay cuda graph if applicable
             if can_run_graph:
+                if os.environ.get("SGLANG_G003_GRAPH_REPLAY_AUDIT") == "1":
+                    logger.warning(
+                        "G003_GRAPH_REPLAY_AUDIT mode=%s batch=%s graph_runner=%s",
+                        forward_batch.forward_mode,
+                        forward_batch.batch_size,
+                        type(self.graph_runner).__name__,
+                    )
                 ret = self.graph_runner.replay(
                     forward_batch,
                     skip_attn_backend_init=skip_attn_backend_init,
                     pp_proxy_tensors=pp_proxy_tensors,
                 )
+                self._maybe_capture_g003_logits(forward_batch, ret, "graph")
                 return ModelRunnerOutput(logits_output=ret, can_run_graph=can_run_graph)
 
             # For MLP sync
@@ -3639,13 +3655,95 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             else:
                 raise ValueError(f"Invalid forward mode: {forward_batch.forward_mode}")
 
+            self._maybe_capture_g003_logits(forward_batch, ret, "eager")
+
             if (
                 forward_batch.global_num_tokens_cpu is not None
                 and self.pp_group.is_last_rank
             ):
                 forward_batch.post_forward_mlp_sync_batch(ret)
 
+            if os.environ.get("G023_CAPTURE_PATH") and forward_batch.rids and forward_batch.forward_mode.is_extend(include_draft_extend_v2=True) and isinstance(ret, LogitsProcessorOutput) and ret.next_token_logits is not None:
+                trace_row = {
+                    "request_id": list(forward_batch.rids),
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "prompt_input_tokens": [int(x) for x in forward_batch.extend_seq_lens_cpu] if getattr(forward_batch, "extend_seq_lens_cpu", None) is not None else None,
+                    "cached_prefix_tokens": [int(x) for x in forward_batch.extend_prefix_lens_cpu] if getattr(forward_batch, "extend_prefix_lens_cpu", None) is not None else None,
+                    "decode_step": [int(seq_len) - _G023_PROMPT_LENGTHS.setdefault(rid, int(seq_len)) + 1 for rid, seq_len in zip(forward_batch.rids, forward_batch.seq_lens.detach().cpu().tolist())],
+                    "execution": "piecewise_cuda_graph" if can_run_graph else "eager",
+                    "kind": "forward_logits",
+                    "logits_shape": list(ret.next_token_logits.shape),
+                    "logits_dtype": str(ret.next_token_logits.dtype),
+                    "logits_values": None,
+                }
+                with open(os.environ["G023_CAPTURE_PATH"], "a") as trace:
+                    trace.write(json.dumps(trace_row, sort_keys=True) + "\n")
             return ModelRunnerOutput(logits_output=ret, can_run_graph=can_run_graph)
+
+    def _maybe_capture_g003_logits(self, forward_batch, ret, execution: str):
+        """Opt-in capture of one request's next-token logits after forward/replay.
+
+        CUDA Graph replay has returned before any row is copied to CPU. Set
+        SGLANG_G003_CAPTURE_PATH plus optional RID/POSITION filters to enable.
+        """
+        path = os.environ.get("SGLANG_G003_CAPTURE_PATH")
+        rid = os.environ.get("SGLANG_G003_CAPTURE_RID")
+        target_position = os.environ.get("SGLANG_G003_CAPTURE_POSITION")
+        if not path or not isinstance(ret, LogitsProcessorOutput):
+            return
+        logits = ret.next_token_logits
+        rids = forward_batch.rids
+        positions = forward_batch.seq_lens.detach().cpu().tolist()
+        if logits is None or not rids:
+            return
+        targets = [
+            i for i, request_id in enumerate(rids)
+            if i < logits.shape[0]
+            and (rid is None or request_id == rid)
+            and (target_position is None or int(positions[i]) - 1 == int(target_position))
+        ]
+        for row in targets:
+            request_id = str(rids[row])
+            # Move a single selected row only after graph replay has returned.
+            captured = logits[row].detach().to(device="cpu", dtype=torch.float32).contiguous()
+            position = int(positions[row]) - 1
+            server_args = get_global_server_args()
+            hf_config = getattr(self.model_config, "hf_text_config", None)
+            softcap = getattr(hf_config, "final_logit_softcapping", None)
+            tokenizer_path = getattr(server_args, "tokenizer_path", None)
+            config_path = (
+                os.path.join(tokenizer_path, "config.json")
+                if tokenizer_path and os.path.isdir(tokenizer_path)
+                else None
+            )
+            config_sha256 = None
+            if config_path:
+                with open(config_path, "rb") as config_file:
+                    config_sha256 = hashlib.sha256(config_file.read()).hexdigest()
+            model_path = getattr(server_args, "model_path", None)
+            target_path = (
+                os.path.join(
+                    path,
+                    f"{request_id}-{execution}-{forward_batch.forward_mode.name}-{position}.pt",
+                )
+                if os.path.isdir(path)
+                else path
+            )
+            torch.save(
+                {
+                    "request_id": request_id,
+                    "execution": execution,
+                    "forward_mode": forward_batch.forward_mode.name,
+                    "position": position,
+                    "model_path": model_path,
+                    "config_path": config_path,
+                    "config_sha256": config_sha256,
+                    "softcap_value": softcap,
+                    "logits_stage": "post_final_logit_softcap_pre_sampling",
+                    "logits": captured,
+                },
+                target_path,
+            )
 
     def _preprocess_logits(
         self, logits_output: LogitsProcessorOutput, sampling_info: SamplingBatchInfo
@@ -3690,6 +3788,8 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         self._preprocess_logits(logits_output, forward_batch.sampling_info)
 
         # Sample the next tokens
+        if os.environ.get("G023_LOGPROB_TRACE_PATH"):
+            forward_batch.sampling_info._g023_request_ids = list(forward_batch.rids or [])
         next_token_ids = self.sampler(
             logits_output,
             forward_batch.sampling_info,

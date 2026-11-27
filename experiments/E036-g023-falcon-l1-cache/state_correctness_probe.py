@@ -14,8 +14,10 @@ MODEL = os.environ.get(
     "G023_MODEL", "/data/t011/hf/Falcon-H1-7B-Instruct-GPTQ-Int4"
 )
 MODE = os.environ.get("G023_MODE", "hit")
+MAX_NEW_TOKENS = int(os.environ.get("G023_MAX_NEW_TOKENS", "256"))
 OUT = os.environ.get("G023_OUT", f"/data/t011/artifacts/g023-{MODE}.json")
 EXPECTED_CACHED = {"miss": 0, "hit": 768}
+MAX_RUNNING_REQUESTS = int(os.environ.get("G023_MAX_RUNNING_REQUESTS", "1"))
 if MODE not in EXPECTED_CACHED:
     raise SystemExit("G023_MODE must be miss or hit")
 
@@ -38,11 +40,12 @@ prompts = [prefix + suffix for suffix in suffixes]
 
 def request(label, ids, max_new_tokens=256):
     started = time.perf_counter()
+    request_id = os.environ.get(f"G023_RID_{label.replace('-', '_').upper()}") or f"g023-{MODE}-{label}-{time.time_ns()}"
     response = requests.post(
         BASE + "/generate",
         json={
             "input_ids": ids,
-            "rid": f"g023-{MODE}-{label}-{time.time_ns()}",
+            "rid": request_id,
             "sampling_params": {
                 "temperature": 0,
                 "max_new_tokens": max_new_tokens,
@@ -59,6 +62,8 @@ def request(label, ids, max_new_tokens=256):
     meta = result.get("meta_info", {})
     row = {
         "label": label,
+        "request_id": request_id,
+        "input_ids": ids,
         "input_ids_sha256": hashlib.sha256(
             bytes(str(ids), "ascii")
         ).hexdigest(),
@@ -98,17 +103,17 @@ if needs_builder:
     rows.append(prime)
 base_sequence = sequence.removeprefix("fresh-")
 if base_sequence == "single":
-    first = request("branch-alpha-first", prompts[0])
+    first = request("branch-alpha-first", prompts[0], MAX_NEW_TOKENS)
     rows.append(first)
 elif base_sequence == "repeat":
-    first = request("branch-alpha-first", prompts[0])
-    repeat = request("branch-alpha-repeat", prompts[0])
+    first = request("branch-alpha-first", prompts[0], MAX_NEW_TOKENS)
+    repeat = request("branch-alpha-repeat", prompts[0], MAX_NEW_TOKENS)
     rows.extend([first, repeat])
 elif base_sequence == "ababa":
-    first = request("branch-alpha-first", prompts[0])
-    repeat = request("branch-alpha-repeat", prompts[0])
-    branch = request("branch-bravo", prompts[1])
-    interleave = request("branch-alpha-after-bravo", prompts[0])
+    first = request("branch-alpha-first", prompts[0], MAX_NEW_TOKENS)
+    repeat = request("branch-alpha-repeat", prompts[0], MAX_NEW_TOKENS)
+    branch = request("branch-bravo", prompts[1], MAX_NEW_TOKENS)
+    interleave = request("branch-alpha-after-bravo", prompts[0], MAX_NEW_TOKENS)
     rows.extend([first, repeat, branch, interleave])
 else:
     raise SystemExit("G023_SEQUENCE must be [fresh-]single, repeat, or ababa")
@@ -120,6 +125,7 @@ report = {
     "dtype": "float16",
     "input_prefix_tokens": 768,
     "sequence": sequence,
+    "max_running_requests": MAX_RUNNING_REQUESTS,
     "prompt_ids_sha256": [r["input_ids_sha256"] for r in rows],
     "expected_cached_tokens": EXPECTED_CACHED[MODE],
     "all_cached_tokens_validated": all(

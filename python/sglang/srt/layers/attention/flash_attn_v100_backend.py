@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 # page_size used by this backend (must match server_args SM70 default).
 V100_PAGE_SIZE = 16
 
@@ -954,7 +955,6 @@ class FlashAttnV100Backend(AttentionBackend):
                 layer.k_scale,
                 layer.v_scale,
             )
-
         # For B=1, Triton's logical token list is also an inexpensive source
         # for the page table: every 16th slot is a logical page start.
         # Eager metadata is runtime-sized; CUDA-graph metadata is capacity-sized,

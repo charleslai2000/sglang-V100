@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -418,11 +420,18 @@ class _GenerationStreamAccumulator:
 
             if req.return_logprob:
                 logprob_end = max(len(output_ids_), 1)
-                self.output_token_logprobs_val.append(
-                    req.logprob.output_token_logprobs_val[
-                        send_output_token_logprobs_offset:logprob_end
-                    ]
-                )
+                selected_logprobs = req.logprob.output_token_logprobs_val[
+                    send_output_token_logprobs_offset:logprob_end
+                ]
+                selected_token_ids = req.logprob.output_token_logprobs_idx[
+                    send_output_token_logprobs_offset:logprob_end
+                ]
+                if os.environ.get("G023_LOGPROB_TRACE_PATH") and req.rid.startswith("g023-"):
+                    with open(os.environ["G023_LOGPROB_TRACE_PATH"], "a") as f:
+                        for j, (token_id, logprob) in enumerate(zip(selected_token_ids, selected_logprobs)):
+                            f.write(json.dumps({"kind":"request_stream_logprob","request_id":req.rid,"generation_index":send_output_token_logprobs_offset+j,"token_id":int(token_id),"value":float(logprob)},sort_keys=True)+"\n")
+                        f.flush()
+                self.output_token_logprobs_val.append(selected_logprobs)
                 self.output_token_logprobs_idx.append(
                     req.logprob.output_token_logprobs_idx[
                         send_output_token_logprobs_offset:logprob_end
