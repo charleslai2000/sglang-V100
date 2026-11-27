@@ -107,11 +107,21 @@ i.e. 120 → 2435 tok/s, ~20× for 32× the batch — the step is weight-bandwid
 
 ## 4. GPU trace and bottlenecks
 
-Traces: `traces/decode-bs8-1024.txt`, `traces/decode-bs1-1024.txt`,
-`traces/prefill-bs1-64.txt` (`torch.profiler`, CUDA activities, `key_averages` table).
-Environment limits: `nsys` cannot import `qdstrm` (no `.nsys-rep`), `ncu --target-processes all`
-kills the scheduler at init, and `sgl.Engine` children are not visible to a parent-side profiler —
-so the in-process tables below are the trace of record.
+Traces: `traces/decode-bs8-1024.json.gz`, `traces/prefill-bs1-64.json.gz` (chrome traces,
+open in Perfetto / `chrome://tracing`), `traces/decode-bs8-1024.txt`,
+`traces/decode-bs1-1024.txt`, `traces/prefill-bs1-64.txt` (`torch.profiler` `key_averages`
+tables), see `traces/README.md`.
+
+GPU busy vs wall (merged kernel intervals from the chrome traces):
+
+| Workload | Kernels | Wall | GPU busy | GPU idle | Busy |
+|---|---|---|---|---|---|
+| prefill, 1 × 64 tokens × 3 calls | 2,322 | 195.7 ms | 56.3 ms | 139.4 ms | **28.8 %** |
+| decode, bs 8 @ 1024 ctx × 10 steps | 8,140 | 123.0 ms | 106.2 ms | 16.8 ms | **86.3 %** |
+
+Environment limits: `nsys` cannot import `qdstrm` (no `.nsys-rep`; `nsys import` fails the same
+way), `ncu --target-processes all` kills the scheduler at init, and `sgl.Engine` children are not
+visible to a parent-side profiler — so the in-process traces above are the trace of record.
 
 Decode, bs=8, ctx 1024 (GPU 10.7 ms of the 11.2 ms step):
 
@@ -150,10 +160,11 @@ Prefill, bs=1, 64 tokens (GPU 18.9 ms, wall 57 ms):
    throughput keeps rising to c32.
 2. **Attention is the second cost at bs≥8** (21%): the SM70 split-K decode kernel launches
    205 µs per layer for 8 requests × 1024 keys. SWA layers (5 of 11) only scan 256 keys.
-3. **Short-prompt prefill is CPU/launch bound**: 64 tokens take 57 ms wall but 18.9 ms GPU; the
-   gap is eager per-layer Python dispatch. The Triton extend kernel itself (615 µs/layer at
-   64 tokens) is the largest GPU item, and it grows quadratically, so 4096-token prefill is
-   attention dominated (0.55 ms/token vs 0.28 ms/token at 1024).
+3. **Short-prompt prefill is CPU/launch bound**: 64 tokens take 57 ms wall but 18.9 ms GPU
+   (28.8 % GPU busy in the trace); the gap is eager per-layer Python dispatch. The Triton extend
+   kernel itself (615 µs/layer at 64 tokens) is the largest GPU item, and it grows quadratically,
+   so 4096-token prefill is attention dominated (0.55 ms/token vs 0.28 ms/token at 1024).
+   Decode replay, by contrast, is 86.3 % GPU busy (~1.7 ms/step of launch gaps).
 4. Conv state bookkeeping (index ops, cats, gated elementwise) is ~22% of a bs=1 step; it is a
    handful of small kernels per conv layer, not a bandwidth problem.
 
