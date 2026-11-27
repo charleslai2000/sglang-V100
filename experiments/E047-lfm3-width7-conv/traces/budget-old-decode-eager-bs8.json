@@ -1,0 +1,473 @@
+{
+  "trace": "/var/tmp/e047_trace_old/trace-decode-eager-bs8.json.gz",
+  "envelope_us": 1070310.784,
+  "kernel_duration_sum_us": 98643.799,
+  "activity_union_us": 98643.812,
+  "gpu_busy_pct": 9.22,
+  "gpu_idle_us": 971666.972,
+  "idle_gap_count": 8419,
+  "largest_gaps_us": [
+    508.246,
+    501.941,
+    482.902,
+    464.502,
+    442.167
+  ],
+  "host_op_ms_total": 2193.849,
+  "unattributed_kernel_ms": 0.0,
+  "steps": [
+    {
+      "step": "step[DECODE bs=8 iter=None rids=trace-0,trace-1,trace-2,trace-3,trace-4,trace-5,trace-6,trace-7]",
+      "kernels": 8297,
+      "kernel_ms": 98.04,
+      "gpu_busy_pct_of_step": 90.88
+    }
+  ],
+  "owners": [
+    {
+      "owner": "attn.rope+store",
+      "kernels": 3494,
+      "kernel_ms": 32.501,
+      "kernel_share_pct": 32.95,
+      "envelope_share_pct": 3.04,
+      "host_ms": 387.928,
+      "top_ops": [
+        [
+          "model.layers.2.self_attn",
+          3.99
+        ],
+        [
+          "model.layers.14.self_attn",
+          3.969
+        ],
+        [
+          "model.layers.10.self_attn",
+          3.945
+        ]
+      ]
+    },
+    {
+      "owner": "mlp.gate_up",
+      "kernels": 244,
+      "kernel_ms": 22.673,
+      "kernel_share_pct": 22.98,
+      "envelope_share_pct": 2.12,
+      "host_ms": 50.282,
+      "top_ops": [
+        [
+          "model.layers.0.feed_forward.gate_up_proj",
+          1.034
+        ],
+        [
+          "model.layers.2.feed_forward.gate_up_proj",
+          0.992
+        ],
+        [
+          "model.layers.23.feed_forward.gate_up_proj",
+          0.99
+        ]
+      ]
+    },
+    {
+      "owner": "mlp.down",
+      "kernels": 486,
+      "kernel_ms": 13.934,
+      "kernel_share_pct": 14.13,
+      "envelope_share_pct": 1.3,
+      "host_ms": 55.06,
+      "top_ops": [
+        [
+          "model.layers.21.feed_forward.down_proj",
+          0.619
+        ],
+        [
+          "model.layers.8.feed_forward.down_proj",
+          0.618
+        ],
+        [
+          "model.layers.2.feed_forward.down_proj",
+          0.614
+        ]
+      ]
+    },
+    {
+      "owner": "lm_head",
+      "kernels": 20,
+      "kernel_ms": 6.318,
+      "kernel_share_pct": 6.41,
+      "envelope_share_pct": 0.59,
+      "host_ms": 4.281,
+      "top_ops": [
+        [
+          "logits_processor",
+          6.318
+        ]
+      ]
+    },
+    {
+      "owner": "conv.in_proj",
+      "kernels": 262,
+      "kernel_ms": 5.339,
+      "kernel_share_pct": 5.41,
+      "envelope_share_pct": 0.5,
+      "host_ms": 29.497,
+      "top_ops": [
+        [
+          "model.layers.0.conv.in_proj",
+          0.471
+        ],
+        [
+          "model.layers.21.conv.in_proj",
+          0.412
+        ],
+        [
+          "model.layers.13.conv.in_proj",
+          0.407
+        ]
+      ]
+    },
+    {
+      "owner": "conv.kernel+state",
+      "kernels": 1179,
+      "kernel_ms": 4.963,
+      "kernel_share_pct": 5.03,
+      "envelope_share_pct": 0.46,
+      "host_ms": 201.541,
+      "top_ops": [
+        [
+          "model.layers.19.conv",
+          0.451
+        ],
+        [
+          "model.layers.0.conv",
+          0.395
+        ],
+        [
+          "model.layers.23.conv",
+          0.388
+        ]
+      ]
+    },
+    {
+      "owner": "norm",
+      "kernels": 908,
+      "kernel_ms": 2.895,
+      "kernel_share_pct": 2.94,
+      "envelope_share_pct": 0.27,
+      "host_ms": 150.441,
+      "top_ops": [
+        [
+          "model.layers.0.post_operator_norm",
+          0.034
+        ],
+        [
+          "model.layers.13.post_ffn_norm",
+          0.034
+        ],
+        [
+          "model.layers.20.post_operator_norm",
+          0.034
+        ]
+      ]
+    },
+    {
+      "owner": "conv.out_proj",
+      "kernels": 262,
+      "kernel_ms": 2.547,
+      "kernel_share_pct": 2.58,
+      "envelope_share_pct": 0.24,
+      "host_ms": 32.05,
+      "top_ops": [
+        [
+          "model.layers.11.conv.out_proj",
+          0.221
+        ],
+        [
+          "model.layers.9.conv.out_proj",
+          0.2
+        ],
+        [
+          "model.layers.19.conv.out_proj",
+          0.197
+        ]
+      ]
+    },
+    {
+      "owner": "attn.qkv",
+      "kernels": 220,
+      "kernel_ms": 2.437,
+      "kernel_share_pct": 2.47,
+      "envelope_share_pct": 0.23,
+      "host_ms": 24.418,
+      "top_ops": [
+        [
+          "model.layers.4.self_attn.qkv_proj",
+          0.224
+        ],
+        [
+          "model.layers.12.self_attn.qkv_proj",
+          0.223
+        ],
+        [
+          "model.layers.10.self_attn.qkv_proj",
+          0.223
+        ]
+      ]
+    },
+    {
+      "owner": "attn.o_proj",
+      "kernels": 267,
+      "kernel_ms": 2.296,
+      "kernel_share_pct": 2.33,
+      "envelope_share_pct": 0.21,
+      "host_ms": 27.425,
+      "top_ops": [
+        [
+          "model.layers.6.self_attn.o_proj",
+          0.222
+        ],
+        [
+          "model.layers.10.self_attn.o_proj",
+          0.222
+        ],
+        [
+          "model.layers.22.self_attn.o_proj",
+          0.22
+        ]
+      ]
+    },
+    {
+      "owner": "name:elementwise",
+      "kernels": 630,
+      "kernel_ms": 1.361,
+      "kernel_share_pct": 1.38,
+      "envelope_share_pct": 0.13,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:elementwise",
+          1.361
+        ]
+      ]
+    },
+    {
+      "owner": "mlp.act",
+      "kernels": 241,
+      "kernel_ms": 0.548,
+      "kernel_share_pct": 0.56,
+      "envelope_share_pct": 0.05,
+      "host_ms": 176.399,
+      "top_ops": [
+        [
+          "model.layers.4.feed_forward",
+          0.035
+        ],
+        [
+          "model.layers.12.feed_forward",
+          0.027
+        ],
+        [
+          "model.layers.2.feed_forward",
+          0.024
+        ]
+      ]
+    },
+    {
+      "owner": "name:reduce",
+      "kernels": 20,
+      "kernel_ms": 0.409,
+      "kernel_share_pct": 0.41,
+      "envelope_share_pct": 0.04,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:reduce",
+          0.409
+        ]
+      ]
+    },
+    {
+      "owner": "name:other",
+      "kernels": 170,
+      "kernel_ms": 0.338,
+      "kernel_share_pct": 0.34,
+      "envelope_share_pct": 0.03,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:other",
+          0.338
+        ]
+      ]
+    },
+    {
+      "owner": "embedding",
+      "kernels": 10,
+      "kernel_ms": 0.061,
+      "kernel_share_pct": 0.06,
+      "envelope_share_pct": 0.01,
+      "host_ms": 2.052,
+      "top_ops": [
+        [
+          "model.embed_tokens",
+          0.061
+        ]
+      ]
+    },
+    {
+      "owner": "name:norm",
+      "kernels": 5,
+      "kernel_ms": 0.016,
+      "kernel_share_pct": 0.02,
+      "envelope_share_pct": 0.0,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:norm",
+          0.016
+        ]
+      ]
+    },
+    {
+      "owner": "name:attn.decode_reduce",
+      "kernels": 2,
+      "kernel_ms": 0.008,
+      "kernel_share_pct": 0.01,
+      "envelope_share_pct": 0.0,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:attn.decode_reduce",
+          0.008
+        ]
+      ]
+    }
+  ],
+  "top_ops": [
+    {
+      "op": "logits_processor",
+      "kernels": 20,
+      "kernel_ms": 6.318
+    },
+    {
+      "op": "model.layers.2.self_attn",
+      "kernels": 309,
+      "kernel_ms": 3.99
+    },
+    {
+      "op": "model.layers.14.self_attn",
+      "kernels": 305,
+      "kernel_ms": 3.969
+    },
+    {
+      "op": "model.layers.10.self_attn",
+      "kernels": 305,
+      "kernel_ms": 3.945
+    },
+    {
+      "op": "model.layers.6.self_attn",
+      "kernels": 305,
+      "kernel_ms": 3.943
+    },
+    {
+      "op": "model.layers.18.self_attn",
+      "kernels": 304,
+      "kernel_ms": 3.927
+    },
+    {
+      "op": "model.layers.22.self_attn",
+      "kernels": 303,
+      "kernel_ms": 3.638
+    },
+    {
+      "op": "model.layers.16.self_attn",
+      "kernels": 333,
+      "kernel_ms": 2.072
+    },
+    {
+      "op": "model.layers.12.self_attn",
+      "kernels": 334,
+      "kernel_ms": 1.79
+    },
+    {
+      "op": "model.layers.20.self_attn",
+      "kernels": 337,
+      "kernel_ms": 1.787
+    },
+    {
+      "op": "model.layers.8.self_attn",
+      "kernels": 330,
+      "kernel_ms": 1.771
+    },
+    {
+      "op": "model.layers.4.self_attn",
+      "kernels": 329,
+      "kernel_ms": 1.669
+    },
+    {
+      "op": "name:elementwise",
+      "kernels": 630,
+      "kernel_ms": 1.361
+    },
+    {
+      "op": "model.layers.0.feed_forward.gate_up_proj",
+      "kernels": 11,
+      "kernel_ms": 1.034
+    },
+    {
+      "op": "model.layers.2.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.992
+    },
+    {
+      "op": "model.layers.23.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.99
+    },
+    {
+      "op": "model.layers.9.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.97
+    },
+    {
+      "op": "model.layers.19.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.968
+    },
+    {
+      "op": "model.layers.17.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.958
+    },
+    {
+      "op": "model.layers.14.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.956
+    },
+    {
+      "op": "model.layers.5.feed_forward.gate_up_proj",
+      "kernels": 11,
+      "kernel_ms": 0.946
+    },
+    {
+      "op": "model.layers.21.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.946
+    },
+    {
+      "op": "model.layers.10.feed_forward.gate_up_proj",
+      "kernels": 11,
+      "kernel_ms": 0.943
+    },
+    {
+      "op": "model.layers.6.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.941
+    },
+    {
+      "op": "model.layers.16.feed_forward.gate_up_proj",
+      "kernels": 10,
+      "kernel_ms": 0.941
+    }
+  ]
+}

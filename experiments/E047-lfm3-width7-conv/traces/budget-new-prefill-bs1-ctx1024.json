@@ -1,0 +1,258 @@
+{
+  "trace": "/var/tmp/e047_trace_new/trace-prefill-bs1-ctx1024.json.gz",
+  "envelope_us": 535469.624,
+  "kernel_duration_sum_us": 503529.044,
+  "activity_union_us": 503529.019,
+  "gpu_busy_pct": 94.04,
+  "gpu_idle_us": 31940.605,
+  "idle_gap_count": 1623,
+  "largest_gaps_us": [
+    886.921,
+    754.668,
+    710.286,
+    518.354,
+    497.33
+  ],
+  "host_op_ms_total": 211.932,
+  "unattributed_kernel_ms": 0.0,
+  "steps": [
+    {
+      "step": "step[EXTEND bs=1 toks=1024 iter=None rids=trace-p0]",
+      "kernels": 1389,
+      "kernel_ms": 235.808,
+      "gpu_busy_pct_of_step": 229.8
+    }
+  ],
+  "owners": [
+    {
+      "owner": "attn.prefill_kernel",
+      "kernels": 22,
+      "kernel_ms": 416.429,
+      "kernel_share_pct": 82.7,
+      "envelope_share_pct": 77.77,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "attn.prefill_kernel",
+          416.429
+        ]
+      ]
+    },
+    {
+      "owner": "gemm.cutlass",
+      "kernels": 146,
+      "kernel_ms": 62.002,
+      "kernel_share_pct": 12.31,
+      "envelope_share_pct": 11.58,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "gemm.cutlass",
+          62.002
+        ]
+      ]
+    },
+    {
+      "owner": "gemm.volta",
+      "kernels": 70,
+      "kernel_ms": 9.405,
+      "kernel_share_pct": 1.87,
+      "envelope_share_pct": 1.76,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "gemm.volta",
+          9.405
+        ]
+      ]
+    },
+    {
+      "owner": "elementwise",
+      "kernels": 776,
+      "kernel_ms": 8.284,
+      "kernel_share_pct": 1.65,
+      "envelope_share_pct": 1.55,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "elementwise",
+          8.284
+        ]
+      ]
+    },
+    {
+      "owner": "mlp.act",
+      "kernels": 48,
+      "kernel_ms": 2.825,
+      "kernel_share_pct": 0.56,
+      "envelope_share_pct": 0.53,
+      "host_ms": 33.611,
+      "top_ops": [
+        [
+          "mlp.act",
+          2.825
+        ]
+      ]
+    },
+    {
+      "owner": "norm",
+      "kernels": 238,
+      "kernel_ms": 2.758,
+      "kernel_share_pct": 0.55,
+      "envelope_share_pct": 0.51,
+      "host_ms": 27.668,
+      "top_ops": [
+        [
+          "norm",
+          2.758
+        ]
+      ]
+    },
+    {
+      "owner": "conv.cat",
+      "kernels": 44,
+      "kernel_ms": 0.877,
+      "kernel_share_pct": 0.17,
+      "envelope_share_pct": 0.16,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "conv.cat",
+          0.877
+        ]
+      ]
+    },
+    {
+      "owner": "conv.kernel",
+      "kernels": 26,
+      "kernel_ms": 0.377,
+      "kernel_share_pct": 0.07,
+      "envelope_share_pct": 0.07,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "conv.kernel",
+          0.377
+        ]
+      ]
+    },
+    {
+      "owner": "other",
+      "kernels": 208,
+      "kernel_ms": 0.323,
+      "kernel_share_pct": 0.06,
+      "envelope_share_pct": 0.06,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "other",
+          0.323
+        ]
+      ]
+    },
+    {
+      "owner": "attn.kv_store",
+      "kernels": 22,
+      "kernel_ms": 0.095,
+      "kernel_share_pct": 0.02,
+      "envelope_share_pct": 0.02,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "attn.kv_store",
+          0.095
+        ]
+      ]
+    },
+    {
+      "owner": "gemm.splitk_reduce",
+      "kernels": 22,
+      "kernel_ms": 0.085,
+      "kernel_share_pct": 0.02,
+      "envelope_share_pct": 0.02,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "gemm.splitk_reduce",
+          0.085
+        ]
+      ]
+    },
+    {
+      "owner": "reduce",
+      "kernels": 2,
+      "kernel_ms": 0.07,
+      "kernel_share_pct": 0.01,
+      "envelope_share_pct": 0.01,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "reduce",
+          0.07
+        ]
+      ]
+    }
+  ],
+  "top_ops": [
+    {
+      "op": "attn.prefill_kernel",
+      "kernels": 22,
+      "kernel_ms": 416.429
+    },
+    {
+      "op": "gemm.cutlass",
+      "kernels": 146,
+      "kernel_ms": 62.002
+    },
+    {
+      "op": "gemm.volta",
+      "kernels": 70,
+      "kernel_ms": 9.405
+    },
+    {
+      "op": "elementwise",
+      "kernels": 776,
+      "kernel_ms": 8.284
+    },
+    {
+      "op": "mlp.act",
+      "kernels": 48,
+      "kernel_ms": 2.825
+    },
+    {
+      "op": "norm",
+      "kernels": 238,
+      "kernel_ms": 2.758
+    },
+    {
+      "op": "conv.cat",
+      "kernels": 44,
+      "kernel_ms": 0.877
+    },
+    {
+      "op": "conv.kernel",
+      "kernels": 26,
+      "kernel_ms": 0.377
+    },
+    {
+      "op": "other",
+      "kernels": 208,
+      "kernel_ms": 0.323
+    },
+    {
+      "op": "attn.kv_store",
+      "kernels": 22,
+      "kernel_ms": 0.095
+    },
+    {
+      "op": "gemm.splitk_reduce",
+      "kernels": 22,
+      "kernel_ms": 0.085
+    },
+    {
+      "op": "reduce",
+      "kernels": 2,
+      "kernel_ms": 0.07
+    }
+  ]
+}

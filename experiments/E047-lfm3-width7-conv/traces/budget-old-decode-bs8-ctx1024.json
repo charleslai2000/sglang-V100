@@ -1,0 +1,258 @@
+{
+  "trace": "/var/tmp/e047_trace_old/trace-decode-bs8-ctx1024.json.gz",
+  "envelope_us": 125435.729,
+  "kernel_duration_sum_us": 107171.363,
+  "activity_union_us": 107078.105,
+  "gpu_busy_pct": 85.36,
+  "gpu_idle_us": 18357.623,
+  "idle_gap_count": 8425,
+  "largest_gaps_us": [
+    365.369,
+    331.577,
+    274.938,
+    270.074,
+    265.657
+  ],
+  "host_op_ms_total": 102.445,
+  "unattributed_kernel_ms": 0.0,
+  "steps": [
+    {
+      "step": "step[DECODE bs=8 iter=None rids=trace-0,trace-1,trace-2,trace-3,trace-4,trace-5,trace-6,trace-7]",
+      "kernels": 6748,
+      "kernel_ms": 86.099,
+      "gpu_busy_pct_of_step": 1613.53
+    }
+  ],
+  "owners": [
+    {
+      "owner": "name:gemm.cutlass",
+      "kernels": 1080,
+      "kernel_ms": 56.544,
+      "kernel_share_pct": 52.76,
+      "envelope_share_pct": 45.08,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:gemm.cutlass",
+          56.544
+        ]
+      ]
+    },
+    {
+      "owner": "name:attn.decode_kernel",
+      "kernels": 110,
+      "kernel_ms": 22.709,
+      "kernel_share_pct": 21.19,
+      "envelope_share_pct": 18.1,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:attn.decode_kernel",
+          22.709
+        ]
+      ]
+    },
+    {
+      "owner": "name:elementwise",
+      "kernels": 3820,
+      "kernel_ms": 14.892,
+      "kernel_share_pct": 13.9,
+      "envelope_share_pct": 11.87,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:elementwise",
+          14.892
+        ]
+      ]
+    },
+    {
+      "owner": "name:norm",
+      "kernels": 1190,
+      "kernel_ms": 4.297,
+      "kernel_share_pct": 4.01,
+      "envelope_share_pct": 3.43,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:norm",
+          4.297
+        ]
+      ]
+    },
+    {
+      "owner": "name:gemm.splitk_reduce",
+      "kernels": 590,
+      "kernel_ms": 2.161,
+      "kernel_share_pct": 2.02,
+      "envelope_share_pct": 1.72,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:gemm.splitk_reduce",
+          2.161
+        ]
+      ]
+    },
+    {
+      "owner": "name:conv.cat",
+      "kernels": 350,
+      "kernel_ms": 1.794,
+      "kernel_share_pct": 1.67,
+      "envelope_share_pct": 1.43,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:conv.cat",
+          1.794
+        ]
+      ]
+    },
+    {
+      "owner": "name:reduce",
+      "kernels": 140,
+      "kernel_ms": 1.297,
+      "kernel_share_pct": 1.21,
+      "envelope_share_pct": 1.03,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:reduce",
+          1.297
+        ]
+      ]
+    },
+    {
+      "owner": "name:conv.index",
+      "kernels": 140,
+      "kernel_ms": 1.122,
+      "kernel_share_pct": 1.05,
+      "envelope_share_pct": 0.89,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:conv.index",
+          1.122
+        ]
+      ]
+    },
+    {
+      "owner": "name:other",
+      "kernels": 570,
+      "kernel_ms": 0.991,
+      "kernel_share_pct": 0.92,
+      "envelope_share_pct": 0.79,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:other",
+          0.991
+        ]
+      ]
+    },
+    {
+      "owner": "name:mlp.act",
+      "kernels": 240,
+      "kernel_ms": 0.676,
+      "kernel_share_pct": 0.63,
+      "envelope_share_pct": 0.54,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:mlp.act",
+          0.676
+        ]
+      ]
+    },
+    {
+      "owner": "name:attn.decode_reduce",
+      "kernels": 110,
+      "kernel_ms": 0.45,
+      "kernel_share_pct": 0.42,
+      "envelope_share_pct": 0.36,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:attn.decode_reduce",
+          0.45
+        ]
+      ]
+    },
+    {
+      "owner": "name:attn.kv_store",
+      "kernels": 110,
+      "kernel_ms": 0.237,
+      "kernel_share_pct": 0.22,
+      "envelope_share_pct": 0.19,
+      "host_ms": 0.0,
+      "top_ops": [
+        [
+          "name:attn.kv_store",
+          0.237
+        ]
+      ]
+    }
+  ],
+  "top_ops": [
+    {
+      "op": "name:gemm.cutlass",
+      "kernels": 1080,
+      "kernel_ms": 56.544
+    },
+    {
+      "op": "name:attn.decode_kernel",
+      "kernels": 110,
+      "kernel_ms": 22.709
+    },
+    {
+      "op": "name:elementwise",
+      "kernels": 3820,
+      "kernel_ms": 14.892
+    },
+    {
+      "op": "name:norm",
+      "kernels": 1190,
+      "kernel_ms": 4.297
+    },
+    {
+      "op": "name:gemm.splitk_reduce",
+      "kernels": 590,
+      "kernel_ms": 2.161
+    },
+    {
+      "op": "name:conv.cat",
+      "kernels": 350,
+      "kernel_ms": 1.794
+    },
+    {
+      "op": "name:reduce",
+      "kernels": 140,
+      "kernel_ms": 1.297
+    },
+    {
+      "op": "name:conv.index",
+      "kernels": 140,
+      "kernel_ms": 1.122
+    },
+    {
+      "op": "name:other",
+      "kernels": 570,
+      "kernel_ms": 0.991
+    },
+    {
+      "op": "name:mlp.act",
+      "kernels": 240,
+      "kernel_ms": 0.676
+    },
+    {
+      "op": "name:attn.decode_reduce",
+      "kernels": 110,
+      "kernel_ms": 0.45
+    },
+    {
+      "op": "name:attn.kv_store",
+      "kernels": 110,
+      "kernel_ms": 0.237
+    }
+  ]
+}
