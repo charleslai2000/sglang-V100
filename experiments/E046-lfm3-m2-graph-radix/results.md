@@ -165,6 +165,12 @@ Prefill, bs=1, 64 tokens (GPU 18.9 ms, wall 57 ms):
    kernel itself (615 µs/layer at 64 tokens) is the largest GPU item, and it grows quadratically,
    so 4096-token prefill is attention dominated (0.55 ms/token vs 0.28 ms/token at 1024).
    Decode replay, by contrast, is 86.3 % GPU busy (~1.7 ms/step of launch gaps).
+   Piecewise CUDA graph (the existing remedy) auto-disables for LFM3 —
+   `Disable piecewise CUDA graph because some layers do not apply Standard GQA` — and the current
+   Short Conv prefill cannot be captured anyway: it loops per request over `.tolist()` sequence
+   offsets. Making prefill graph-capturable needs a fully tensorised conv prefill (e.g. a
+   cu_seqlens-based `causal_conv1d_fn` with width 7), which is kernel work, so it is left as the
+   single highest-value follow-up rather than attempted here.
 4. Conv state bookkeeping (index ops, cats, gated elementwise) is ~22% of a bs=1 step; it is a
    handful of small kernels per conv layer, not a bandwidth problem.
 
