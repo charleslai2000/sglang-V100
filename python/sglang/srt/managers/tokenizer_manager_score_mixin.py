@@ -51,6 +51,38 @@ class TokenizerManagerScoreMixin:
                 scores: List of score lists, one for each prompt, each in the order of label_token_ids.
                 prompt_tokens: The number of prompt tokens processed.
         """
+        # Per-prompt label sets (newer official score_prompts contract, used by
+        # /v1/decisions): group prompts that share a label set into one batched
+        # request and score the remaining groups separately.
+        if (
+            isinstance(label_token_ids, list)
+            and label_token_ids
+            and isinstance(label_token_ids[0], list)
+        ):
+            prompt_list = [prompts] if isinstance(prompts, str) else list(prompts)
+            if len(prompt_list) != len(label_token_ids):
+                raise ValueError(
+                    "label_token_ids must provide one list per prompt "
+                    f"({len(label_token_ids)} label sets for {len(prompt_list)} prompts)"
+                )
+            groups: Dict[Tuple[int, ...], List[int]] = {}
+            for idx, labels in enumerate(label_token_ids):
+                groups.setdefault(tuple(labels), []).append(idx)
+            scores: List[List[float]] = [[] for _ in prompt_list]
+            prompt_tokens = 0
+            for label_key, indices in groups.items():
+                sub_prompts = [prompt_list[i] for i in indices]
+                sub = await self.score_prompts(
+                    prompts=sub_prompts,
+                    label_token_ids=list(label_key),
+                    apply_softmax=apply_softmax,
+                    request=request,
+                )
+                prompt_tokens = max(prompt_tokens, sub.prompt_tokens)
+                for offset, idx in enumerate(indices):
+                    scores[idx] = sub.scores[offset]
+            return ScoreResult(scores=scores, prompt_tokens=prompt_tokens)
+
         # Text prompts
         if isinstance(prompts, str) or (
             isinstance(prompts, list) and (not prompts or isinstance(prompts[0], str))
