@@ -14,16 +14,15 @@ second projection gate (conv), and optionally a sandwich RMSNorm before joining
 the residual stream.
 
 Attention layers use ``RadixAttention`` (KV cache); conv layers use the
-``HybridReqToTokenPool`` mamba conv-state cache exactly like LFM2.  LFM3 width 7
-exceeds the width-4 in-tree fused kernels, so the conv uses the reference
-``F.conv1d`` formulation (the same fallback upstream SGLang uses off Hopper).
+``HybridReqToTokenPool`` mamba conv-state cache exactly like LFM2.  The width-7
+short conv runs on the Triton varlen prefill kernel (batch metadata resolved once
+per forward) and a fused decode kernel; see ``lfm3_conv``.
 """
 
 import logging
 from typing import Iterable, Optional, Tuple
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from sglang.srt.configs.lfm3 import Lfm3Config
@@ -50,6 +49,7 @@ from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
     track_mamba_states_if_needed,
 )
+from sglang.srt.layers.attention.mamba.causal_conv1d import causal_conv1d_fn
 from sglang.srt.model_executor.forward_context import (
     get_attn_backend,
     get_req_to_token_pool,
@@ -58,6 +58,7 @@ from sglang.srt.model_loader.weight_utils import (
     default_weight_loader,
     sharded_weight_loader,
 )
+from sglang.srt.models.lfm3_conv import lfm3_short_conv_decode
 from sglang.srt.utils.common import add_prefix, make_layers, set_weight_attrs
 
 logger = logging.getLogger(__name__)
@@ -287,23 +288,11 @@ class Lfm3ShortConv(nn.Module):
         else:
             self.register_parameter("conv_bias", None)
 
-    def _depthwise_conv(self, window: torch.Tensor) -> torch.Tensor:
-        """Causal depthwise conv over (D, K-1+T); returns the T new positions."""
-        weight = self.conv_weight.to(window.dtype).unsqueeze(1)
-        bias = self.conv_bias.to(window.dtype) if self.conv_bias is not None else None
-        out = F.conv1d(
-            window.unsqueeze(0),
-            weight,
-            bias,
-            padding=0,
-            groups=self.hidden_size_per_partition,
-        )
-        return out[0]
-
     def forward(
         self,
         hidden_states: torch.Tensor,
         forward_batch: ForwardBatch,
+        conv_ctx: "_Lfm3ConvBatchContext",
     ) -> torch.Tensor:
         if forward_batch.forward_mode.is_idle():
             return hidden_states
@@ -311,62 +300,81 @@ class Lfm3ShortConv(nn.Module):
         req_to_token_pool = get_req_to_token_pool()
         layer_cache = req_to_token_pool.mamba2_layer_cache(self.layer_id)
         conv_state = layer_cache.conv[0]
-        # Metadata-owned state slots: identical to a per-batch req_pool_indices
-        # lookup, but precomputed by the linear-attention backend so CUDA graph
-        # replay sees the captured state-index buffer.
-        metadata = get_attn_backend().linear_attn_backend.forward_metadata
-        mamba_indices = metadata.mamba_cache_indices
 
         proj, _ = self.in_proj(hidden_states)
-        b_gate, c_gate, x = proj.chunk(3, dim=-1)
-        bx = b_gate * x
-
-        num_prefills = metadata.num_prefills
-        if num_prefills == 0:
-            conv_out = self._decode_step(bx, conv_state, mamba_indices)
+        dim = self.hidden_size_per_partition
+        if conv_ctx.num_prefills == 0:
+            # decode: one fused kernel does B*x, the width-7 conv over the six
+            # carried values, the in-place window shift and the C gate.
+            conv_out = lfm3_short_conv_decode(
+                proj,
+                self.conv_weight,
+                self.conv_bias,
+                conv_state,
+                conv_ctx.mamba_indices,
+            )
             self._track_decode_state(
-                conv_state, layer_cache, forward_batch, mamba_indices, 0
+                conv_state, layer_cache, forward_batch, conv_ctx, 0
             )
-        else:
-            # extra_buffer prefix caching: snapshot B*x at the boundaries the
-            # backend planned, so a later prefix hit can restore this state.
-            self._store_tracked_prefill_state(
-                bx, conv_state, forward_batch, metadata
+            output, _ = self.out_proj(conv_out)
+            return output
+
+        bx = proj[:, :dim] * proj[:, 2 * dim :]
+        self._store_tracked_prefill_state(bx, conv_state, conv_ctx)
+
+        pieces = []
+        if conv_ctx.num_prefill_tokens > 0:
+            conv_out = causal_conv1d_fn(
+                bx[: conv_ctx.num_prefill_tokens].t(),
+                self.conv_weight,
+                self.conv_bias,
+                query_start_loc=conv_ctx.query_start_loc,
+                seq_lens_cpu=conv_ctx.seq_lens_cpu,
+                cache_indices=conv_ctx.mamba_indices[: conv_ctx.num_prefills],
+                has_initial_state=conv_ctx.has_initial_state,
+                conv_states=conv_state,
+                activation=None,
             )
-            conv_out = self._prefill(
-                bx, conv_state, mamba_indices, metadata, forward_batch
+            pieces.append(proj[: conv_ctx.num_prefill_tokens, dim : 2 * dim] * conv_out.t())
+
+        num_decodes = conv_ctx.mamba_indices.shape[0] - conv_ctx.num_prefills
+        if num_decodes > 0:
+            # mixed batch: decode rows follow the prefill tokens
+            pieces.append(
+                lfm3_short_conv_decode(
+                    proj[conv_ctx.num_prefill_tokens :],
+                    self.conv_weight,
+                    self.conv_bias,
+                    conv_state,
+                    conv_ctx.mamba_indices[conv_ctx.num_prefills :],
+                )
+            )
+            self._track_decode_state(
+                conv_state, layer_cache, forward_batch, conv_ctx, conv_ctx.num_prefills
             )
 
-        output, _ = self.out_proj(c_gate * conv_out)
+        gated = pieces[0] if len(pieces) == 1 else torch.cat(pieces, dim=0)
+        output, _ = self.out_proj(gated)
         return output
 
     def _store_tracked_prefill_state(
         self,
         bx: torch.Tensor,
         conv_state: torch.Tensor,
-        forward_batch: ForwardBatch,
-        metadata,
+        conv_ctx: "_Lfm3ConvBatchContext",
     ) -> None:
         """Write the conv window ending at each planned cache boundary."""
-        if metadata.track_conv_indices is None:
+        dst = conv_ctx.track_dst
+        if dst is None:
             return
-        mask = forward_batch.mamba_track_mask
-        if mask is None:
-            return
-        dst = forward_batch.mamba_track_indices[mask]
-        if dst.numel() == 0:
-            return
-        # bx[indices]: [n_track, K-1, D] -> [n_track, D, K-1]
-        conv_state[dst] = bx[metadata.track_conv_indices].transpose(1, 2).to(
-            conv_state.dtype
-        )
+        conv_state[dst] = bx[conv_ctx.track_src].transpose(1, 2).to(conv_state.dtype)
 
     def _track_decode_state(
         self,
         conv_state: torch.Tensor,
         layer_cache,
         forward_batch: ForwardBatch,
-        mamba_indices: torch.Tensor,
+        conv_ctx: "_Lfm3ConvBatchContext",
         prefill_count: int,
     ) -> None:
         """Copy just-advanced decode states to their checkpoint slots.
@@ -377,78 +385,78 @@ class Lfm3ShortConv(nn.Module):
         mask = forward_batch.mamba_track_mask
         if mask is None:
             return
-        num_decodes = mamba_indices.shape[0] - prefill_count
+        num_decodes = conv_ctx.mamba_indices.shape[0] - prefill_count
         if num_decodes <= 0:
             return
         track_mamba_states_if_needed(
             conv_state,
             layer_cache.temporal,
-            mamba_indices[prefill_count:],
+            conv_ctx.mamba_indices[prefill_count:],
             mask[-num_decodes:],
             forward_batch.mamba_track_indices[-num_decodes:],
             num_decodes,
         )
 
-    def _decode_step(
-        self,
-        bx: torch.Tensor,
-        conv_state: torch.Tensor,
-        mamba_indices: torch.Tensor,
-    ) -> torch.Tensor:
-        """Single-token rolling update for every request in the batch."""
-        state_len = conv_state.shape[-1]
-        state = conv_state.index_select(0, mamba_indices).to(bx.dtype)
-        window = torch.cat((state, bx.unsqueeze(-1)), dim=-1)
-        out = (window * self.conv_weight.to(bx.dtype).unsqueeze(0)).sum(-1)
-        if self.conv_bias is not None:
-            out = out + self.conv_bias.to(bx.dtype)
-        conv_state[mamba_indices] = window[:, :, -state_len:].to(conv_state.dtype)
-        return out
 
-    def _prefill(
-        self,
-        bx: torch.Tensor,
-        conv_state: torch.Tensor,
-        mamba_indices: torch.Tensor,
-        metadata,
-        forward_batch: ForwardBatch,
-    ) -> torch.Tensor:
-        """Varlen causal conv per request, seeded with the cached conv window.
+class _Lfm3ConvBatchContext:
+    """Batch-level Short Conv metadata, computed once per forward pass.
 
-        The backend clears freshly allocated state slots and copies cache-hit
-        slots before the forward, so every request can read its stored window:
-        an empty prefix reads zeros, a continued chunk or a prefix hit reads the
-        carried (or restored) window.
-        """
-        num_prefills = metadata.num_prefills
-        starts = metadata.query_start_loc[: num_prefills + 1].tolist()
-        slots = mamba_indices[:num_prefills].tolist()
-        layer_cache = get_req_to_token_pool().mamba2_layer_cache(self.layer_id)
+    Everything here is derived from the linear-attention metadata that the
+    backend already prepared, so the 13 conv layers share one set of indices
+    instead of re-deriving (and re-syncing) them per layer.
+    """
 
-        state_len = conv_state.shape[-1]
-        chunks = []
-        for i, slot in enumerate(slots):
-            begin, end = starts[i], starts[i + 1]
-            if begin == end:
-                continue
-            prefix = conv_state[slot].to(bx.dtype)
-            window = torch.cat((prefix, bx[begin:end].transpose(0, 1)), dim=-1)
-            chunks.append(self._depthwise_conv(window).transpose(0, 1))
-            conv_state[slot] = window[:, -state_len:].to(conv_state.dtype)
+    __slots__ = (
+        "num_prefills",
+        "num_prefill_tokens",
+        "query_start_loc",
+        "seq_lens_cpu",
+        "has_initial_state",
+        "mamba_indices",
+        "track_dst",
+        "track_src",
+    )
 
-        if num_prefills < len(mamba_indices):
-            # Mixed batch: the decode rows follow the prefill tokens.
-            decode_out = self._decode_step(
-                bx[starts[-1] :], conv_state, mamba_indices[num_prefills:]
-            )
-            chunks.append(decode_out)
-            self._track_decode_state(
-                conv_state, layer_cache, forward_batch, mamba_indices, num_prefills
-            )
+    @classmethod
+    def build(
+        cls, forward_batch: ForwardBatch
+    ) -> Optional["_Lfm3ConvBatchContext"]:
+        if forward_batch.forward_mode.is_idle():
+            return None
+        metadata = get_attn_backend().linear_attn_backend.forward_metadata
+        if metadata is None:
+            return None
 
-        if not chunks:
-            return bx.new_empty((0, bx.shape[-1]))
-        return torch.cat(chunks, dim=0)
+        ctx = cls()
+        ctx.num_prefills = metadata.num_prefills
+        ctx.num_prefill_tokens = metadata.num_prefill_tokens
+        ctx.mamba_indices = metadata.mamba_cache_indices
+        ctx.query_start_loc = None
+        ctx.seq_lens_cpu = None
+        ctx.has_initial_state = None
+
+        if ctx.num_prefills > 0:
+            mixed = metadata.mixed_metadata
+            ctx.query_start_loc = metadata.query_start_loc[: ctx.num_prefills + 1]
+            ctx.seq_lens_cpu = mixed.extend_seq_lens_cpu
+            ctx.has_initial_state = mixed.has_initial_states[: ctx.num_prefills]
+
+        # checkpoint targets: one mask-select per batch instead of per layer
+        dst = src = None
+        mask = forward_batch.mamba_track_mask
+        if (
+            ctx.num_prefills > 0
+            and mask is not None
+            and metadata.track_conv_indices is not None
+        ):
+            dst = forward_batch.mamba_track_indices[mask]
+            if dst.numel() > 0:
+                src = metadata.track_conv_indices
+            else:
+                dst = None
+        ctx.track_dst = dst
+        ctx.track_src = src
+        return ctx
 
 
 class Lfm3DecoderLayer(nn.Module):
@@ -501,6 +509,7 @@ class Lfm3DecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         forward_batch: ForwardBatch,
+        conv_ctx: Optional["_Lfm3ConvBatchContext"] = None,
     ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.operator_norm(hidden_states)
@@ -510,7 +519,7 @@ class Lfm3DecoderLayer(nn.Module):
                     positions, hidden_states, forward_batch
                 )
             else:
-                hidden_states = self.conv(hidden_states, forward_batch)
+                hidden_states = self.conv(hidden_states, forward_batch, conv_ctx)
         if self.use_sandwich_norm:
             hidden_states = self.post_operator_norm(hidden_states)
         hidden_states = residual + hidden_states
@@ -553,6 +562,7 @@ class Lfm3Model(nn.Module):
         self.num_attention_layers = sum(
             1 for lt in config.layer_types if lt in _ATTENTION_TYPES
         )
+        self.num_conv_layers = sum(1 for lt in config.layer_types if lt == "conv")
 
     def forward(
         self,
@@ -564,8 +574,15 @@ class Lfm3Model(nn.Module):
         hidden_states = (
             input_embeds if input_embeds is not None else self.embed_tokens(input_ids)
         )
+        # Short Conv batch metadata (state slots, sequence offsets, checkpoint
+        # targets) is identical for every conv layer: resolve it once here.
+        conv_ctx = (
+            _Lfm3ConvBatchContext.build(forward_batch)
+            if self.num_conv_layers > 0
+            else None
+        )
         for layer in self.layers:
-            hidden_states = layer(positions, hidden_states, forward_batch)
+            hidden_states = layer(positions, hidden_states, forward_batch, conv_ctx)
         return self.embedding_norm(hidden_states)
 
 

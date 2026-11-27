@@ -71,10 +71,14 @@ def causal_conv1d_fn(
     out: (batch, dim, seqlen)
     """
     # Use Triton when: (1) sgl_kernel not available, or (2) input is
-    # non-contiguous and seq_lens_cpu is already pre-computed by caller.
-    # The Triton kernel accepts arbitrary strides, avoiding a .contiguous()
-    # copy that can cost >0.6 ms/layer on large prefill batches.
-    use_triton = not _HAS_SGL_KERNEL or (x.stride(-1) != 1 and "seq_lens_cpu" in kwargs)
+    # non-contiguous and seq_lens_cpu is already pre-computed by caller, or
+    # (3) the kernel width is beyond what sgl_kernel supports (width > 4, e.g.
+    # LFM3 short conv width 7) - sgl_kernel silently produces wrong values there.
+    use_triton = (
+        not _HAS_SGL_KERNEL
+        or weight.shape[1] > 4
+        or (x.stride(-1) != 1 and "seq_lens_cpu" in kwargs)
+    )
     if use_triton:
         if "seq_lens_cpu" not in kwargs:
             kwargs["seq_lens_cpu"] = _get_seq_lens_cpu(query_start_loc, x)
