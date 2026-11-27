@@ -136,6 +136,21 @@ def default_radix_cache_factory(ctx: TreeCacheBuildContext) -> BasePrefixCache:
         return cache
 
     if ctx.is_hybrid_swa:
+        if ctx.is_hybrid_ssm:
+            # Hybrids that mix sliding-window KV with recurrent state (e.g. LFM3
+            # short-conv layers) need every component in one tree: SWARadixCache
+            # alone cannot store the mamba/conv state, so a prefix hit would keep
+            # the stale working state instead of restoring the cached one.
+            from sglang.srt.mem_cache.unified_cache_components import ComponentType
+            from sglang.srt.mem_cache.unified_radix_cache import UnifiedRadixCache
+
+            params.tree_components = (
+                ComponentType.FULL,
+                ComponentType.SWA,
+                ComponentType.MAMBA,
+            )
+            return UnifiedRadixCache(params)
+
         from sglang.srt.mem_cache.swa_radix_cache import SWARadixCache
 
         return SWARadixCache(params=params)

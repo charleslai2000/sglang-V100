@@ -47,7 +47,13 @@ from sglang.srt.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
-from sglang.srt.model_executor.forward_context import get_req_to_token_pool
+from sglang.srt.layers.attention.hybrid_linear_attn_backend import (
+    track_mamba_states_if_needed,
+)
+from sglang.srt.model_executor.forward_context import (
+    get_attn_backend,
+    get_req_to_token_pool,
+)
 from sglang.srt.model_loader.weight_utils import (
     default_weight_loader,
     sharded_weight_loader,
@@ -305,28 +311,83 @@ class Lfm3ShortConv(nn.Module):
         req_to_token_pool = get_req_to_token_pool()
         layer_cache = req_to_token_pool.mamba2_layer_cache(self.layer_id)
         conv_state = layer_cache.conv[0]
-        mamba_indices = req_to_token_pool.get_mamba_indices(
-            forward_batch.req_pool_indices
-        )
+        # Metadata-owned state slots: identical to a per-batch req_pool_indices
+        # lookup, but precomputed by the linear-attention backend so CUDA graph
+        # replay sees the captured state-index buffer.
+        metadata = get_attn_backend().linear_attn_backend.forward_metadata
+        mamba_indices = metadata.mamba_cache_indices
 
         proj, _ = self.in_proj(hidden_states)
         b_gate, c_gate, x = proj.chunk(3, dim=-1)
         bx = b_gate * x
 
-        num_prefills = (
-            len(forward_batch.extend_seq_lens)
-            if forward_batch.extend_seq_lens is not None
-            else 0
-        )
+        num_prefills = metadata.num_prefills
         if num_prefills == 0:
             conv_out = self._decode_step(bx, conv_state, mamba_indices)
+            self._track_decode_state(
+                conv_state, layer_cache, forward_batch, mamba_indices, 0
+            )
         else:
+            # extra_buffer prefix caching: snapshot B*x at the boundaries the
+            # backend planned, so a later prefix hit can restore this state.
+            self._store_tracked_prefill_state(
+                bx, conv_state, forward_batch, metadata
+            )
             conv_out = self._prefill(
-                bx, conv_state, mamba_indices, forward_batch, num_prefills
+                bx, conv_state, mamba_indices, metadata, forward_batch
             )
 
         output, _ = self.out_proj(c_gate * conv_out)
         return output
+
+    def _store_tracked_prefill_state(
+        self,
+        bx: torch.Tensor,
+        conv_state: torch.Tensor,
+        forward_batch: ForwardBatch,
+        metadata,
+    ) -> None:
+        """Write the conv window ending at each planned cache boundary."""
+        if metadata.track_conv_indices is None:
+            return
+        mask = forward_batch.mamba_track_mask
+        if mask is None:
+            return
+        dst = forward_batch.mamba_track_indices[mask]
+        if dst.numel() == 0:
+            return
+        # bx[indices]: [n_track, K-1, D] -> [n_track, D, K-1]
+        conv_state[dst] = bx[metadata.track_conv_indices].transpose(1, 2).to(
+            conv_state.dtype
+        )
+
+    def _track_decode_state(
+        self,
+        conv_state: torch.Tensor,
+        layer_cache,
+        forward_batch: ForwardBatch,
+        mamba_indices: torch.Tensor,
+        prefill_count: int,
+    ) -> None:
+        """Copy just-advanced decode states to their checkpoint slots.
+
+        Runs inside the captured decode graph: the Triton helper is a pure
+        indexed copy with a data-dependent mask, so it needs no host sync.
+        """
+        mask = forward_batch.mamba_track_mask
+        if mask is None:
+            return
+        num_decodes = mamba_indices.shape[0] - prefill_count
+        if num_decodes <= 0:
+            return
+        track_mamba_states_if_needed(
+            conv_state,
+            layer_cache.temporal,
+            mamba_indices[prefill_count:],
+            mask[-num_decodes:],
+            forward_batch.mamba_track_indices[-num_decodes:],
+            num_decodes,
+        )
 
     def _decode_step(
         self,
@@ -349,20 +410,18 @@ class Lfm3ShortConv(nn.Module):
         bx: torch.Tensor,
         conv_state: torch.Tensor,
         mamba_indices: torch.Tensor,
+        metadata,
         forward_batch: ForwardBatch,
-        num_prefills: int,
     ) -> torch.Tensor:
         """Varlen causal conv per request, seeded with the cached conv window.
 
-        A request whose prefix is empty starts from a zero window; requests
-        continuing an earlier chunk (or a reused prefix) continue from the
-        state stored in their mamba slot.
+        The backend clears freshly allocated state slots and copies cache-hit
+        slots before the forward, so every request can read its stored window:
+        an empty prefix reads zeros, a continued chunk or a prefix hit reads the
+        carried (or restored) window.
         """
-        seq_lens = forward_batch.extend_seq_lens.tolist()
-        has_state = forward_batch.extend_prefix_lens.tolist()
-        starts = [0]
-        for length in seq_lens:
-            starts.append(starts[-1] + length)
+        num_prefills = metadata.num_prefills
+        starts = metadata.query_start_loc[: num_prefills + 1].tolist()
         slots = mamba_indices[:num_prefills].tolist()
 
         state_len = conv_state.shape[-1]
@@ -371,12 +430,7 @@ class Lfm3ShortConv(nn.Module):
             begin, end = starts[i], starts[i + 1]
             if begin == end:
                 continue
-            if has_state[i] > 0:
-                prefix = conv_state[slot].to(bx.dtype)
-            else:
-                prefix = torch.zeros(
-                    (bx.shape[-1], state_len), dtype=bx.dtype, device=bx.device
-                )
+            prefix = conv_state[slot].to(bx.dtype)
             window = torch.cat((prefix, bx[begin:end].transpose(0, 1)), dim=-1)
             chunks.append(self._depthwise_conv(window).transpose(0, 1))
             conv_state[slot] = window[:, -state_len:].to(conv_state.dtype)
@@ -387,6 +441,9 @@ class Lfm3ShortConv(nn.Module):
                 bx[starts[-1] :], conv_state, mamba_indices[num_prefills:]
             )
             chunks.append(decode_out)
+            self._track_decode_state(
+                conv_state, layer_cache, forward_batch, mamba_indices, num_prefills
+            )
 
         if not chunks:
             return bx.new_empty((0, bx.shape[-1]))
