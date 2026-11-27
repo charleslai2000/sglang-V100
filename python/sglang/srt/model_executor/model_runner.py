@@ -47,6 +47,7 @@ from sglang.srt.configs import (
     Lfm2Config,
     Lfm2MoeConfig,
     Lfm2VlConfig,
+    Lfm3Config,
     NemotronH_Nano_VL_V2_Config,
     NemotronHConfig,
     Qwen3_5Config,
@@ -2182,7 +2183,8 @@ class ModelRunner(ModelRunnerKVCacheMixin):
             | NemotronHConfig
             | Lfm2Config
             | Lfm2MoeConfig
-            | Lfm2VlConfig,
+            | Lfm2VlConfig
+            | Lfm3Config,
         ):
             return config
         if isinstance(config, NemotronH_Nano_VL_V2_Config):

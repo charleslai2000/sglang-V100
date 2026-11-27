@@ -1714,6 +1714,7 @@ def is_hybrid_swa_model(
         "Gemma4ForCausalLM",
         "Gemma4ForConditionalGeneration",
         "LagunaForCausalLM",
+        "Lfm3ForCausalLM",
     }
     if any(arch in hybrid_swa_archs for arch in model_architectures):
         return True
@@ -1784,7 +1785,10 @@ def get_hybrid_layer_ids(
         full_attention_layer_ids = [
             i for i, x in enumerate(layer_types) if x == "full_attention"
         ]
-    elif "LagunaForCausalLM" in model_architectures:
+    elif any(
+        arch in {"LagunaForCausalLM", "Lfm3ForCausalLM"}
+        for arch in model_architectures
+    ):
         layer_types = getattr(hf_text_config, "layer_types", [])
         swa_attention_layer_ids = [
             i for i, x in enumerate(layer_types) if x == "sliding_attention"

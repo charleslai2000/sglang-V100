@@ -155,6 +155,10 @@ class SWAKVPool(BaseSWAKVPool):
         else:
             return self.full_kv_pool.get_value_buffer(layer_id_pool)
 
+    def get_v_head_dim(self):
+        """Per-head value width shared by both pools (hybrid linear models)."""
+        return self.full_kv_pool.get_value_buffer(0).shape[-1]
+
     def get_kv_buffer(self, layer_id: int):
         self._wait_for_layer(layer_id)
         layer_id_pool, is_swa_layer = self.layers_mapping[layer_id]
