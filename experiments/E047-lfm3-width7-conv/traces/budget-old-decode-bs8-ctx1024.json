@@ -1,5 +1,5 @@
 {
-  "trace": "/var/tmp/e047_trace_old/trace-decode-bs8-ctx1024.json.gz",
+  "trace": "experiments/E047-lfm3-width7-conv/traces/trace-old-decode-bs8-ctx1024.json.gz",
   "envelope_us": 125435.729,
   "kernel_duration_sum_us": 107171.363,
   "activity_union_us": 107078.105,

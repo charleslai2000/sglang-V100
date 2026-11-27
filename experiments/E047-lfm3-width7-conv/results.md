@@ -112,21 +112,37 @@ kernels fall back to a kernel-name class). Traces and raw budgets:
 
 ### 4.1 Prefill, 1 × 1024 tokens, 2 forwards, eager (exact operator spans)
 
+Reproduce with the shipped profile (the JSON in `traces/` is the output of this
+command, not an older ruleset):
+
+```bash
+PYTHONPATH=python python benchmark/perf_telemetry/op_budget.py \
+    experiments/E047-lfm3-width7-conv/traces/trace-new-prefill-bs1-ctx1024.json.gz \
+    --profile lfm3 --out /tmp/budget.json
+```
+
 | owner | old kernels / ms | new kernels / ms |
 |---|---|---|
 | forward envelope | — / 637.0 | — / 535.5 |
 | GPU busy / idle | 79.4 % / 131.5 ms | **94.0 % / 31.9 ms** |
-| `attn.core` (rope + attn kernel + KV store) | 720 / 423.0 | 644 / 416.4 |
-| `mlp.gate_up` | 48 / 32.5 | 50 / 68.8 † |
+| attention (rope + paged extend + KV store) | 720 / 423.0 | 681 / 348.2 † |
+| `mlp.gate_up` | 48 / 32.5 | 50 / 68.8 ‡ |
 | `mlp.down` | 98 / 19.5 | 98 / 19.5 |
 | `conv.in_proj` | 28 / 8.49 | 33 / 8.55 |
 | **`conv.kernel+state`** | **474 / 5.55** | **119 / 1.46** |
 | `conv.out_proj` | 26 / 2.97 | 30 / 2.99 |
+| `mlp.act` | 49 / 2.81 | 51 / 2.86 |
 | host time in the conv span | 452.8 ms | **33.3 ms** |
 | host time total (all spans) | 1267 ms | 212 ms |
 
-† The `gate_up` cell differs because in the old run those kernels fell into the
-`attn.core` bucket by launch-containment; the totals are what matter.
+† In the new trace 14 large extend-attention kernels (265.7 ms) are reported
+under the `name:attn.prefill_kernel` class because their launcher has no
+resolvable aten op, while in the old trace the same kernels resolve into the
+`self_attn` span. Both totals are shown; the reliable comparisons are the conv
+rows, the envelope and the GPU idle/ busy split, plus the uninstrumented A/B in
+§2 (which is the performance of record).
+‡ `gate_up` differs because in the old run part of those kernels fell into the
+`self_attn` bucket by launch containment; totals are what matter.
 
 ### 4.2 Decode, batch 8 @ 1024, CUDA-graph replay (name-class attribution)
 

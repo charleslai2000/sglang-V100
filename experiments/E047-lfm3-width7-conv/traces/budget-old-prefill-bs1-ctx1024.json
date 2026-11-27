@@ -1,5 +1,5 @@
 {
-  "trace": "/var/tmp/e047_trace_old/trace-prefill-bs1-ctx1024.json.gz",
+  "trace": "experiments/E047-lfm3-width7-conv/traces/trace-old-prefill-bs1-ctx1024.json.gz",
   "envelope_us": 637047.414,
   "kernel_duration_sum_us": 505513.788,
   "activity_union_us": 505513.744,
