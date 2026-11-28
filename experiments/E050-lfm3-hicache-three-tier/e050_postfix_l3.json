@@ -1,0 +1,11 @@
+{
+ "post_fix_l3_cached": 8192,
+ "levels": {
+  "device": 0,
+  "host": 0,
+  "storage": 8192,
+  "storage_backend": "HiCacheFile"
+ },
+ "ids_equal_vs_baseline": true,
+ "max_logprob_diff_vs_baseline": 0.001006
+}
