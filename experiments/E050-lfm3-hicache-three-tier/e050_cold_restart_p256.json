@@ -1,0 +1,35 @@
+{
+ "cold_restart": {
+  "1024": {
+   "ttft_ms": 124.1,
+   "total_ms": 343.9,
+   "tpot_ms": 7.09,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 1024,
+   "host": 0,
+   "storage": 0
+  },
+  "4096": {
+   "ttft_ms": 169.9,
+   "total_ms": 409.8,
+   "tpot_ms": 7.74,
+   "chunks": 32,
+   "cached": 4096,
+   "device": 4096,
+   "host": 0,
+   "storage": 0
+  },
+  "8192": {
+   "ttft_ms": 291.8,
+   "total_ms": 557.8,
+   "tpot_ms": 8.58,
+   "chunks": 32,
+   "cached": 8192,
+   "device": 8192,
+   "host": 0,
+   "storage": 0
+  }
+ },
+ "ids_equal_8192": true
+}

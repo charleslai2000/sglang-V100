@@ -1,0 +1,158 @@
+{
+ "1024": {
+  "cold_or_l3": {
+   "ttft_ms": 120.4,
+   "total_ms": 341.3,
+   "tpot_ms": 7.13,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 0,
+   "host": 0,
+   "storage": 1024
+  },
+  "l1a": {
+   "ttft_ms": 77.3,
+   "total_ms": 297.1,
+   "tpot_ms": 7.09,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 1024,
+   "host": 0,
+   "storage": 0
+  },
+  "l1b": {
+   "ttft_ms": 77.0,
+   "total_ms": 297.6,
+   "tpot_ms": 7.12,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 1024,
+   "host": 0,
+   "storage": 0
+  },
+  "l3a": {
+   "ttft_ms": 124.2,
+   "total_ms": 344.3,
+   "tpot_ms": 7.1,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 0,
+   "host": 0,
+   "storage": 1024
+  },
+  "l3b": {
+   "ttft_ms": 77.9,
+   "total_ms": 298.1,
+   "tpot_ms": 7.1,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 1024,
+   "host": 0,
+   "storage": 0
+  }
+ },
+ "4096": {
+  "cold_or_l3": {
+   "ttft_ms": 2225.1,
+   "total_ms": 2464.6,
+   "tpot_ms": 7.73,
+   "chunks": 32,
+   "cached": 1024,
+   "device": 0,
+   "host": 0,
+   "storage": 1024
+  },
+  "l1a": {
+   "ttft_ms": 169.7,
+   "total_ms": 410.1,
+   "tpot_ms": 7.75,
+   "chunks": 32,
+   "cached": 4096,
+   "device": 4096,
+   "host": 0,
+   "storage": 0
+  },
+  "l1b": {
+   "ttft_ms": 170.6,
+   "total_ms": 410.9,
+   "tpot_ms": 7.75,
+   "chunks": 32,
+   "cached": 4096,
+   "device": 4096,
+   "host": 0,
+   "storage": 0
+  },
+  "l3a": {
+   "ttft_ms": 280.4,
+   "total_ms": 519.9,
+   "tpot_ms": 7.72,
+   "chunks": 32,
+   "cached": 4096,
+   "device": 0,
+   "host": 0,
+   "storage": 4096
+  },
+  "l3b": {
+   "ttft_ms": 170.2,
+   "total_ms": 409.5,
+   "tpot_ms": 7.72,
+   "chunks": 32,
+   "cached": 4096,
+   "device": 4096,
+   "host": 0,
+   "storage": 0
+  }
+ },
+ "8192": {
+  "cold_or_l3": {
+   "ttft_ms": 5814.4,
+   "total_ms": 6079.7,
+   "tpot_ms": 8.56,
+   "chunks": 32,
+   "cached": 4096,
+   "device": 0,
+   "host": 0,
+   "storage": 4096
+  },
+  "l1a": {
+   "ttft_ms": 293.6,
+   "total_ms": 559.6,
+   "tpot_ms": 8.58,
+   "chunks": 32,
+   "cached": 8192,
+   "device": 8192,
+   "host": 0,
+   "storage": 0
+  },
+  "l1b": {
+   "ttft_ms": 290.0,
+   "total_ms": 558.6,
+   "tpot_ms": 8.67,
+   "chunks": 32,
+   "cached": 8192,
+   "device": 8192,
+   "host": 0,
+   "storage": 0
+  },
+  "l3a": {
+   "ttft_ms": 473.6,
+   "total_ms": 739.2,
+   "tpot_ms": 8.57,
+   "chunks": 32,
+   "cached": 8192,
+   "device": 0,
+   "host": 0,
+   "storage": 8192
+  },
+  "l3b": {
+   "ttft_ms": 288.7,
+   "total_ms": 556.1,
+   "tpot_ms": 8.62,
+   "chunks": 32,
+   "cached": 8192,
+   "device": 8192,
+   "host": 0,
+   "storage": 0
+  }
+ }
+}

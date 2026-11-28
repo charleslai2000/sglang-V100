@@ -1,0 +1,442 @@
+{
+ "l2_1024": {
+  "prompt": 1024,
+  "flood_count": 200,
+  "warm": {
+   "wall_ms": 1558.4,
+   "cached": 768,
+   "device": 0,
+   "host": 0,
+   "storage": 768,
+   "ids": [
+    302,
+    278,
+    16735,
+    2738,
+    9808,
+    296,
+    278,
+    8659
+   ]
+  },
+  "after_flood": {
+   "wall_ms": 586.3,
+   "cached": 768,
+   "device": 0,
+   "host": 768,
+   "storage": 0,
+   "ids": [
+    302,
+    278,
+    16735,
+    2738,
+    9808,
+    296,
+    278,
+    8659
+   ]
+  },
+  "flood_metrics": {
+   "sglang:prefetched_tokens_total": 0.0,
+   "sglang:load_back_tokens_total": 0.0,
+   "sglang:load_back_bytes_total": 0.0,
+   "sglang:hicache_backup_tokens_total": 407751.0,
+   "sglang:hicache_backup_bytes_total": 4654243840.0,
+   "sglang:backuped_tokens_total": 203007.0,
+   "sglang:hicache_host_used_tokens": 204800.0,
+   "sglang:hicache_host_total_tokens": 0.0,
+   "sglang:hicache_host_mamba_used_states": 200.0,
+   "sglang:hicache_host_mamba_total_states": 0.0,
+   "sglang:cached_tokens_total": 0.0
+  },
+  "hit_metrics": {
+   "sglang:prefetched_tokens_total": 0.0,
+   "sglang:load_back_tokens_total": 1025.0,
+   "sglang:load_back_bytes_total": 12687360.0,
+   "sglang:hicache_backup_tokens_total": 2049.0,
+   "sglang:hicache_backup_bytes_total": 23388160.0,
+   "sglang:backuped_tokens_total": 2048.0,
+   "sglang:hicache_host_used_tokens": 0.0,
+   "sglang:hicache_host_total_tokens": 0.0,
+   "sglang:hicache_host_mamba_used_states": 0.0,
+   "sglang:hicache_host_mamba_total_states": 0.0,
+   "sglang:cached_tokens_total": 768.0
+  }
+ },
+ "l2_4096": {
+  "prompt": 4096,
+  "flood_count": 200,
+  "warm": {
+   "wall_ms": 4633.0,
+   "cached": 3072,
+   "device": 0,
+   "host": 0,
+   "storage": 3072,
+   "ids": [
+    278,
+    8659,
+    16672,
+    3434,
+    20,
+    902,
+    1818,
+    607
+   ]
+  },
+  "after_flood": {
+   "wall_ms": 2024.3,
+   "cached": 3072,
+   "device": 0,
+   "host": 3072,
+   "storage": 0,
+   "ids": [
+    278,
+    8659,
+    16672,
+    3434,
+    20,
+    902,
+    1818,
+    607
+   ]
+  },
+  "flood_metrics": {
+   "sglang:prefetched_tokens_total": 0.0,
+   "sglang:load_back_tokens_total": 0.0,
+   "sglang:load_back_bytes_total": 0.0,
+   "sglang:hicache_backup_tokens_total": 407751.0,
+   "sglang:hicache_backup_bytes_total": 4654243840.0,
+   "sglang:backuped_tokens_total": 203776.0,
+   "sglang:hicache_host_used_tokens": 204800.0,
+   "sglang:hicache_host_total_tokens": 0.0,
+   "sglang:hicache_host_mamba_used_states": 200.0,
+   "sglang:hicache_host_mamba_total_states": 0.0,
+   "sglang:cached_tokens_total": 0.0
+  },
+  "hit_metrics": {
+   "sglang:prefetched_tokens_total": 0.0,
+   "sglang:load_back_tokens_total": 3329.0,
+   "sglang:load_back_bytes_total": 40998912.0,
+   "sglang:hicache_backup_tokens_total": 2306.0,
+   "sglang:hicache_backup_bytes_total": 26329088.0,
+   "sglang:backuped_tokens_total": 2048.0,
+   "sglang:hicache_host_used_tokens": 0.0,
+   "sglang:hicache_host_total_tokens": 0.0,
+   "sglang:hicache_host_mamba_used_states": 1.0,
+   "sglang:hicache_host_mamba_total_states": 0.0,
+   "sglang:cached_tokens_total": 3072.0
+  }
+ },
+ "concurrency_1024": {
+  "prompt": 1024,
+  "concurrency": 8,
+  "wall_ms": 8291.2,
+  "levels": [
+   [
+    1024,
+    0,
+    0
+   ],
+   [
+    1024,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    1024
+   ],
+   [
+    1024,
+    0,
+    0
+   ],
+   [
+    1024,
+    0,
+    0
+   ],
+   [
+    1024,
+    0,
+    0
+   ],
+   [
+    1024,
+    0,
+    0
+   ],
+   [
+    1024,
+    0,
+    0
+   ]
+  ],
+  "cached": [
+   1024,
+   1024,
+   1024,
+   1024,
+   1024,
+   1024,
+   1024,
+   1024
+  ],
+  "ids_equal_across_requests": false,
+  "metrics": {
+   "sglang:prefetched_tokens_total": 8192.0,
+   "sglang:load_back_tokens_total": 1281.0,
+   "sglang:load_back_bytes_total": 15833088.0,
+   "sglang:hicache_backup_tokens_total": 0.0,
+   "sglang:hicache_backup_bytes_total": 0.0,
+   "sglang:backuped_tokens_total": 0.0,
+   "sglang:hicache_host_used_tokens": -207872.0,
+   "sglang:hicache_host_total_tokens": 0.0,
+   "sglang:hicache_host_mamba_used_states": -202.0,
+   "sglang:hicache_host_mamba_total_states": 0.0,
+   "sglang:cached_tokens_total": 8192.0
+  }
+ },
+ "concurrency_4096": {
+  "prompt": 4096,
+  "concurrency": 8,
+  "wall_ms": 26924.3,
+  "levels": [
+   [
+    0,
+    0,
+    4096
+   ],
+   [
+    4096,
+    0,
+    0
+   ],
+   [
+    4096,
+    0,
+    0
+   ],
+   [
+    4096,
+    0,
+    0
+   ],
+   [
+    4096,
+    0,
+    0
+   ],
+   [
+    4096,
+    0,
+    0
+   ],
+   [
+    4096,
+    0,
+    0
+   ],
+   [
+    4096,
+    0,
+    0
+   ]
+  ],
+  "cached": [
+   4096,
+   4096,
+   4096,
+   4096,
+   4096,
+   4096,
+   4096,
+   4096
+  ],
+  "ids_equal_across_requests": false,
+  "metrics": {
+   "sglang:prefetched_tokens_total": 32768.0,
+   "sglang:load_back_tokens_total": 4353.0,
+   "sglang:load_back_bytes_total": 53581824.0,
+   "sglang:hicache_backup_tokens_total": 0.0,
+   "sglang:hicache_backup_bytes_total": 0.0,
+   "sglang:backuped_tokens_total": 0.0,
+   "sglang:hicache_host_used_tokens": 3072.0,
+   "sglang:hicache_host_total_tokens": 0.0,
+   "sglang:hicache_host_mamba_used_states": 0.0,
+   "sglang:hicache_host_mamba_total_states": 0.0,
+   "sglang:cached_tokens_total": 32768.0
+  }
+ },
+ "repeat_1024": {
+  "prompt": 1024,
+  "rounds": [
+   {
+    "wall_ms": 1520.4,
+    "cached": 768,
+    "device": 0,
+    "host": 0,
+    "storage": 768,
+    "ids": [
+     302,
+     278,
+     16735,
+     2738,
+     9808,
+     296,
+     278,
+     8659
+    ],
+    "round": 0,
+    "host_used_after_flush": 4096.0,
+    "mamba_used_after_flush": 1.0,
+    "metrics": {
+     "sglang:prefetched_tokens_total": 768.0,
+     "sglang:load_back_tokens_total": 1025.0,
+     "sglang:load_back_bytes_total": 12687360.0,
+     "sglang:hicache_backup_tokens_total": 513.0,
+     "sglang:hicache_backup_bytes_total": 6086656.0,
+     "sglang:backuped_tokens_total": 1.0,
+     "sglang:hicache_host_used_tokens": -3072.0,
+     "sglang:hicache_host_total_tokens": 0.0,
+     "sglang:hicache_host_mamba_used_states": 1.0,
+     "sglang:hicache_host_mamba_total_states": 0.0,
+     "sglang:cached_tokens_total": 768.0
+    }
+   },
+   {
+    "wall_ms": 1570.3,
+    "cached": 768,
+    "device": 0,
+    "host": 0,
+    "storage": 768,
+    "ids": [
+     302,
+     278,
+     16735,
+     2738,
+     9808,
+     296,
+     278,
+     8659
+    ],
+    "round": 1,
+    "host_used_after_flush": 1024.0,
+    "mamba_used_after_flush": 2.0,
+    "metrics": {
+     "sglang:prefetched_tokens_total": 768.0,
+     "sglang:load_back_tokens_total": 1025.0,
+     "sglang:load_back_bytes_total": 12687360.0,
+     "sglang:hicache_backup_tokens_total": 513.0,
+     "sglang:hicache_backup_bytes_total": 6086656.0,
+     "sglang:backuped_tokens_total": 1.0,
+     "sglang:hicache_host_used_tokens": 0.0,
+     "sglang:hicache_host_total_tokens": 0.0,
+     "sglang:hicache_host_mamba_used_states": 0.0,
+     "sglang:hicache_host_mamba_total_states": 0.0,
+     "sglang:cached_tokens_total": 768.0
+    }
+   },
+   {
+    "wall_ms": 1572.5,
+    "cached": 768,
+    "device": 0,
+    "host": 0,
+    "storage": 768,
+    "ids": [
+     302,
+     278,
+     16735,
+     2738,
+     9808,
+     296,
+     278,
+     8659
+    ],
+    "round": 2,
+    "host_used_after_flush": 1024.0,
+    "mamba_used_after_flush": 2.0,
+    "metrics": {
+     "sglang:prefetched_tokens_total": 768.0,
+     "sglang:load_back_tokens_total": 1025.0,
+     "sglang:load_back_bytes_total": 12687360.0,
+     "sglang:hicache_backup_tokens_total": 513.0,
+     "sglang:hicache_backup_bytes_total": 6086656.0,
+     "sglang:backuped_tokens_total": 1.0,
+     "sglang:hicache_host_used_tokens": 0.0,
+     "sglang:hicache_host_total_tokens": 0.0,
+     "sglang:hicache_host_mamba_used_states": 0.0,
+     "sglang:hicache_host_mamba_total_states": 0.0,
+     "sglang:cached_tokens_total": 768.0
+    }
+   },
+   {
+    "wall_ms": 1600.6,
+    "cached": 768,
+    "device": 0,
+    "host": 0,
+    "storage": 768,
+    "ids": [
+     302,
+     278,
+     16735,
+     2738,
+     9808,
+     296,
+     278,
+     8659
+    ],
+    "round": 3,
+    "host_used_after_flush": 1024.0,
+    "mamba_used_after_flush": 2.0,
+    "metrics": {
+     "sglang:prefetched_tokens_total": 768.0,
+     "sglang:load_back_tokens_total": 1025.0,
+     "sglang:load_back_bytes_total": 12687360.0,
+     "sglang:hicache_backup_tokens_total": 513.0,
+     "sglang:hicache_backup_bytes_total": 6086656.0,
+     "sglang:backuped_tokens_total": 1.0,
+     "sglang:hicache_host_used_tokens": 0.0,
+     "sglang:hicache_host_total_tokens": 0.0,
+     "sglang:hicache_host_mamba_used_states": 0.0,
+     "sglang:hicache_host_mamba_total_states": 0.0,
+     "sglang:cached_tokens_total": 768.0
+    }
+   },
+   {
+    "wall_ms": 1527.5,
+    "cached": 768,
+    "device": 0,
+    "host": 0,
+    "storage": 768,
+    "ids": [
+     302,
+     278,
+     16735,
+     2738,
+     9808,
+     296,
+     278,
+     8659
+    ],
+    "round": 4,
+    "host_used_after_flush": 1024.0,
+    "mamba_used_after_flush": 2.0,
+    "metrics": {
+     "sglang:prefetched_tokens_total": 768.0,
+     "sglang:load_back_tokens_total": 1025.0,
+     "sglang:load_back_bytes_total": 12687360.0,
+     "sglang:hicache_backup_tokens_total": 513.0,
+     "sglang:hicache_backup_bytes_total": 6086656.0,
+     "sglang:backuped_tokens_total": 1.0,
+     "sglang:hicache_host_used_tokens": 0.0,
+     "sglang:hicache_host_total_tokens": 0.0,
+     "sglang:hicache_host_mamba_used_states": 0.0,
+     "sglang:hicache_host_mamba_total_states": 0.0,
+     "sglang:cached_tokens_total": 768.0
+    }
+   }
+  ]
+ }
+}
