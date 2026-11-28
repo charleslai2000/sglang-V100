@@ -61,6 +61,22 @@ server, otherwise 2 OOM failures).
   i.e. the dropped beliefs cause an idempotent rewrite rather than a hole.
   (In `cache` mode no existence beliefs exist, so the drain is not wired there.)
 
+- **Abnormal exit (SIGKILL mid-group-commit)**: four 4K prefixes were in flight
+  when the scheduler was killed (`evidence/e052_recovery_after_sigkill.log`).
+  Restart on the same dir recovered cleanly, then:
+
+  | prefix | outcome | matches no-HiCache ground truth |
+  |---|---|---|
+  | 0 (in flight at kill) | `cached=0`, recomputed | yes |
+  | 1–3 (committed) | `storage=4096` | yes |
+
+  The un-ACKed group is simply absent — no incomplete restore frontier, and no
+  wrong tokens served from a half-written group.
+- **Undersized tier** (`file_size=64M`, 1 slot, 8K prefix whose joint backup
+  ≈100 MB): writes cannot fit, restores report `storage=0` and recompute,
+  outputs identical, no hang, no refusal spam (16.5 s wall for two 8K requests
+  ≈ 2× prefill). Degradation is "recompute", never "partial restore".
+
 ## 4. Performance A/B — restore after `/flush_cache`
 
 Serving config identical across arms; only the backend differs. `syscr`/`rchar`/

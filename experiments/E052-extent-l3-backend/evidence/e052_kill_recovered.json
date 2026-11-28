@@ -1,0 +1,26 @@
+{
+ "0": {
+  "ids": [],
+  "cached": 0,
+  "storage": 0,
+  "repeat_stable": true
+ },
+ "1": {
+  "ids": [],
+  "cached": 4096,
+  "storage": 4096,
+  "repeat_stable": true
+ },
+ "2": {
+  "ids": [],
+  "cached": 4096,
+  "storage": 4096,
+  "repeat_stable": true
+ },
+ "3": {
+  "ids": [],
+  "cached": 4096,
+  "storage": 4096,
+  "repeat_stable": true
+ }
+}
