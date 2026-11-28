@@ -249,6 +249,9 @@ class StorageOperation:
         self.stats_requested_tokens = 0
         # Absolute token offset at which this storage-prefetched span starts.
         self.storage_start = 0
+        # Backend group open for this operation's writes (extent group commit);
+        # set by the controller that opened it and cleared when it ends.
+        self.group_id = None
 
         self.id = StorageOperation.counter
         StorageOperation.counter += 1
@@ -1420,10 +1423,42 @@ class HiCacheController:
             self.storage_backend.batch_set_v1(hash_values, host_indices, extra_info)
         )
 
+    def _page_set_for_operation(
+        self, hash_values, host_indices, extra_info, operation
+    ) -> bool:
+        """Write one KV batch, preserving the operation's transient group.
+
+        Inside an open group the batch must go through ``batch_set_v2`` so its
+        pages stage under the same group identity as the sidecars and become
+        visible only at ``commit_group``. Outside a group the fast
+        (zero-copy v1) path is used unchanged.
+        """
+        group_id = getattr(operation, "group_id", None)
+        if group_id is None:
+            return self.page_set_func(hash_values, host_indices, extra_info)
+
+        transfer = PoolTransfer(
+            name=PoolName.KV,
+            host_indices=host_indices,
+            keys=hash_values,
+        )
+        results = self.storage_backend.batch_set_v2(
+            [transfer], extra_info=extra_info, group_id=group_id
+        )
+        result = results.get(transfer.name)
+        if result is None:
+            result = results.get(transfer.name.value)
+        return (
+            isinstance(result, (list, tuple))
+            and len(result) == len(hash_values)
+            and all(bool(ok) for ok in result)
+        )
+
     # Backup batch by batch
-    def _page_backup(self, operation):
+    def _page_backup(self, operation) -> bool:
         # Backup batch by batch
         prefix_keys = operation.prefix_keys
+        success = True
         for i in range(0, len(operation.hash_value), STORAGE_BATCH_SIZE):
             batch_hashes = operation.hash_value[i : i + STORAGE_BATCH_SIZE]
             batch_host_indices = operation.host_indices[
@@ -1432,8 +1467,11 @@ class HiCacheController:
             # Set one batch token, and record if success.
             # todo: allow partial success
             extra_info = HiCacheStorageExtraInfo(prefix_keys=prefix_keys)
-            success = self.page_set_func(batch_hashes, batch_host_indices, extra_info)
-            if not success:
+            batch_ok = self._page_set_for_operation(
+                batch_hashes, batch_host_indices, extra_info, operation
+            )
+            if not batch_ok:
+                success = False
                 logger.warning(
                     f"Write page to storage: {len(batch_hashes)} pages failed."
                 )
@@ -1442,6 +1480,7 @@ class HiCacheController:
             if prefix_keys is not None:
                 prefix_keys = prefix_keys + batch_hashes
             operation.completed_tokens += self.page_size * len(batch_hashes)
+        return success
 
     def _page_backup_or_log(self, operation):
         try:

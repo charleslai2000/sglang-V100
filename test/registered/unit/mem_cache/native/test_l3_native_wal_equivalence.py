@@ -43,6 +43,11 @@ from sglang.srt.mem_cache.hicache_storage import (
 from sglang.srt.mem_cache.storage.extent.extent_file_backend import (
     ExtentFileBackend,
 )
+from sglang.srt.mem_cache.storage.extent.extent_metadata import (
+    FRAME_GROUP_COMMIT,
+    iter_segment_frames,
+    segment_path,
+)
 from sglang.srt.mem_cache.storage.extent import extent_file_backend as efb
 from sglang.test.test_utils import CustomTestCase
 
@@ -1207,6 +1212,126 @@ class CrashRecoveryParityTests(CustomTestCase):
             0,
             "the data pwrite must have happened before the crash",
         )
+
+
+class GroupCommitArmTests(CustomTestCase):
+    """Grouped writes behave identically in the Python and native arms."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="l3_native_group_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+        os.environ.pop(_NATIVE_ENV, None)
+
+    def _new_backend(self, name: str, native: bool) -> ExtentFileBackend:
+        sub = Path(self.tmpdir) / name
+        sub.mkdir()
+        if native:
+            os.environ[_NATIVE_ENV] = "1"
+        else:
+            os.environ.pop(_NATIVE_ENV, None)
+        return ExtentFileBackend(_make_config(str(sub), model_name="wal-eq"))
+
+    @staticmethod
+    def _group_frames(backend):
+        return [
+            frame.frame_type
+            for frame in iter_segment_frames(
+                segment_path(
+                    backend._storage_dir,
+                    backend.config_suffix,
+                    backend._wal_generation,
+                ),
+                active=True,
+            )
+        ]
+
+    @staticmethod
+    def _register(backend):
+        pool = _PagePool(1000, slots=8)
+        for i in range(4):
+            pool._pages[i][:] = bytes([i + 1]) * 1000
+        backend.register_mem_host_pool_v2(pool, PoolName.KV)
+        return pool
+
+    @classmethod
+    def _stage_and_commit(cls, backend) -> dict:
+        keys = ["g0", "g1"]
+        cls._register(backend)
+        transfer = PoolTransfer(
+            name=PoolName.KV, host_indices=[0, 1], keys=keys
+        )
+        group_id = backend.open_group()
+        staged = backend.batch_set_v2([transfer], group_id=group_id)[PoolName.KV]
+        invisible = [backend.exists(key) for key in keys]
+        committed = backend.commit_group(group_id)
+        return {
+            "staged": staged,
+            "invisible": invisible,
+            "committed": committed,
+            "visible": [backend.exists(key) for key in keys],
+            "frames": GroupCommitArmTests._group_frames(backend),
+        }
+
+    def test_group_commit_matches_across_arms(self):
+        arm_a = self._stage_and_commit(self._new_backend("a", native=False))
+        arm_b = self._stage_and_commit(self._new_backend("b", native=True))
+
+        for arm in (arm_a, arm_b):
+            self.assertEqual(arm["staged"], [True, True])
+            # Nothing is restorable before the group commits.
+            self.assertEqual(arm["invisible"], [False, False])
+            self.assertTrue(arm["committed"])
+            self.assertEqual(arm["visible"], [True, True])
+            self.assertIn(FRAME_GROUP_COMMIT, arm["frames"])
+            self.assertEqual(arm["frames"].count(FRAME_GROUP_COMMIT), 1)
+        self.assertEqual(arm_a["frames"], arm_b["frames"])
+
+    def test_aborted_group_writes_no_commit_frame_in_either_arm(self):
+        for native in (False, True):
+            backend = self._new_backend(f"abort{native}", native=native)
+            self._register(backend)
+            group_id = backend.open_group()
+            self.assertEqual(
+                backend.batch_set_v2(
+                    [PoolTransfer(name=PoolName.KV, host_indices=[0], keys=["x"])],
+                    group_id=group_id,
+                )[PoolName.KV],
+                [True],
+            )
+            self.assertTrue(backend.abort_group(group_id))
+            self.assertFalse(backend.exists("x"))
+            self.assertNotIn(FRAME_GROUP_COMMIT, self._group_frames(backend))
+            backend.close()
+
+    def test_uncommitted_group_is_not_recovered_after_restart(self):
+        """Crash-equivalent: staging is dropped, no frontier survives."""
+        for native in (False, True):
+            name = f"crash{native}"
+            backend = self._new_backend(name, native=native)
+            self._register(backend)
+            group_id = backend.open_group()
+            self.assertEqual(
+                backend.batch_set_v2(
+                    [PoolTransfer(name=PoolName.KV, host_indices=[0], keys=["y"])],
+                    group_id=group_id,
+                )[PoolName.KV],
+                [True],
+            )
+            # No commit: dropping the backend is the crash.
+            backend.close()
+
+            os.environ.pop(_NATIVE_ENV, None)
+            reopened = ExtentFileBackend(
+                _make_config(str(Path(self.tmpdir) / name), model_name="wal-eq")
+            )
+            try:
+                self.assertFalse(reopened.exists("y"))
+                self.assertNotIn(FRAME_GROUP_COMMIT, self._group_frames(reopened))
+            finally:
+                reopened.close()
+
 
 
 if __name__ == "__main__":

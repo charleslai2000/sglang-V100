@@ -1762,149 +1762,85 @@ class ExtentFileBackend(HiCacheStorage):
         pool_transfers: Optional[List[PoolTransfer]] = None,
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
     ) -> PoolTransferResult:
+        """Restorable prefix lengths, as a set intersection over pools.
+
+        A TRAILING_PAGES pool (SWA window, Mamba/Conv checkpoint) is only
+        restorable at the discrete lengths whose trailing window is on disk, and
+        two such pools can hold windows that never coincide. Folding each pool
+        to one number and taking the minimum would then return a length that at
+        least one pool cannot serve; the pools' restorable sets are intersected
+        instead, so the answer is the longest *jointly* restorable prefix.
+
+        Existence comes from the allocator index (``lookup`` honours the slot
+        generation, so circular reuse reads as absent); everything else follows
+        ``HiCacheFile.batch_exists_v2``.
+        """
         with self._lock:
-
-            query_context = getattr(extra_info, "extra_info", None) or {}
-
-            def log_mamba_query(logical_key: str, present_result: bool) -> None:
-                if not marker_present("/tmp/t38c-durable-trace"):
-                    return
-                storage_key = self._component_key(PoolName.MAMBA, logical_key)
-                ref = self._allocator.lookup(storage_key)
-                _t38c_durable_log(
-                    {
-                        "evt": "storage_query",
-                        "operation": "batch_exists_v2",
-                        **query_context,
-                        "pool": PoolName.MAMBA.value,
-                        "mamba_key": logical_key,
-                        "storage_key": storage_key,
-                        "extent_id": ref.extent_id if ref is not None else None,
-                        "extent_generation": (
-                            ref.generation if ref is not None else None
-                        ),
-                        "result": bool(present_result),
-                        "reason": "query_present" if present_result else "query_miss",
-                    }
-                )
 
             def present(key: str) -> bool:
                 return self._allocator.lookup(key) is not None
 
+            def has_component(page_idx: int, name) -> bool:
+                return present(self._component_key(name, keys[page_idx]))
+
+            # Longest contiguous KV prefix present in storage.
             kv_pages = next(
                 (i for i in range(len(keys)) if not present(self._storage_key(keys[i]))),
                 len(keys),
             )
             hit_count: dict = {PoolName.KV: kv_pages} if kv_pages else {}
-            final_pages = kv_pages
+            restorable = list(range(1, kv_pages + 1))
+
             for transfer in pool_transfers or []:
-                if final_pages == 0:
-                    if transfer.name == PoolName.MAMBA:
-                        _t38c_log(
-                            {
-                                "evt": "pc_mamba_query",
-                                "raw_kv_frontier": int(kv_pages),
-                                "trailing_key": (
-                                    transfer.keys[-1]
-                                    if transfer.keys
-                                    else ""
-                                ),
-                                "trailing_key_present": False,
-                                "tested_key": "",
-                                "tested_present": False,
-                                "boundary": 0,
-                                "final_pages": 0,
-                                "removal_recycle_hook": "allocator_storage_invalidate",
-                            }
-                        )
+                if not restorable:
                     break
                 name = transfer.name
-                # Each sidecar is queried against the frontier that remains
-                # usable after the preceding pools, not the original KV
-                # prefix.  In particular, appended request tokens must not
-                # participate in a trailing sidecar check.
-                frontier = final_pages
                 # A PREFETCH transfer's keys are placeholders at build time
                 # (mamba_component / swa_component write node-last checkpoints;
                 # the real trailing hashes are filled only after the hit query
-                # by _sync_trailing_keys).  Such a transfer must use the
+                # by _sync_trailing_keys). Such a transfer must use the
                 # TRAILING scan: these pools store only a trailing window, so
                 # reading them as ALL_PAGES -- the PoolTransfer default, which
                 # takes over when a transfer reconstruction drops the policy --
-                # fails at the first non-window page and clamps kv_hit to 0
-                # (live 3090 M4, storage_hit=0 for every hybrid prefetch).
+                # fails at the first non-window page and clamps kv_hit to 0.
                 placeholder_keys = bool(transfer.keys) and all(
                     k == "__placeholder__" for k in transfer.keys
                 )
-                if transfer.hit_policy == PoolHitPolicy.ALL_PAGES and not placeholder_keys:
+                trailing_pages = transfer.hit_policy in (
+                    PoolHitPolicy.TRAILING_PAGES,
+                    None,
+                )
+                if not trailing_pages and not placeholder_keys:
                     boundary = next(
                         (
                             i
-                            for i in range(frontier)
-                            if not present(self._component_key(name, keys[i]))
+                            for i in range(kv_pages)
+                            if not has_component(i, name)
                         ),
-                        frontier,
+                        kv_pages,
                     )
-                else:  # trailing_pages
-                    trailing = self._trailing_transfer_pages(transfer)
-                    trailing = min(trailing, frontier)
-                    boundary = 0
-                    mamba_tested_key = ""
-                    mamba_tested_present = False
-                    mamba_match_key = ""
-                    mamba_match_present = False
-                    for prefix_len in range(frontier, 0, -1):
-                        candidate_start = max(0, prefix_len - trailing)
-                        candidate_present = all(
-                            present(self._component_key(name, keys[i]))
-                            for i in range(candidate_start, prefix_len)
+                    pool_restorable = set(range(1, boundary + 1))
+                else:
+                    trailing = max(
+                        1, min(self._trailing_transfer_pages(transfer), kv_pages)
+                    )
+                    pool_restorable = {
+                        prefix_len
+                        for prefix_len in range(1, kv_pages + 1)
+                        if all(
+                            has_component(i, name)
+                            for i in range(
+                                max(0, prefix_len - trailing), prefix_len
+                            )
                         )
-                        if name == PoolName.MAMBA:
-                            candidate_key = keys[prefix_len - 1]
-                            if not mamba_tested_key:
-                                mamba_tested_key = candidate_key
-                                mamba_tested_present = candidate_present
-                                log_mamba_query(
-                                    candidate_key, candidate_present
-                                )
-                            if candidate_present:
-                                mamba_match_key = candidate_key
-                                mamba_match_present = True
-                        if candidate_present:
-                            boundary = prefix_len
-                            break
-                    if name == PoolName.MAMBA:
-                        _t38c_log(
-                            {
-                                "evt": "pc_mamba_query",
-                                "raw_kv_frontier": int(kv_pages),
-                                "trailing_key": (
-                                    transfer.keys[-1]
-                                    if transfer.keys
-                                    else ""
-                                ),
-                                "trailing_key_present": (
-                                    present(
-                                        self._component_key(
-                                            name, transfer.keys[-1]
-                                        )
-                                    )
-                                    if transfer.keys
-                                    else False
-                                ),
-                                "tested_key": mamba_tested_key,
-                                "tested_present": bool(mamba_tested_present),
-                                "matched_key": mamba_match_key,
-                                "matched_present": bool(mamba_match_present),
-                                "boundary": int(boundary),
-                                "final_pages": int(min(final_pages, boundary)),
-                                "removal_recycle_hook": "allocator_storage_invalidate",
-                            }
-                        )
+                    }
+                    boundary = max(pool_restorable, default=0)
                 if boundary:
                     hit_count[name] = boundary
-                final_pages = min(final_pages, boundary)
-        return PoolTransferResult(final_pages, hit_count)
+                restorable = [page for page in restorable if page in pool_restorable]
+
+            final_pages = restorable[-1] if restorable else 0
+            return PoolTransferResult(final_pages, hit_count, restorable)
 
     def _trailing_transfer_pages(self, transfer: PoolTransfer) -> int:
         """Return the number of sidecar pages represented by a transfer."""

@@ -1762,7 +1762,11 @@ class HybridCacheController(BaseHiCacheController):
         with self.mem_pool_host.layout_lease():
             return self._page_backup_with_stable_layout(operation)
 
-    def _page_backup_with_stable_layout(self, operation):
+    def _page_backup_with_stable_layout(self, operation) -> bool:
+        """One backup = one group: FULL KV, SWA KV and Conv state of a single
+        backup are written under one ``group_id`` and become visible only when
+        every member committed. A failed member aborts the group, so a partial
+        backup can never form a restore frontier."""
         # Write primary KV only on its selected shard writer. Rank-sharded
         # sidecars can still need every TP rank.
         backup_transfers = [
@@ -1770,42 +1774,107 @@ class HybridCacheController(BaseHiCacheController):
             for transfer in operation.pool_transfers or []
             if self.should_backup(transfer)
         ]
+        has_kv = bool(operation.hash_value) and not self.backup_skip
+        group_api = all(
+            callable(getattr(self.storage_backend, method, None))
+            for method in ("open_group", "commit_group", "abort_group")
+        )
+        group_id = None
+        committed = False
 
-        if backup_transfers:
-            self._resolve_sidecar_kv_derived_pool_transfers(operation)
-            self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
+        try:
+            if group_api and (has_kv or backup_transfers):
+                group_id = self.storage_backend.open_group()
+                operation.group_id = group_id
+
             results = {}
-            for extra_info, transfers in _trailing_chain_groups(
-                operation.prefix_keys, operation.hash_value, backup_transfers
-            ):
-                results.update(
-                    self.storage_backend.batch_set_v2(transfers, extra_info=extra_info)
-                )
-            pool_hits = count_pool_hits(results)
-            operation.pool_storage_result.update_extra_pool_hit_pages(pool_hits)
+            sidecar_ok = True
+            if backup_transfers:
+                self._resolve_sidecar_kv_derived_pool_transfers(operation)
+                self._resolve_sidecar_nonkv_derived_pool_transfers(operation)
+                for extra_info, transfers in _trailing_chain_groups(
+                    operation.prefix_keys, operation.hash_value, backup_transfers
+                ):
+                    results.update(
+                        self.storage_backend.batch_set_v2(
+                            transfers, extra_info=extra_info, group_id=group_id
+                        )
+                    )
+                pool_hits = count_pool_hits(results)
+                operation.pool_storage_result.update_extra_pool_hit_pages(pool_hits)
+                sidecar_ok = self._sidecar_backup_ok(backup_transfers, results)
+                if not sidecar_ok:
+                    return self._fail_backup(operation, "sidecar_set_failed")
 
-        if not self.backup_skip:
-            super()._page_backup(operation)
-        else:
-            sidecar_ok = bool(backup_transfers)
-            if sidecar_ok:
-                for transfer in backup_transfers:
-                    result = results.get(transfer.name)
-                    if result is None:
-                        result = results.get(transfer.name.value)
-                    expected = len(transfer.keys or [])
-                    if expected == 0 and transfer.host_indices is not None:
-                        expected = int(transfer.host_indices.numel())
-                    if (
-                        not isinstance(result, (list, tuple))
-                        or len(result) != expected
-                        or not all(bool(ok) for ok in result)
-                    ):
-                        sidecar_ok = False
-                        break
-            operation.completed_tokens = (
-                len(operation.hash_value) * self.page_size if sidecar_ok else 0
+            kv_ok = True
+            if has_kv:
+                kv_ok = super()._page_backup(operation)
+                if not kv_ok:
+                    return self._fail_backup(operation, "kv_set_failed")
+            else:
+                operation.completed_tokens = (
+                    len(operation.hash_value) * self.page_size if sidecar_ok else 0
+                )
+
+            if group_id is not None:
+                committed = bool(self.storage_backend.commit_group(group_id))
+                if not committed:
+                    return self._fail_backup(operation, "group_commit_failed")
+            return True
+        except Exception as exc:
+            return self._fail_backup(
+                operation,
+                f"exception:{type(exc).__name__}: {exc}",
+                exc_info=True,
             )
+        finally:
+            if group_id is not None and not committed:
+                try:
+                    self.storage_backend.abort_group(group_id)
+                except Exception:
+                    logger.warning(
+                        "HiCache backup: group abort failed (operation=%s)",
+                        getattr(operation, "id", None),
+                        exc_info=True,
+                    )
+            operation.group_id = None
+
+    @staticmethod
+    def _transfer_units(transfer) -> int:
+        """How many per-page results a transfer's write must produce."""
+        expected = len(transfer.keys or [])
+        if expected:
+            return expected
+        host_indices = transfer.host_indices
+        if host_indices is None:
+            return 0
+        numel = getattr(host_indices, "numel", None)
+        return int(numel()) if callable(numel) else len(host_indices)
+
+    @classmethod
+    def _sidecar_backup_ok(cls, backup_transfers, results) -> bool:
+        for transfer in backup_transfers:
+            result = results.get(transfer.name)
+            if result is None:
+                result = results.get(transfer.name.value)
+            expected = cls._transfer_units(transfer)
+            if (
+                not isinstance(result, (list, tuple))
+                or len(result) != expected
+                or not all(bool(ok) for ok in result)
+            ):
+                return False
+        return True
+
+    def _fail_backup(self, operation, reason: str, exc_info: bool = False) -> bool:
+        logger.error(
+            "Hybrid HiCache backup failed (operation=%s node=%s): %s",
+            getattr(operation, "id", None),
+            getattr(operation, "node_id", None),
+            reason,
+            exc_info=exc_info,
+        )
+        return False
 
     def should_backup(self, transfer: PoolTransfer) -> bool:
         if not self.backup_skip:
