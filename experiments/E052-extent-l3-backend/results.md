@@ -222,8 +222,19 @@ The page-1 arm was re-measured against the pre-change code on the same machine
 run-to-run, so group commit costs no measurable restore time. Read syscalls and
 bytes are unchanged (8K: 207 vs 209 `syscr`, 103.6 MB `rchar`).
 
-Correctness is unchanged on the new path: matrix 45/45 identical ids, 18 cases
-served from storage, repeat 5/5 `storage=1024`.
+Correctness is unchanged on the new path, in every arm:
+
+| arm (page 256) | matrix | storage-served cases | repeat |
+|---|---|---|---|
+| extent, Python writer | 45/45 identical ids | 18 | 5/5 `storage=1024` |
+| extent, native writer (`SGLANG_L3_NATIVE_WRITE_PATH=1`) | 45/45 | 17 | — |
+| extent, `buffer_only` (existence beliefs active) | 45/45 | 17 | 5/5 |
+
+The native arm's live WAL shows the same grouped commits as the Python arm
+(`evidence/e052_group_commit_wal_scan_native.txt`: 17 `GROUP_COMMIT`, members
+2/3/5/6), so the Rust writer participates in group commit rather than bypassing
+it. Native restore timings with group commit: 96.7 / 207.9 / 351.0 ms at
+1K/4K/8K, i.e. equal to the Python arm.
 
 ### 4b.5 Test totals after round 2
 
