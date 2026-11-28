@@ -107,24 +107,13 @@ def parse(name, cfg):
 
 
 def init_dist_once():
-    import os as _os
-
-    from sglang.srt.server_args import (
-        ServerArgs,
-        set_global_server_args_for_scheduler,
-    )
-
-    sa = ServerArgs(model_path="/var/tmp/lfm3", trust_remote_code=True,
-                    dtype="float16", log_level="error")
-    sa.distributed_init_method = None
-    sa.enable_dp_attention = False
-    sa.dp_size = 1
-    set_global_server_args_for_scheduler(sa)
-
+    """Publish a single-rank topology and build the process groups once."""
     import sglang.srt.distributed.parallel_state as ps
+    from sglang.srt.runtime_context import get_parallel
 
     if ps._TP is not None:
         return
+
     from sglang.srt.distributed import (
         init_distributed_environment,
         initialize_model_parallel,
@@ -136,21 +125,36 @@ def init_dist_once():
         local_rank=0,
         distributed_init_method="tcp://127.0.0.1:29513",
     )
-    initialize_model_parallel(
-        tensor_model_parallel_size=1, attention_data_parallel_size=1
+    from sglang.srt.layers.dp_attention import initialize_dp_attention
+    from sglang.srt.server_args import (
+        ServerArgs,
+        set_global_server_args_for_scheduler,
     )
-    from sglang.srt.layers.dp_attention import (
-        initialize_dp_attention,
+
+    sa = ServerArgs(
+        model_path="/var/tmp/lfm3", trust_remote_code=True, dtype="float16",
+        log_level="error",
     )
-
-    initialize_dp_attention(server_args=sa, model_config=_DP_MODEL_CONFIG[0])
-
-
-_DP_MODEL_CONFIG = [None]
+    set_global_server_args_for_scheduler(sa)
+    # v0.5.23 reads topology widths and ranks from the published parallel
+    # context instead of initialize_model_parallel() arguments.
+    get_parallel().override_permanently(
+        tp_rank=0,
+        tp_size=1,
+        attn_tp_rank=0,
+        attn_tp_size=1,
+        attn_cp_rank=0,
+        attn_cp_size=1,
+        attn_dp_rank=0,
+        attn_dp_size=1,
+        dp_rank=0,
+        dp_size=1,
+    )
+    initialize_model_parallel()
+    initialize_dp_attention(sa)
 
 
 def build_on_meta(name, mc, module_path, cls_name):
-    _DP_MODEL_CONFIG[0] = mc
     init_dist_once()
     module = __import__(module_path, fromlist=[cls_name])
     cls = getattr(module, cls_name)
