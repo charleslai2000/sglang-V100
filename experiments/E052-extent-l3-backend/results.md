@@ -160,9 +160,10 @@ frame histogram: {'FRAME_SET': 36, 'BATCH_COMMIT': 36, 'GROUP_COMMIT': 17}
 group commits: 17, members per group: [2, 3, 5, 6]
 ```
 
-Multi-pool backups (KV + SWA + Conv, 2–6 members) commit as one group, and only
-36 `BATCH_COMMIT` frames accompany them, i.e. the members share the group's
-durability rather than committing individually.
+Multi-pool backups (KV + SWA + Conv, 2–6 members) commit as one group. Each
+staged batch still logs its `FRAME_SET`/`BATCH_COMMIT` pair (36 each) but no
+longer fsyncs it, so the members' durability comes from the single
+`GROUP_COMMIT` sync — the frames describe the group, they do not publish it.
 
 Failure injection through the real controller + backend
 (`test_extent_group_commit.py`): refused Conv member (geometry), failed KV
