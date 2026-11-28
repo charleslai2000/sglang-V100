@@ -93,15 +93,19 @@ TPOT 三档不受级别影响：7.0–7.1 / 7.7 / 8.6 ms。
 
 ## 7. 回归
 
-- 目标单测（12 文件，含新增哈希回退测试）：
-  **96 passed + 2004 subtests passed**（`test_hicache_python_hash`、`test_hicache_file_lru_unit`、
-  `test_hicache_file_storage_path_unit`、`test_hicache_copy_rounds`、`test_hicache_storage_format_tag`、
-  `test_hicache_write_back_ordering`、`test_hicache_load_back_timing`、
-  `test_hicache_mamba_slot_side_states`、`test_unified_radix_hicache_dispatch`、
-  `test_buffer_swa_tail_only`、`test_hicache_auto_size`、`test_hicache_kvcacheio_gate`）。
-- 整个 `test/registered/unit/mem_cache/` 套件在本环境仍不可作门禁：收集期 5 个文件缺 `nixl`/rust 扩展，
-  运行到 44% 处 core dump（与 E049 记录一致）；崩溃前出现的失败与本案改动无交集（改动仅 `native_hash.py`，
-  唯一消费者是 `mem_cache/utils.py` 的 `get_native_hash`）。
+- 目标单测（13 文件，含新增哈希回退测试）：
+  **115 passed + 2030 subtests passed**（`test_hicache_python_hash`、`test_mem_cache_utils`、
+  `test_hicache_file_lru_unit`、`test_hicache_file_storage_path_unit`、`test_hicache_copy_rounds`、
+  `test_hicache_storage_format_tag`、`test_hicache_write_back_ordering`、
+  `test_hicache_load_back_timing`、`test_hicache_mamba_slot_side_states`、
+  `test_unified_radix_hicache_dispatch`、`test_buffer_swa_tail_only`、`test_hicache_auto_size`、
+  `test_hicache_kvcacheio_gate`）。
+- 上游 `test_mem_cache_utils.py` 把回退实现与“优化前逐 token 参考实现”逐值对比
+  （page 链、wide、bigram、空序列），首轮即扣出一个真实缺陷：`logical_len=0` 的 bigram 会索引空数组
+  （`IndexError`），已修并与 C++ 的 `logical_len > 0` 守卫对齐；修复后该文件全通过。
+- 整个 `test/registered/unit/mem_cache/` 套件在本环境仍不可作门禁：收集期若干文件缺 `nixl`/rust 扩展，
+  运行到 44% 处 core dump（与 E049 记录一致）。逐文件排查正在进行，已确认的非通过项均不 import 改动模块
+  （唯一消费者是 `mem_cache/utils.py`）。
 
 ## 8. 已知限制
 

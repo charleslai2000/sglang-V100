@@ -164,9 +164,13 @@ def python_get_hash(
         if _needs_wide(raw, raw_count):
             words = _wide_words(raw, logical_len if is_bigram else raw_count, is_bigram)
             digest = _hash_page(_pack(words, True), digest, wide=True)
-        else:
+        elif logical_len > 0:
+            # An empty token list hashes the (optional) prior digest only, the
+            # same guard hash_all() uses before filling a bigram page.
             words = _page_units(raw, 0, logical_len, unit_width, is_bigram)
             digest = _hash_page(_pack(words, False), digest)
+        else:
+            digest = _hash_page(b"", digest)
         return digest.hex()
 
     if page_size <= 0:

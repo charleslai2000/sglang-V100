@@ -70,6 +70,16 @@ class TestPythonPageHash(unittest.TestCase):
         from_list = python_get_hash(tokens, 3, 1, False, None, None)
         self.assertEqual(from_array, from_list)
 
+    def test_empty_token_list_hashes_only_the_prior(self):
+        self.assertEqual(python_get_hash([], 0, 1, False, None, None), sha256(b""))
+        prior = bytes(range(32))
+        self.assertEqual(
+            python_get_hash([], 0, 1, False, prior, None), sha256(prior)
+        )
+        # bigram over an empty list must not index the (absent) first token
+        self.assertEqual(python_get_hash([], 0, 2, True, None, None), sha256(b""))
+        self.assertEqual(python_get_hash([], 0, 2, True, None, 4), [])
+
     def test_entry_point_falls_back_when_extension_is_forced_off(self):
         import os
         from unittest import mock
