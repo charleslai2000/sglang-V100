@@ -68,6 +68,10 @@ TPOT 三档不受级别影响：7.0–7.1 / 7.7 / 8.6 ms。
   有效带宽 ≈ **1.08 GB/s**；page=1 同样 ~195 MB 却需要 7.7 s ≈ **25 MB/s**。
 - 落盘规模：page=1 目录 **502,006 文件 / 5.75 GB**（247,808 个 `.swa_`、253,952 个 FULL、246 个 `.mamba_`）；
   page=256 目录跑完 9 个用例只有 **47 文件 / 123 MB**。
+- IO 后端：`direct` 与 `kernel` 两条官方路径都实测可用。`kernel` 路径因 sglang-kernel 0.4.3 缺
+  `kvcacheio.get_device_accessible_ptr`，走上游自带的 raw host 指针表回退（启动告警一次），
+  L3 恢复 TTFT 122.7 / 295.0 / 481.3 ms，与 `direct`（124.2 / 280.4 / 473.6 ms）相当；
+  9/9 用例 greedy ids 与无缓存基准一致（`e050_timing_kernel.json`、`e050_kernel_backend_correctness.json`）。
 
 ## 6. 并发、驱逐、重复恢复、资源回收
 

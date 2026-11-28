@@ -1,0 +1,110 @@
+[
+ {
+  "case": "L1024_tail5",
+  "ids_equal": true,
+  "max_logprob_diff": 0.006559,
+  "cached": 1024,
+  "levels": {
+   "device": 1024,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L1024_tail8",
+  "ids_equal": true,
+  "max_logprob_diff": 0.006714,
+  "cached": 1024,
+  "levels": {
+   "device": 1024,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L1024_tail10",
+  "ids_equal": true,
+  "max_logprob_diff": 0.007549,
+  "cached": 1024,
+  "levels": {
+   "device": 1024,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L4096_tail5",
+  "ids_equal": true,
+  "max_logprob_diff": 0.002252,
+  "cached": 4096,
+  "levels": {
+   "device": 1024,
+   "host": 3072,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L4096_tail8",
+  "ids_equal": true,
+  "max_logprob_diff": 0.004868,
+  "cached": 4096,
+  "levels": {
+   "device": 4096,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L4096_tail10",
+  "ids_equal": true,
+  "max_logprob_diff": 0.001807,
+  "cached": 4096,
+  "levels": {
+   "device": 4096,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L8192_tail5",
+  "ids_equal": true,
+  "max_logprob_diff": 0.001006,
+  "cached": 8192,
+  "levels": {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L8192_tail8",
+  "ids_equal": true,
+  "max_logprob_diff": 0.000772,
+  "cached": 8192,
+  "levels": {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ {
+  "case": "L8192_tail10",
+  "ids_equal": true,
+  "max_logprob_diff": 0.001174,
+  "cached": 8192,
+  "levels": {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ }
+]

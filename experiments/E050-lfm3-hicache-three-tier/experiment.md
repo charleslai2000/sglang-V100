@@ -19,7 +19,7 @@
 | 精度 / 后端 | FP16，`--attention-backend triton`，`--sampling-backend pytorch` |
 | 长度/并发 | `--context-length 8448`，`--max-running-requests 32`，`--cuda-graph-max-bs-decode 32`，`--mem-fraction-static 0.60` |
 | Radix | `--mamba-radix-cache-strategy extra_buffer`（`mamba_track_interval=256`，LFM3 `mamba_chunk_size=256`） |
-| HiCache | `--enable-hierarchical-cache --hicache-host-memory-mode cache --hicache-io-backend direct --hicache-mem-layout page_first_direct --hicache-storage-backend file` |
+| HiCache | `--enable-hierarchical-cache --hicache-host-memory-mode cache --hicache-io-backend direct --hicache-mem-layout page_first_direct --hicache-storage-backend file`（`kernel` 后端同样实测可用，见结果 5） |
 | 页大小 | **`--page-size 256`**（对照实验：`--page-size 1`） |
 | 预取策略 | `--hicache-storage-prefetch-policy timeout` + extra_config `prefetch_timeout_base=20.0, prefetch_timeout_per_ki_token=5.0` |
 | 观测 | `--enable-metrics`（`/metrics` 提供 HiCache 计数） |
