@@ -1,0 +1,12 @@
+{
+ "cold_8192_wall_ms": 8146.4,
+ "backup_delta": {
+  "hicache_backup_duration_seconds_sum": 0.0116,
+  "hicache_backup_duration_seconds_count": 4.0,
+  "hicache_backup_bytes_total": 122912768.0,
+  "hicache_backup_tokens_total": 10244.0,
+  "load_back_bytes_total": 0.0,
+  "load_back_tokens_total": 0.0,
+  "hicache_host_used_tokens": 0.0
+ }
+}

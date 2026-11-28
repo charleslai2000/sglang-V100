@@ -72,6 +72,12 @@ TPOT 三档不受级别影响：7.0–7.1 / 7.7 / 8.6 ms。
   `kvcacheio.get_device_accessible_ptr`，走上游自带的 raw host 指针表回退（启动告警一次），
   L3 恢复 TTFT 122.7 / 295.0 / 481.3 ms，与 `direct`（124.2 / 280.4 / 473.6 ms）相当；
   9/9 用例 greedy ids 与无缓存基准一致（`e050_timing_kernel.json`、`e050_kernel_backend_correctness.json`）。
+- H2D（host→device，`load_back_duration_seconds_sum`）：1025 token 恢复 9.6 ms / 15.8 MB（≈1.6 GB/s）；
+  8193 token 恢复 11.3–16.5 ms / 103.9 MB（≈6–9 GB/s，仅 FULL 池计数）。
+- D2H（device→host，`hicache_backup_duration_seconds_sum`）：冷 8192 请求触发 4 次备份、
+  122.9 MB / 10,244 token 共 11.6 ms（≈10.6 GB/s），备份在请求完成后异步执行，不占首字延迟。
+- 磁盘读：8K 恢复 TTFT 与 L1 之差 180 ms 对应 ~195 MB → **≈1.1 GB/s**；page=1 同量需 7.7 s（≈25 MB/s）。
+  数据：`e050_io_durations.json`、`e050_d2h.json`。
 
 ## 6. 并发、驱逐、重复恢复、资源回收
 

@@ -1,0 +1,56 @@
+{
+ "1024": {
+  "warm_wall_ms": 228.8,
+  "warm_backup": {
+   "load_back_duration_seconds_sum": 0.0079,
+   "load_back_duration_seconds_count": 1.0,
+   "load_back_bytes_total": 15843328.0,
+   "load_back_tokens_total": 1282.0,
+   "hicache_host_used_tokens": 0.0,
+   "hicache_host_mamba_used_states": 0.0
+  },
+  "restore_wall_ms": 246.9,
+  "restore_load_back": {
+   "load_back_duration_seconds_sum": 0.0096,
+   "load_back_duration_seconds_count": 1.0,
+   "load_back_bytes_total": 15843328.0,
+   "load_back_tokens_total": 1282.0,
+   "hicache_host_used_tokens": 0.0,
+   "hicache_host_mamba_used_states": 0.0
+  },
+  "cached": 1024,
+  "levels": {
+   "device": 0,
+   "host": 0,
+   "storage": 1024,
+   "storage_backend": "HiCacheFile"
+  }
+ },
+ "8192": {
+  "warm_wall_ms": 640.9,
+  "warm_backup": {
+   "load_back_duration_seconds_sum": 0.0165,
+   "load_back_duration_seconds_count": 1.0,
+   "load_back_bytes_total": 103923712.0,
+   "load_back_tokens_total": 8450.0,
+   "hicache_host_used_tokens": 7168.0,
+   "hicache_host_mamba_used_states": 0.0
+  },
+  "restore_wall_ms": 439.4,
+  "restore_load_back": {
+   "load_back_duration_seconds_sum": 0.0113,
+   "load_back_duration_seconds_count": 1.0,
+   "load_back_bytes_total": 103923712.0,
+   "load_back_tokens_total": 8450.0,
+   "hicache_host_used_tokens": 0.0,
+   "hicache_host_mamba_used_states": 0.0
+  },
+  "cached": 8192,
+  "levels": {
+   "device": 0,
+   "host": 0,
+   "storage": 8192,
+   "storage_backend": "HiCacheFile"
+  }
+ }
+}
