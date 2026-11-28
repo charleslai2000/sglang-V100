@@ -1,0 +1,86 @@
+{
+ "churn": 28,
+ "hits": 4,
+ "length": 8192,
+ "l3_files": 44,
+ "elapsed_s": 156.3,
+ "completed": 32,
+ "anchor_hits_completed": 4,
+ "anchor_hits_ids_match": 4,
+ "anchor_hits_cached": [
+  8192,
+  8192,
+  8192,
+  8192
+ ],
+ "anchor_hits_details": [
+  {
+   "device": 4096,
+   "host": 0,
+   "storage": 4096,
+   "storage_backend": "HiCacheFile"
+  },
+  {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  },
+  {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  },
+  {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "HiCacheFile"
+  }
+ ],
+ "failures": [],
+ "metrics": {
+  "sglang:hicache_dropped_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"kv\",pp_rank=\"0\",reason=\"host_pressure\",tp_rank=\"0\"}": 0.0,
+  "sglang:hicache_dropped_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"kv\",pp_rank=\"0\",reason=\"write_through_unbacked_eviction\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"below_threshold\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"host_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_covered\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"storage_transfer\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"deadline\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"anchor_lost\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"aux_window_trim\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_overlap\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"cache_admission_shortfall\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"dropped\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_deferred_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"host_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_deferred_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:hicache_backup_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"kv\",pp_rank=\"0\",tp_rank=\"0\"}": 122880.0,
+  "sglang:hicache_backup_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"swa\",pp_rank=\"0\",tp_rank=\"0\"}": 31232.0,
+  "sglang:hicache_backup_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"mamba\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_bytes_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 1849253888.0,
+  "sglang:storage_prefetch_hit_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",storage_backend=\"file\",tp_rank=\"0\"}": 102400.0,
+  "sglang:hicache_backup_duration_seconds_sum{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.17291871923208238,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.001\",pp_rank=\"0\",tp_rank=\"0\"}": 1.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.005\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.01\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.05\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.1\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.2\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.5\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"1.0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"2.0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"5.0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"10.0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"30.0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"60.0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"+Inf\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_backup_duration_seconds_count{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 61.0,
+  "sglang:hicache_host_used_tokens{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 122880.0,
+  "sglang:hicache_host_total_tokens{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 328960.0,
+  "sglang:hicache_host_mamba_used_states{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 59.0,
+  "sglang:hicache_host_mamba_total_states{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 18965.0
+ },
+ "wall_s": 165.6
+}

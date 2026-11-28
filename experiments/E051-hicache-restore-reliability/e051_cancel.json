@@ -1,0 +1,69 @@
+{
+ "aborted": 6,
+ "after": [
+  {
+   "cached": 8192,
+   "details": {
+    "device": 8192,
+    "host": 0,
+    "storage": 0,
+    "storage_backend": "HiCacheFile"
+   },
+   "ids": [
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7
+   ],
+   "raw": null
+  },
+  {
+   "cached": 8192,
+   "details": {
+    "device": 8192,
+    "host": 0,
+    "storage": 0,
+    "storage_backend": "HiCacheFile"
+   },
+   "ids": [
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7
+   ],
+   "raw": null
+  },
+  {
+   "cached": 8192,
+   "details": {
+    "device": 8192,
+    "host": 0,
+    "storage": 0,
+    "storage_backend": "HiCacheFile"
+   },
+   "ids": [
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7
+   ],
+   "raw": null
+  }
+ ],
+ "host_used_before": null,
+ "host_used_after": null,
+ "metrics": {},
+ "wall_s": 5.0
+}

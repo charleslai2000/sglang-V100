@@ -574,6 +574,15 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Whether the node is the tree root."""
         return self.node_by_id(node_id) is self.root_node
 
+    def node_exists(self, node_id: NodeId) -> bool:
+        """Whether the node id still resolves in the arena.
+
+        Eviction, drop and rotation delete ids while deferred references (an
+        in-flight prefetch anchor, a parked waiter) may still name them, so a
+        holder validates before dereferencing.
+        """
+        return node_id in self._node_arena
+
     supports_rotation_base = True
 
     def rotation_base_of(self, node_id: NodeId) -> Optional[int]:

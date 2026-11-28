@@ -279,6 +279,11 @@ class PrefetchOperation(StorageOperation):
         self._lock = threading.Lock()
         self._terminated_flag = False
         self.storage_hit_count = 0
+        # Set when a ``wait_complete`` wait is cut because its completion
+        # stopped arriving; distinct from a policy deadline on purpose.
+        self.prefetch_stalled = False
+        # Host staging attempts already requeued for this validated hit.
+        self.staging_deferrals = 0
         self.start_time = time.monotonic()
 
         super().__init__(None, token_ids, last_hash, prefix_keys=prefix_keys)

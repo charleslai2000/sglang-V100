@@ -222,6 +222,16 @@ class UnifiedTreeCoreInterface(ABC):
         """Whether the node is the tree root."""
         ...
 
+    @abstractmethod
+    def node_exists(self, node_id: NodeId) -> bool:
+        """Whether the node id still resolves in the arena.
+
+        A deferred reference (an in-flight async prefetch, a parked waiter)
+        outlives the node it names; eviction and drop delete ids without
+        notifying its holders, so a holder must re-check before dereferencing.
+        """
+        ...
+
     # Logical-page KV sharding: whether this core stamps and honors
     # UnifiedTreeNode.rotation_base. A core that does not cannot serve a
     # sharded allocator (it would never decline a cross-base graft), and

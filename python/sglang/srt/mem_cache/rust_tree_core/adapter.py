@@ -1058,6 +1058,16 @@ class RustUnifiedTreeCore(UnifiedTreeCoreInterface):
     def is_root(self, node_id: NodeId) -> bool:
         return self._binding.is_root(node_id)
 
+    def node_exists(self, node_id: NodeId) -> bool:
+        # The binding has no liveness predicate; a hash read on a deleted id
+        # fails with NodeAccessError, so that read is the probe (a live node
+        # without a recorded chain still answers None).
+        try:
+            self._binding.get_last_hash_value(node_id)
+        except Exception:
+            return False
+        return True
+
     def get_last_hash_value(self, node_id: NodeId) -> Optional[str]:
         return self._binding.get_last_hash_value(node_id)
 

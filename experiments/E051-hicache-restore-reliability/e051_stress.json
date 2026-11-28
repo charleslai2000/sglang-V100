@@ -1,0 +1,93 @@
+{
+ "clients": 32,
+ "length": 8192,
+ "rounds": [
+  {
+   "round": 0,
+   "elapsed_s": 183.0,
+   "completed": 32,
+   "host_hits": 0,
+   "storage_hits": 1,
+   "cached": [
+    4096
+   ],
+   "failures": []
+  },
+  {
+   "round": 1,
+   "elapsed_s": 175.5,
+   "completed": 32,
+   "host_hits": 0,
+   "storage_hits": 0,
+   "cached": [
+    4096
+   ],
+   "failures": []
+  },
+  {
+   "round": 2,
+   "elapsed_s": 175.5,
+   "completed": 32,
+   "host_hits": 0,
+   "storage_hits": 0,
+   "cached": [
+    4096
+   ],
+   "failures": []
+  },
+  {
+   "round": 3,
+   "elapsed_s": 175.6,
+   "completed": 32,
+   "host_hits": 0,
+   "storage_hits": 0,
+   "cached": [
+    4096
+   ],
+   "failures": []
+  }
+ ],
+ "metrics": {
+  "sglang:hicache_backup_duration_seconds_sum{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 0.840912543058395,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.001\",pp_rank=\"0\",tp_rank=\"0\"}": 3.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.005\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.01\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.05\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.1\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.2\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"0.5\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"1.0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"2.0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"5.0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"10.0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"30.0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"60.0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_bucket{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",le=\"+Inf\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_duration_seconds_count{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_dropped_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"kv\",pp_rank=\"0\",reason=\"host_pressure\",tp_rank=\"0\"}": 0.0,
+  "sglang:hicache_dropped_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"kv\",pp_rank=\"0\",reason=\"write_through_unbacked_eviction\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"below_threshold\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"host_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_covered\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"storage_transfer\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"deadline\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"anchor_lost\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"aux_window_trim\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_overlap\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"cache_admission_shortfall\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_unfulfilled_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"dropped\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_deferred_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"host_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:storage_prefetch_deferred_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",reason=\"device_capacity\",storage_backend=\"file\",tp_rank=\"0\"}": 0.0,
+  "sglang:hicache_backup_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"kv\",pp_rank=\"0\",tp_rank=\"0\"}": 561408.0,
+  "sglang:hicache_backup_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"swa\",pp_rank=\"0\",tp_rank=\"0\"}": 141312.0,
+  "sglang:hicache_backup_tokens_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pool=\"mamba\",pp_rank=\"0\",tp_rank=\"0\"}": 278.0,
+  "sglang:hicache_backup_bytes_total{cache_type=\"UnifiedRadixCache\",dp_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 8434434048.0,
+  "sglang:storage_prefetch_hit_tokens_total{attn_cp_rank=\"0\",attn_cp_size=\"1\",dp_rank=\"0\",pp_rank=\"0\",pp_size=\"1\",storage_backend=\"file\",tp_rank=\"0\"}": 176640.0,
+  "sglang:hicache_host_used_tokens{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 327680.0,
+  "sglang:hicache_host_total_tokens{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 328960.0,
+  "sglang:hicache_host_mamba_used_states{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 160.0,
+  "sglang:hicache_host_mamba_total_states{engine_type=\"unified\",model_name=\"/var/tmp/lfm3\",moe_ep_rank=\"0\",pp_rank=\"0\",tp_rank=\"0\"}": 18965.0
+ },
+ "wall_s": 709.6
+}

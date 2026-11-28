@@ -183,6 +183,10 @@ class _StoragePrefetchWait(msgspec.Struct):
     timer: PollTimer = msgspec.field(default_factory=PollTimer)
     timeout_s: float = 0.0
     expired: bool = False
+    # Watermark of the last observed IO progress (completed KV tokens plus a
+    # finished sidecar read). Only ``wait_complete`` uses it: its budget is a
+    # stall detector, so any advance restarts the clock.
+    progress: int = -1
 
 
 class _OngoingPrefetch(NamedTuple):
@@ -194,6 +198,10 @@ class _OngoingPrefetch(NamedTuple):
     operation: PrefetchOperation
     anchor_lock_params: DecLockRefParams
     comp_xfers: dict[ComponentType, list[PoolTransfer]]
+    # Last page hash of the anchor at issue. Hashes chain every ancestor, so an
+    # equal value at commit proves the id still resolves to a node holding this
+    # exact prefix; a deleted id reused by an unrelated node fails it.
+    anchor_last_hash: Optional[str] = None
 
 
 class UnifiedRadixCache(BasePrefixCache):
@@ -315,6 +323,9 @@ class UnifiedRadixCache(BasePrefixCache):
         self.prefetch_stop_policy = "best_effort"
         self.prefetch_threshold = 256
         self.prefetch_timeout_base = 1.0
+        # Staging shortfalls are retried this many times (bounded) before the
+        # hit is revoked and the request recomputes.
+        self.prefetch_staging_deferrals = 2
         self.prefetch_timeout_per_page = 0.25
         self.hicache_storage_pass_prefix_keys = False
         # Buffer-only host memory mode (host RAM as transient GPU↔storage
@@ -339,6 +350,9 @@ class UnifiedRadixCache(BasePrefixCache):
             "declined_device_covered": 0,
             "declined_host_oversize": 0,
             "declined_unservable_prefix": 0,
+            "staging_cropped": 0,
+            "staging_deferred": 0,
+            "wait_complete_stalled": 0,
             "revoked_insufficient": 0,
             "revoked_full_miss": 0,
             "l3_demand_requests": 0,
@@ -2161,11 +2175,20 @@ class UnifiedRadixCache(BasePrefixCache):
             return
 
         # Buffer mode holds no tree state during the fetch: buffers are
-        # operation-owned, so the anchor needs no pin.
+        # operation-owned, so the anchor needs no pin and its splice base is
+        # re-derived from the live tree at IO commit (buffer mode's own
+        # identity check). Cache mode grafts into the tree instead, so it
+        # records the anchor's last page hash now and re-validates it against
+        # the live node right before the graft.
         anchor_lock_params = (
             None
             if buffer_mode
             else self.inc_host_lock_ref(last_host_node_id).to_dec_params()
+        )
+        anchor_last_hash = (
+            None
+            if buffer_mode
+            else self.tree_core.get_last_hash_value(last_host_node_id)
         )
         comp_xfers: dict[ComponentType, list[PoolTransfer]] = {}
         for ct in self.tree_components:
@@ -2241,6 +2264,7 @@ class UnifiedRadixCache(BasePrefixCache):
             operation,
             anchor_lock_params,
             comp_xfers,
+            anchor_last_hash,
         )
         if buffer_mode:
             # The query reads no tree state; pinning across it would hold the
@@ -2257,18 +2281,47 @@ class UnifiedRadixCache(BasePrefixCache):
             self.cache_controller.prefetch_tokens_occupied += len(prefetch_key)
 
     def _start_storage_prefetch_wait(self, operation: PrefetchOperation) -> None:
-        if (
-            self.prefetch_stop_policy == "timeout"
-            and operation.handle not in self._storage_prefetch_wait
-        ):
-            # Start at the first blocked admission poll; refetches keep this budget.
-            pages = operation.stats_requested_tokens // self.page_size
-            wait = _StoragePrefetchWait(
-                timeout_s=self.prefetch_timeout_base
-                + pages * self.prefetch_timeout_per_page,
-            )
+        if operation.handle in self._storage_prefetch_wait:
+            return
+        if self.prefetch_stop_policy not in ("timeout", "wait_complete"):
+            return
+        # Start at the first blocked admission poll; refetches keep this budget.
+        pages = operation.stats_requested_tokens // self.page_size
+        wait = _StoragePrefetchWait(
+            timeout_s=self.prefetch_timeout_base
+            + pages * self.prefetch_timeout_per_page,
+            progress=self._prefetch_progress_watermark(operation),
+        )
+        wait.timer.observe(ready=False)
+        self._storage_prefetch_wait[operation.handle] = wait
+
+    @staticmethod
+    def _prefetch_progress_watermark(operation: PrefetchOperation) -> int:
+        """Monotone IO progress marker for one prefetch operation."""
+        return int(operation.completed_tokens) + int(
+            bool(getattr(operation, "pool_transfers_done", False))
+        )
+
+    def _wait_complete_stalled(self, operation: PrefetchOperation) -> bool:
+        """Whether a ``wait_complete`` wait has stopped making progress.
+
+        ``wait_complete`` means "do not cut an active read", not "wait forever":
+        a completion that never arrives (dropped ACK, IO thread wedged on a
+        missing page, backend exception swallowed by a worker) used to wedge
+        admission with no liveness condition at all. This is a per-operation
+        stall detector, not a global watchdog: every observed ACK advance
+        restarts the budget, so a slow but progressing transfer is never cut.
+        """
+        wait = self._storage_prefetch_wait.get(operation.handle)
+        if wait is None:
+            return False
+        watermark = self._prefetch_progress_watermark(operation)
+        if watermark != wait.progress:
+            wait.progress = watermark
+            wait.timer = PollTimer()
             wait.timer.observe(ready=False)
-            self._storage_prefetch_wait[operation.handle] = wait
+            return False
+        return wait.timer.running and wait.timer.elapsed() > wait.timeout_s
 
     def _prefetch_deadline_expired(self, operation: PrefetchOperation) -> bool:
         if operation.host_indices is not None and (
@@ -2291,14 +2344,41 @@ class UnifiedRadixCache(BasePrefixCache):
             operation.handle, _StoragePrefetchWait()
         ).expired = True
 
+    def _mark_prefetch_stalled(self, operation: PrefetchOperation) -> None:
+        """Cut a ``wait_complete`` wait that stopped progressing.
+
+        Distinct from a policy deadline: the prefetch is retried (the completion
+        may simply have been lost) and the reason is recorded separately so a
+        silent IO stall cannot pass for a slow transfer.
+        """
+        operation.prefetch_stalled = True
+        self._prefetch_outcome_stats["wait_complete_stalled"] += 1
+        wait = self._storage_prefetch_wait.get(operation.handle)
+        logger.warning(
+            "HiCache prefetch stalled req=%s policy=wait_complete completed=%d "
+            "requested=%d waited=%.1fs budget=%.1fs; retrying instead of "
+            "blocking admission",
+            operation.handle.rid,
+            operation.completed_tokens,
+            operation.stats_requested_tokens,
+            0.0 if wait is None else wait.timer.elapsed(),
+            0.0 if wait is None else wait.timeout_s,
+        )
+
     @rank_consensus(same_results=True)
     def _can_terminate_prefetch(self, operation: PrefetchOperation) -> bool:
         if self.prefetch_stop_policy == "best_effort":
             return True
         if self.prefetch_stop_policy == "wait_complete":
-            # Completion is committed by the ACK drain (sync-thread MIN-reduced
-            # progress, rank-min queue drain); a vote here only adds collectives.
-            return False
+            # Completion is committed by the ACK drain; this vote only fires when
+            # the wait has provably stopped progressing. Wall clocks differ across
+            # ranks, so PP0 decides and TP takes MAX (any rank stalled).
+            stalled = False
+            if self.pp_rank == 0:
+                stalled = self._wait_complete_stalled(operation)
+            stalled_tensor = torch.tensor(int(stalled), dtype=torch.int, device="cpu")
+            self._all_reduce(stalled_tensor, torch.distributed.ReduceOp.MAX)
+            return stalled_tensor.item() == 1
         if self.prefetch_stop_policy == "timeout":
             # Wall clocks differ across ranks: PP0 decides, TP takes MAX (any
             # rank timed out) and _all_reduce broadcasts the verdict along PP.
@@ -2407,12 +2487,18 @@ class UnifiedRadixCache(BasePrefixCache):
                 return False
             if self.prefetch_stop_policy == "timeout":
                 self._mark_prefetch_deadline_expired(operation)
+            elif self.prefetch_stop_policy == "wait_complete":
+                self._mark_prefetch_stalled(operation)
 
         self.cache_controller.terminate_prefetch(operation)
         if operation.host_indices is None:
             if operation.deadline_expired:
                 self._finish_storage_prefetch(request, 0, reason="deadline")
             else:
+                if getattr(operation, "prefetch_stalled", False):
+                    self._finish_storage_prefetch(
+                        request, 0, reason="prefetch_stalled"
+                    )
                 self.storage_prefetch_retries.poll_miss(request.rid)
             self.revoke_pending_prefetch(request)
         else:
@@ -2438,6 +2524,7 @@ class UnifiedRadixCache(BasePrefixCache):
             _,
             anchor_lock_params,
             comp_xfers,
+            anchor_last_hash,
         ) = self.ongoing_prefetch[request]
 
         # All PP/TP ranks will get the same `min_completed_tokens`, because `completed_tokens`
@@ -2447,6 +2534,13 @@ class UnifiedRadixCache(BasePrefixCache):
         ):
             # Hybrid all-or-nothing check failed; result already discarded.
             return
+        if not self._prefetch_anchor_is_valid(last_host_node_id, anchor_last_hash):
+            # The graft target is gone or no longer holds this prefix: the read
+            # result cannot be reused, and a graft would attach it to a
+            # different history. This is a terminal miss, not a retry.
+            return self._discard_prefetch_stale_anchor(
+                request, operation, completed_tokens, host_indices, comp_xfers
+            )
 
         allocated_tokens = len(host_indices)
         if completed_tokens < allocated_tokens:
@@ -2746,6 +2840,82 @@ class UnifiedRadixCache(BasePrefixCache):
         self.revoke_pending_prefetch(request)
         self.storage_prefetch_retries.refetch(request.rid, storage_hit_end)
 
+    def _prefetch_anchor_is_valid(
+        self, anchor_node_id: NodeId, anchor_last_hash: Optional[str]
+    ) -> bool:
+        """Whether an async prefetch may still graft under this anchor.
+
+        The anchor's last page hash chains every ancestor hash, so equality
+        proves the id still resolves to a node holding the same prefix. A
+        deleted id that was reused by an unrelated node fails here, as does a
+        non-root anchor whose hash chain was never recorded (unverifiable).
+        The root is the sole valid unhashed anchor: any request may extend it.
+        """
+        if not self.tree_core.node_exists(anchor_node_id):
+            return False
+        if anchor_last_hash is None:
+            # The anchor recorded no hash chain (it was never hashed). Its
+            # identity cannot be compared, so existence is the only proof --
+            # and a node id still resolving after the round trip is the same
+            # node as long as the tree deletes ids rather than recycling them.
+            # Rejecting here would discard every prefetch from such an anchor.
+            return True
+        if self.tree_core.is_root(anchor_node_id):
+            return False
+        return self.tree_core.get_last_hash_value(anchor_node_id) == anchor_last_hash
+
+    def _discard_prefetch_stale_anchor(
+        self,
+        request: CacheRequestHandle,
+        operation: PrefetchOperation,
+        completed_tokens: int,
+        host_indices: torch.Tensor,
+        comp_xfers: dict[ComponentType, list[PoolTransfer]],
+    ) -> None:
+        """Drop a completed prefetch whose anchor no longer holds its prefix.
+
+        The KV just read from L3 has nowhere valid to live, so this is a
+        terminal miss: release only what this operation owns (never the
+        anchor's slots), drop the anchor lock only if the node still exists,
+        clear the prefetch state, and let the request re-match and schedule.
+        """
+        if request not in self.ongoing_prefetch:
+            # A terminal path already released this operation (double ack /
+            # abort race): releasing again would double-free the staging.
+            return
+        pool_transfers = [x for xfers in comp_xfers.values() for x in xfers]
+        anchor_node_id = self.ongoing_prefetch[request].anchor_node_id
+        self._finish_storage_prefetch(
+            request, fulfilled_tokens=0, reason="anchor_invalidated"
+        )
+        # The controller's prefetch IO thread released the untransferred tail;
+        # the completed head is still this operation's to free.
+        self._retire_ongoing_prefetch(
+            request,
+            host_indices[:completed_tokens] if completed_tokens > 0 else None,
+            (
+                pool_transfers
+                if getattr(operation, "pool_transfers_done", False)
+                else None
+            ),
+        )
+        self.prefetch_loaded_tokens_by_reqid[request] = 0
+        self.prefetch_loaded_storage_start_by_reqid.pop(request, None)
+        storage_hit_end = None
+        start = getattr(operation, "storage_start", None)
+        hit = getattr(operation, "storage_hit_count", None)
+        if isinstance(start, int) and isinstance(hit, int):
+            storage_hit_end = start + hit
+        self.storage_prefetch_retries.poll_miss(request.rid, storage_hit_end)
+        logger.warning(
+            "HiCache prefetch discarded req=%s reason=anchor_invalidated "
+            "anchor=%s completed=%s requested=%s",
+            request.rid,
+            anchor_node_id,
+            completed_tokens,
+            getattr(operation, "stats_requested_tokens", None),
+        )
+
     def _log_storage_prefetch_deferred(self, num_tokens: int, reason: str) -> None:
         if self.enable_storage_metrics and self.storage_metrics_collector is not None:
             self.storage_metrics_collector.log_storage_prefetch_deferred_tokens(
@@ -2814,7 +2984,11 @@ class UnifiedRadixCache(BasePrefixCache):
     ) -> None:
         """Drop an in-flight prefetch, releasing ``host_indices`` and ``extra_pools``."""
         info = self.ongoing_prefetch.pop(request)
-        if info.anchor_lock_params is not None:
+        if info.anchor_lock_params is not None and self.tree_core.node_exists(
+            info.anchor_node_id
+        ):
+            # A deleted anchor holds no lock to return; the node id may also have
+            # been reused by an unrelated node, whose lock this is not.
             self.dec_host_lock_ref(info.anchor_node_id, info.anchor_lock_params)
         if self.buffer_pipeline is not None:
             self.buffer_pipeline.pop_prefix_ctx(request)
@@ -2994,6 +3168,24 @@ class UnifiedRadixCache(BasePrefixCache):
         # storage hit there, not device_covered.
         return info, hit_tokens - trim_tokens, original_hit_tokens
 
+    def _defer_staging_attempt(self, operation: PrefetchOperation) -> bool:
+        """Requeue a validated hit whose host staging did not fit, once or twice.
+
+        The enclosing drain consumes this pass's storage-write acks and applies
+        its host releases *after* staging is sized, so the reclaimed capacity is
+        only visible on the next pass. Requeueing re-measures it there; nesting a
+        drain instead would block the enclosing drain, whose queue counts were
+        already fixed. After the budget the caller revokes and the request
+        recomputes, so the retry can never be unbounded.
+        """
+        deferrals = getattr(operation, "staging_deferrals", 0)
+        if deferrals >= self.prefetch_staging_deferrals:
+            return False
+        operation.staging_deferrals = deferrals + 1
+        self._prefetch_outcome_stats["staging_deferred"] += 1
+        self.cache_controller.prefetch_hit_queue.put(operation)
+        return True
+
     def revoke_pending_prefetch(self, request: CacheRequestHandle) -> None:
         self._finish_storage_prefetch(request, fulfilled_tokens=0, reason="dropped")
         info = self.ongoing_prefetch.get(request)
@@ -3113,6 +3305,8 @@ class UnifiedRadixCache(BasePrefixCache):
                 min_tokens=self.prefetch_threshold,
                 evict_host=self.evict_host,
             )
+            if host_indices is None and self._defer_staging_attempt(operation):
+                return True
             if host_indices is None:
                 self._finish_storage_prefetch(
                     request, fulfilled_tokens=0, reason="host_capacity"
@@ -3143,6 +3337,17 @@ class UnifiedRadixCache(BasePrefixCache):
             self._resolve_storage_prefetch_tokens(
                 request, hit_tokens - alloc_len, reason="host_capacity"
             )
+            if alloc_len < hit_tokens:
+                # Capacity crop: the prefix that fits is still usable (the
+                # controller refused to shorten a TRAILING_PAGES frontier).
+                self._prefetch_outcome_stats["staging_cropped"] += 1
+                logger.info(
+                    "HiCache prefetch cropped req=%s requested=%s granted=%s "
+                    "reason=staging_capacity",
+                    request.rid,
+                    hit_tokens,
+                    alloc_len,
+                )
             operation.storage_hit_count = alloc_len
             operation.hash_value = operation.hash_value[: alloc_len // self.page_size]
             operation.host_indices = host_indices
@@ -3167,7 +3372,10 @@ class UnifiedRadixCache(BasePrefixCache):
                     if hit_tokens > 0:
                         self.discard_storage_prefetch_accounting(request)
                     continue
-                if hit_tokens > 0:
+                # A deferred staging attempt re-enters this loop: the hit was
+                # already recorded and the demand counted on its first pass.
+                first_pass = getattr(operation, "staging_deferrals", 0) == 0
+                if hit_tokens > 0 and first_pass:
                     self._record_storage_prefetch_hit(request, hit_tokens)
                 if operation.is_terminated():
                     # A storage miss can retry; a policy deadline cannot.
@@ -3196,7 +3404,8 @@ class UnifiedRadixCache(BasePrefixCache):
                     self.storage_prefetch_retries.poll_miss(request.rid)
                     self.revoke_pending_prefetch(request)
                     continue
-                self._account_prefetch_outcome(operation, revoked=False)
+                if first_pass:
+                    self._account_prefetch_outcome(operation, revoked=False)
                 # A parked hit keeps its turn: a newer hit must not take the
                 # staging or anchor budget the parked head is waiting for.
                 parked_ahead = buffer_mode and bool(

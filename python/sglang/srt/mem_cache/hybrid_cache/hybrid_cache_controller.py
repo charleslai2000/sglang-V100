@@ -57,6 +57,65 @@ logger = logging.getLogger(__name__)
 _NO_POOL_VERDICT = -1
 
 
+def storage_hit_crop_is_safe(operation: StorageOperation, crop_len: int) -> bool:
+    """Whether a host-capacity crop preserves the validated storage frontier.
+
+    A hit whose pools only cover a window (SWA / Mamba state, ``TRAILING_PAGES``)
+    is validated as a *tail* that ends at the hit endpoint.  Shortening the
+    prefix would move that endpoint, so the validated span would no longer back
+    the pages the request is about to splice: those pools must be granted whole
+    or not at all.  ``ALL_PAGES`` pools (Full KV and KV-derived sidecars) are
+    page-aligned over the whole span, so a shorter prefix stays valid.
+    """
+    if crop_len >= operation.storage_hit_count:
+        return True
+    if getattr(operation, "sidecar_hash_values", None) is not None:
+        # A trimmed FULL head pins the sidecar window to the untrimmed hit
+        # endpoint, so shortening the KV prefix would desynchronise it.
+        return False
+    trailing_pages = getattr(PoolHitPolicy, "TRAILING_PAGES", None)
+    for transfer in getattr(operation, "pool_transfers", None) or []:
+        if (
+            trailing_pages is not None
+            and getattr(transfer, "hit_policy", None) == trailing_pages
+        ):
+            return False
+        if getattr(transfer, "indices_from_pool", None) is not None:
+            # KV-derived pool: its keys are the KV page chain, so its span
+            # would no longer line up with a shortened prefix.
+            return False
+    return True
+
+
+def staging_crop_length(
+    operation: StorageOperation,
+    alloc_len: int,
+    free_now: int,
+    page_size: int,
+    min_tokens: int,
+) -> int:
+    """Largest page-aligned prefix of a validated storage hit that fits now.
+
+    Returns 0 for "do not crop": nothing usable is free, the crop would be too
+    small to pay for its own transfer, or the hit is a ``TRAILING_PAGES``
+    frontier that the storage validation must not shorten.
+    """
+    page = max(1, int(page_size))
+    alloc_len = int(alloc_len)
+    crop_len = (max(0, int(free_now)) // page) * page
+    if crop_len >= alloc_len:
+        crop_len = alloc_len
+    if crop_len <= 0:
+        return 0
+    # A crop that keeps less than an eighth of the hit pays more (in lost
+    # restore span and the re-query it forces) than the transfer it saves.
+    if crop_len < max(page, alloc_len // 8, int(min_tokens)):
+        return 0
+    if not storage_hit_crop_is_safe(operation, crop_len):
+        return 0
+    return crop_len
+
+
 @dataclass(frozen=True)
 class PPPrefetchPoolSpec:
     name: PoolName
@@ -802,6 +861,14 @@ class HybridCacheController(BaseHiCacheController):
         min_tokens: int,
         evict_host: Callable[[int], int],
     ) -> tuple[Optional[torch.Tensor], int]:
+        """Allocate the host bounce for a validated storage hit.
+
+        Bounded to one pass of each step so the staging path cannot loop: full
+        allocation, one host eviction, then a page-aligned capacity crop that
+        must still pay for its own transfer. Everything else is a shortfall the
+        caller re-measures on its next pass (bounded requeue) and only then
+        turns into a re-query.
+        """
         host_indices = self.alloc_prefetch_host_buffers(operation, hit_tokens)
         shared = uses_shared_host_layout(self.mem_pool_host.anchor_entry.host_pool)
         if host_indices is None and not shared:
@@ -820,13 +887,17 @@ class HybridCacheController(BaseHiCacheController):
                     low = mid
                 else:
                     high = mid - 1
-            alloc_len = low * self.page_size
+            free_now = low * self.page_size
         else:
-            available = self.mem_pool_host.available_size()
-            alloc_len = min(hit_tokens, available - available % self.page_size)
-        if alloc_len >= min_tokens:
+            free_now = self.mem_pool_host.available_size()
+        alloc_len = staging_crop_length(
+            operation, hit_tokens, free_now, self.page_size, min_tokens
+        )
+        if alloc_len > 0:
             host_indices = self.alloc_prefetch_host_buffers(operation, alloc_len)
-        return host_indices, alloc_len
+            if host_indices is not None:
+                return host_indices, alloc_len
+        return None, 0
 
     def free_prefetch_host_buffers(
         self, operation: StorageOperation, host_indices: torch.Tensor
