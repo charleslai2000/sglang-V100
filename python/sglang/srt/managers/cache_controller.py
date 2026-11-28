@@ -14,6 +14,7 @@ limitations under the License.
 """
 
 
+import inspect
 import logging
 import threading
 import time
@@ -1423,6 +1424,27 @@ class HiCacheController:
             self.storage_backend.batch_set_v1(hash_values, host_indices, extra_info)
         )
 
+    def _storage_accepts_grouped_v1(self) -> bool:
+        """Whether the backend's zero-copy writer takes a group identity."""
+        cached = getattr(self, "_grouped_v1_supported", None)
+        if cached is None:
+            setter = getattr(self.storage_backend, "batch_set_v1", None)
+            try:
+                params = inspect.signature(setter).parameters
+            except (TypeError, ValueError):
+                params = {}
+            # v1 also needs the anchor pool's per-page buffer metadata; without
+            # it the zero-copy writer refuses every batch, so pick the writer
+            # once per controller instead of discovering it per backup.
+            anchor_pool = getattr(self.storage_backend, "mem_pool_host", None)
+            cached = (
+                callable(setter)
+                and "group_id" in params
+                and callable(getattr(anchor_pool, "get_page_buffer_meta", None))
+            )
+            self._grouped_v1_supported = cached
+        return cached
+
     def _page_set_for_operation(
         self, hash_values, host_indices, extra_info, operation
     ) -> bool:
@@ -1436,6 +1458,16 @@ class HiCacheController:
         group_id = getattr(operation, "group_id", None)
         if group_id is None:
             return self.page_set_func(hash_values, host_indices, extra_info)
+
+        # Zero-copy v1 is the cheaper writer for large page counts when the
+        # backend can stage it into the group; otherwise fall back to the v2
+        # transfer route.
+        if self._storage_accepts_grouped_v1():
+            return all(
+                self.storage_backend.batch_set_v1(
+                    hash_values, host_indices, extra_info, group_id=group_id
+                )
+            )
 
         transfer = PoolTransfer(
             name=PoolName.KV,

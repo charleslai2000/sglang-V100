@@ -1288,7 +1288,10 @@ class ExtentFileBackend(HiCacheStorage):
             FRAME_BATCH_COMMIT,
             encode_batch_commit_payload(BatchCommitPayload(batch_id, 1)),
         )
-        self._sync_wal()
+        # A staged member is invisible until GROUP_COMMIT makes it durable, so
+        # its own frame needs no fsync; one sync at commit covers the group.
+        if group_id is None:
+            self._sync_wal()
 
     def _append_ungrouped_commit(self, storage_keys, refs, component: int) -> None:
         self._append_batch_commit(storage_keys, refs, component)
@@ -1569,9 +1572,23 @@ class ExtentFileBackend(HiCacheStorage):
         keys: List[str],
         host_indices,
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
+        group_id=None,
     ) -> List[bool]:
+        """Zero-copy write; ``group_id`` stages the pages for a later commit."""
         with self._write_gate:
-            result = self._batch_set_v1_locked(keys, host_indices, extra_info)
+            if group_id is not None:
+                try:
+                    group_id = self._validate_group_id(group_id)
+                except ValueError:
+                    return [False] * len(keys)
+                if (
+                    group_id[0] != self._namespace_epoch
+                    or group_id not in self._staged_groups
+                ):
+                    return [False] * len(keys)
+            result = self._batch_set_v1_locked(
+                keys, host_indices, extra_info, group_id
+            )
             self._signal_wal_checkpoint_if_needed()
             return result
 
@@ -1580,6 +1597,7 @@ class ExtentFileBackend(HiCacheStorage):
         keys: List[str],
         host_indices,
         extra_info: Optional[HiCacheStorageExtraInfo] = None,
+        group_id=None,
     ) -> List[bool]:
         """Zero-copy write: pwritev the host pool blocks into packed extents.
 
@@ -1604,7 +1622,7 @@ class ExtentFileBackend(HiCacheStorage):
         blocks = self._v1_host_blocks(ptr_list, size_list, blocks_per_page)
         with self._lock:
             pending_drops = self._select_gc_victims()
-            refs, passed, drop_events = self._allocator.plan_split(
+            refs, passed, drop_events = self._plan_split_with_staged(
                 list(zip(storage_keys, page_lens)), pending_drops
             )
             if any(r is None for r in refs):
@@ -1646,13 +1664,22 @@ class ExtentFileBackend(HiCacheStorage):
                     iovecs.extend(blocks[i])
                 if not self._pwritev(extent_id * self._extent_size + first, iovecs):
                     return [False] * len(keys)
+            kv_component = component_from_pool_name(PoolName.KV)
             try:
-                self._append_ungrouped_commit(
-                    storage_keys, refs, component_from_pool_name(PoolName.KV)
+                self._append_batch_commit(
+                    storage_keys, refs, kv_component, group_id=group_id
                 )
             except Exception as exc:
                 logger.error("ExtentFileBackend: WAL commit failed: %s", exc)
                 return [False] * len(keys)
+            if group_id is not None:
+                return (
+                    [True] * len(keys)
+                    if self._stage_group_members(
+                        group_id, storage_keys, refs, kv_component, drop_events
+                    )
+                    else [False] * len(keys)
+                )
             trace_context = getattr(self, "_t38c_durable_context", None) or {
                 "pool": "kv",
                 "final_kv_hash": keys[-1] if keys else "",

@@ -2404,6 +2404,52 @@ class TestExtentV1ZeroCopy(ExtentBackendTestBase):
         page = self.host_pool.kv_buffer[:, page_idx * ps : (page_idx + 1) * ps]
         return page.flatten().view(torch.uint8).numpy().tobytes()
 
+    def test_v1_grouped_write_is_invisible_until_commit(self):
+        """v1 batches staged into a group stay invisible until it commits."""
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        indices = self._host_indices(self.num_pages)
+        group_id = self.backend.open_group()
+        self.assertEqual(
+            self.backend.batch_set_v1(keys, indices, group_id=group_id),
+            [True] * self.num_pages,
+        )
+        # Staged, so neither existence nor the allocator index may see it.
+        self.assertEqual(self.backend.batch_exists(keys), 0)
+        self.assertFalse(self.backend.exists(keys[-1]))
+        self.assertTrue(self.backend.commit_group(group_id))
+        self.assertEqual(self.backend.batch_exists(keys), self.num_pages)
+
+        # Bytes are the same flat pages the ungrouped v1 write produces.
+        targets = [bytearray(self.PAGE_BYTES) for _ in keys]
+        got = self.backend.batch_get(keys, targets)
+        for i, g in enumerate(got):
+            self.assertIsNotNone(g)
+            self.assertEqual(bytes(g), self._flat_bytes(i))
+
+    def test_v1_grouped_write_aborted_leaves_nothing(self):
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        indices = self._host_indices(self.num_pages)
+        group_id = self.backend.open_group()
+        self.assertEqual(
+            self.backend.batch_set_v1(keys, indices, group_id=group_id),
+            [True] * self.num_pages,
+        )
+        self.assertTrue(self.backend.abort_group(group_id))
+        self.assertFalse(self.backend.exists(keys[-1]))
+        self.assertEqual(self.backend.batch_exists(keys), 0)
+
+    def test_v1_grouped_write_refused_for_foreign_group(self):
+        self._fill_pool()
+        keys = self._make_keys(self.num_pages)
+        self.assertEqual(
+            self.backend.batch_set_v1(
+                keys, self._host_indices(self.num_pages), group_id=(b"\x01" * 16, 7)
+            ),
+            [False] * self.num_pages,
+        )
+
     def test_v1_write_then_flat_read_round_trip(self):
         # v1 write gathers the pool's k/v blocks into stored flat pages, and
         # the flat-page read path must return them byte-identical (v1 write
