@@ -26,7 +26,7 @@ import torch
 from torch import nn
 
 from sglang.srt.configs.lfm3 import Lfm3Config
-from sglang.srt.distributed import (
+from sglang.srt.distributed.parallel_state import (
     get_pp_group,
     get_tensor_model_parallel_world_size,
 )

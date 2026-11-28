@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
 
-register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
+register_cuda_ci(est_time=9, stage="base-b", runner_config="1-gpu-small")
 register_amd_ci(est_time=20, suite="stage-b-test-1-gpu-small-amd")
 
 # Adapted from https://github.com/vllm-project/vllm/blob/633f943e30a4444d890d26b81850f7217736f840/tests/kernels/mamba/test_mamba_ssm_ssd.py
@@ -13,9 +13,9 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange, repeat
 
-from sglang.srt.layers.attention.mamba.causal_conv1d_triton import PAD_SLOT_ID
-from sglang.srt.layers.attention.mamba.ops import selective_state_update
-from sglang.srt.utils import get_device
+from sglang.kernels.ops.mamba.causal_conv1d_triton import PAD_SLOT_ID
+from sglang.kernels.ops.mamba.triton_ops.mamba_ssm import selective_state_update
+from sglang.srt.utils import get_device, is_sm100_supported
 
 
 def selective_state_update_ref(
@@ -297,42 +297,65 @@ def test_selective_state_update_with_heads_with_batch_indices(
     assert torch.allclose(out, out_ref, rtol=rtol, atol=atol)
 
 
-@pytest.mark.parametrize("itype", [torch.float32, torch.float16])
-@pytest.mark.parametrize("dim,dstate,ngroups", [(128, 256, 1), (256, 128, 2)])
-def test_selective_state_update_tie_hdim_zero_stride(dim, dstate, ngroups, itype):
-    """Exercise the existing TIE_HDIM branch with exact broadcast views."""
-    device = get_device()
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("Test only supports CUDA and XPU devices")
-    torch.manual_seed(20261006)
-    batch, heads = 4, 4
-    state = torch.randn(8, heads, dim, dstate, device=device, dtype=torch.float32)
-    initial = state.clone()
-    state_indices = torch.tensor([1, 3, 4, 6], device=device, dtype=torch.int32)
-    x = torch.randn(batch, heads, dim, device=device, dtype=itype)
-    dt_head = torch.randn(batch, heads, device=device, dtype=itype)
-    A_head = -torch.rand(heads, device=device, dtype=torch.float32) - 0.5
-    bias_head = torch.randn(heads, device=device, dtype=itype)
-    D_head = torch.randn(heads, device=device, dtype=itype)
-    dt = dt_head[..., None].expand(-1, -1, dim)
-    A = A_head[:, None, None].expand(-1, dim, dstate)
-    dt_bias = bias_head[:, None].expand(-1, dim)
-    D = D_head[:, None].expand(-1, dim)
-    B = torch.randn(batch, ngroups, dstate, device=device, dtype=itype)
-    C = torch.randn_like(B)
+@pytest.mark.skipif(
+    not is_sm100_supported(),
+    reason=(
+        "Triton stochastic rounding uses cvt.rs.f16x2.f32 and requires "
+        "SM100-family Blackwell with CUDA >= 12.8"
+    ),
+)
+@pytest.mark.parametrize("philox_rounds", [0, 4])
+@pytest.mark.parametrize("has_z", [False, True])
+@pytest.mark.parametrize("dstate", [16, 64])
+@pytest.mark.parametrize("dim", [2048, 4096])
+def test_selective_state_update_stochastic_rounding(dim, dstate, has_z, philox_rounds):
+    device = "cuda"
+    torch.manual_seed(0)
+
+    batch_size = 2
+    state = torch.randn(batch_size, dim, dstate, dtype=torch.float16, device=device)
+    x = torch.randn(batch_size, dim, device=device, dtype=torch.bfloat16)
     out = torch.empty_like(x)
-    assert A.stride(-1) == A.stride(-2) == dt.stride(-1) == dt_bias.stride(-1) == 0
+    dt = torch.randn(batch_size, dim, device=device, dtype=torch.bfloat16)
+    dt_bias = torch.rand(dim, device=device) - 4.0
+    A = -torch.rand(dim, dstate, device=device) - 1.0
+    B = torch.randn(batch_size, dstate, device=device)
+    C = torch.randn(batch_size, dstate, device=device)
+    D = torch.randn(dim, device=device)
+    z = torch.randn_like(x) if has_z else None
+    state_ref = state.float()
 
     selective_state_update(
-        state, x, dt, A, B, C, D=D, dt_bias=dt_bias, dt_softplus=True,
-        state_batch_indices=state_indices, out=out
+        state,
+        x,
+        dt,
+        A,
+        B,
+        C,
+        D=D,
+        z=z,
+        dt_bias=dt_bias,
+        dt_softplus=True,
+        out=out,
+        enable_stochastic_rounding=True,
+        cache_philox_rounds=philox_rounds,
     )
-    state_ref = initial[state_indices.long()].clone()
     out_ref = selective_state_update_ref(
-        state_ref, x, dt, A, B, C, D=D, dt_bias=dt_bias, dt_softplus=True
+        state_ref,
+        x,
+        dt,
+        A,
+        B,
+        C,
+        D=D,
+        z=z,
+        dt_bias=dt_bias,
+        dt_softplus=True,
     )
-    assert torch.allclose(state[state_indices.long()], state_ref, rtol=5e-3, atol=3e-2)
-    assert torch.allclose(out, out_ref, rtol=5e-3, atol=3e-2)
+
+    assert state.dtype == torch.float16
+    assert torch.allclose(state, state_ref.to(torch.float16), rtol=5e-3, atol=1e-1)
+    assert torch.allclose(out, out_ref, rtol=5e-3, atol=1e-1)
 
 
 if __name__ == "__main__":

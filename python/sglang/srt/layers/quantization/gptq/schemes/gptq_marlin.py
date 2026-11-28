@@ -13,6 +13,7 @@ from sglang.srt.layers.parameter import (
     RowvLLMParameter,
 )
 from sglang.srt.layers.quantization.marlin_utils import (
+    MarlinLinearLayerConfig,
     marlin_repeat_scales_on_all_ranks,
     verify_marlin_supported,
 )
@@ -26,18 +27,21 @@ __all__ = ["GPTQMarlinLinearScheme"]
 
 
 class GPTQMarlinLinearScheme(GPTQLinearSchemeBase):
-    def __init__(self, quant_config: "GPTQMarlinConfig"):
-        from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
-            GPTQMarlinLinearKernel,
-        )
-
+    def __init__(self, quant_config: GPTQMarlinConfig):
         self.quant_config = quant_config
-        self.kernel = GPTQMarlinLinearKernel(quant_config)
+        self.kernel = self._init_kernel(quant_config)
 
         verify_marlin_supported(
             quant_type=self.quant_config.quant_type,
             group_size=self.quant_config.group_size,
         )
+
+    def _init_kernel(self, quant_config: GPTQMarlinConfig):
+        from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
+            GPTQMarlinLinearKernel,
+        )
+
+        return GPTQMarlinLinearKernel(quant_config)
 
     def create_weights(
         self,
@@ -52,10 +56,6 @@ class GPTQMarlinLinearScheme(GPTQLinearSchemeBase):
     ) -> None:
         output_size_per_partition = sum(output_partition_sizes)
         is_row_parallel = input_size != input_size_per_partition
-
-        from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
-            MarlinLinearLayerConfig,
-        )
 
         self.kernel.kernel_config = MarlinLinearLayerConfig(
             full_weight_shape=(input_size, output_size),

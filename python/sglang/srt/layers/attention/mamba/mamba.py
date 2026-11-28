@@ -1,29 +1,24 @@
-import hashlib
-import json
 import logging
-import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 
-_G023_PROMPT_LENS = {}
-_G023_DECODE_STEPS = {}
-
+from sglang.kernels.ops.mamba.triton_ops import (
+    mamba_chunk_scan_combined,
+    selective_state_update,
+)
 from sglang.srt.configs.mamba_utils import (
     Mamba2CacheParams,
     extra_groups_for_head_shards,
 )
 from sglang.srt.distributed import (
     divide,
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
 )
 from sglang.srt.layers.attention.mamba.mamba2_metadata import Mamba2Metadata
 from sglang.srt.layers.attention.mamba.mixer2_rms_norm_gated import Mixer2RMSNormGated
-from sglang.srt.layers.attention.mamba.ops import (
-    mamba_chunk_scan_combined,
-    selective_state_update,
+from sglang.srt.layers.dp_attention import (
+    is_dp_attention_enabled,
 )
 from sglang.srt.layers.linear import (
     ColumnParallelLinear,
@@ -32,28 +27,29 @@ from sglang.srt.layers.linear import (
 )
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.mem_cache.memory_pool import MambaPool
-from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_loader.weight_utils import (
     composed_weight_loader,
     sharded_weight_loader,
 )
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import (
     is_cpu,
     is_cuda,
     is_npu,
+    is_xpu,
     set_weight_attrs,
 )
 
 if is_cuda():
+    from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+        causal_conv1d_fn as causal_conv1d_fn_triton,
+    )
+    from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+        causal_conv1d_update as causal_conv1d_update_triton,
+    )
     from sglang.srt.layers.attention.mamba.causal_conv1d import (
         causal_conv1d_fn,
         causal_conv1d_update,
-    )
-    from sglang.srt.layers.attention.mamba.causal_conv1d_triton import (
-        causal_conv1d_fn as causal_conv1d_fn_triton,
-    )
-    from sglang.srt.layers.attention.mamba.causal_conv1d_triton import (
-        causal_conv1d_update as causal_conv1d_update_triton,
     )
 elif is_npu():
     from sgl_kernel_npu.mamba.causal_conv1d import (
@@ -61,6 +57,22 @@ elif is_npu():
     )
     from sgl_kernel_npu.mamba.causal_conv1d import (
         causal_conv1d_update_npu as causal_conv1d_update,
+    )
+elif is_xpu():
+    # XPU has no native causal_conv1d kernel yet; use the portable Triton
+    # implementation for both the "native" and the "_triton" entry points so
+    # `causal_conv1d_fn` / `causal_conv1d_fn_triton` are always bound on XPU.
+    from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+        causal_conv1d_fn as causal_conv1d_fn,
+    )
+    from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+        causal_conv1d_fn as causal_conv1d_fn_triton,
+    )
+    from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+        causal_conv1d_update as causal_conv1d_update,
+    )
+    from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+        causal_conv1d_update as causal_conv1d_update_triton,
     )
 
 LoaderFunction = Callable[[torch.Tensor, torch.Tensor], None]
@@ -96,9 +108,9 @@ def mamba_v2_sharded_weight_loader(
                 weight_full_dim_list.append(
                     int(full_dim / full_dim_sum * loaded_weight.size(0))
                 )
-            assert sum(weight_full_dim_list) == loaded_weight.size(
-                0
-            ), f"Padding the loaded weight failed due to sizes are not divisible cleanly from {weight_full_dim_list} to {loaded_weight.size(0)}"
+            assert sum(weight_full_dim_list) == loaded_weight.size(0), (
+                f"Padding the loaded weight failed due to sizes are not divisible cleanly from {weight_full_dim_list} to {loaded_weight.size(0)}"
+            )
             if loaded_weight.size(0) < full_dim_sum and tp_rank == 0:
                 logger.warning(
                     f"[ZERO-PADDING] Loaded_weight.dim(0) size:{loaded_weight.size(0)} is padding to {full_dim_sum}"
@@ -165,7 +177,9 @@ def mamba_v2_sharded_weight_loader(
             param.data[
                 boundary : (boundary + take), ...  # type: ignore[misc]
             ] = loaded_weight[
-                loaded_start_idx : (loaded_start_idx + take)  # type: ignore[misc]
+                loaded_start_idx : (
+                    loaded_start_idx + take
+                )  # type: ignore[misc]
             ]  # type: ignore[misc]
 
             # move indexing boundaries
@@ -197,6 +211,7 @@ class MambaMixer2(torch.nn.Module):
         activation: str = "silu",
         use_rms_norm: bool = True,
         quant_config: Optional[QuantizationConfig] = None,
+        reduce_results: Optional[bool] = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -215,15 +230,21 @@ class MambaMixer2(torch.nn.Module):
         #   may be replicated to follow the head shard.
         # - NOTE: currently for the world size DOES NOT divide groups
         #   case, we only support the case when n_groups == 1
-        self.tp_size = get_tensor_model_parallel_world_size()
-        self.tp_rank = get_tensor_model_parallel_rank()
+        if is_dp_attention_enabled():
+            parallel_group = "attn_tp"
+            self.tp_size = get_parallel().attn_tp_size
+            self.tp_rank = get_parallel().attn_tp_rank
+        else:
+            parallel_group = "tp"
+            self.tp_size = get_parallel().tp_size
+            self.tp_rank = get_parallel().tp_rank
 
         self.num_heads = num_heads = cache_params.shape.num_heads
         self.head_dim = cache_params.shape.head_dim
 
-        assert (
-            num_heads % self.tp_size == 0
-        ), "Tensor parallel world size must divide num heads."
+        assert num_heads % self.tp_size == 0, (
+            "Tensor parallel world size must divide num heads."
+        )
 
         assert (n_groups % self.tp_size) == 0 or n_groups == 1, (
             "If tensor parallel world size does not divide num_groups, "
@@ -265,6 +286,7 @@ class MambaMixer2(torch.nn.Module):
                 bias=use_conv_bias,
                 quant_config=None,
                 prefix=f"{prefix}.conv1d",
+                parallel_group=parallel_group,
             )
 
             self.in_proj = MergedColumnParallelLinear(
@@ -279,6 +301,7 @@ class MambaMixer2(torch.nn.Module):
                 bias=use_bias,
                 quant_config=quant_config,
                 prefix=f"{prefix}.in_proj",
+                parallel_group=parallel_group,
             )
         else:
             # This is the n_groups == 1 case,
@@ -290,6 +313,7 @@ class MambaMixer2(torch.nn.Module):
                 bias=use_conv_bias,
                 quant_config=None,
                 prefix=f"{prefix}.conv1d",
+                parallel_group=parallel_group,
             )
 
             self.in_proj = ColumnParallelLinear(
@@ -298,6 +322,7 @@ class MambaMixer2(torch.nn.Module):
                 bias=use_bias,
                 quant_config=quant_config,
                 prefix=f"{prefix}.in_proj",
+                parallel_group=parallel_group,
             )
 
             # - because in_proj is a concatenation of 3 weights, we
@@ -388,19 +413,32 @@ class MambaMixer2(torch.nn.Module):
         self.dt_bias = nn.Parameter(torch.ones(num_heads // self.tp_size))
         self.use_rms_norm = use_rms_norm
 
-        set_weight_attrs(self.D, {"weight_loader": sharded_weight_loader(0)})
+        set_weight_attrs(
+            self.D,
+            {"weight_loader": sharded_weight_loader(0, parallel_group=parallel_group)},
+        )
         a_weight_loader = composed_weight_loader(
-            sharded_weight_loader(0), lambda x: -torch.exp(x.float())
+            sharded_weight_loader(0, parallel_group=parallel_group),
+            lambda x: -torch.exp(x.float()),
         )
         set_weight_attrs(self.A, {"weight_loader": a_weight_loader})
-        set_weight_attrs(self.dt_bias, {"weight_loader": sharded_weight_loader(0)})
+        set_weight_attrs(
+            self.dt_bias,
+            {"weight_loader": sharded_weight_loader(0, parallel_group=parallel_group)},
+        )
 
+        # By default the stage boundary reduces the output under DP attention.
+        if reduce_results is None:
+            reduce_results = not is_dp_attention_enabled()
         self.out_proj = RowParallelLinear(
             intermediate_size,
             hidden_size,
             bias=use_bias,
             input_is_parallel=True,
             quant_config=quant_config,
+            parallel_group=parallel_group,
+            reduce_results=reduce_results,
+            use_dp_attention_reduce=reduce_results and is_dp_attention_enabled(),
             prefix=f"{prefix}.out_proj",
         )
 
@@ -414,13 +452,16 @@ class MambaMixer2(torch.nn.Module):
         self,
         *,
         hidden_states: torch.Tensor,
-        output: torch.Tensor,
+        output: Optional[torch.Tensor] = None,
         layer_cache: MambaPool.State,
         metadata: Mamba2Metadata,
-        forward_batch: ForwardBatch,
         mup_vector: Optional[torch.Tensor] = None,
         use_triton_causal_conv: bool = False,
     ):
+        # Returns the projected result. When `output` is given it is also
+        # written into that buffer (required by the cuda-graph split ops, which
+        # need a stable buffer); otherwise the caller uses the return value and
+        # avoids a copy.
         # metadata contains metadata necessary for the mamba2 triton
         # kernels to operate in continuous batching and in chunked prefill
         # modes; they are computed at top-level model forward since they
@@ -429,63 +470,12 @@ class MambaMixer2(torch.nn.Module):
         conv_state = layer_cache.conv[0]
         ssm_state = layer_cache.temporal
         intermediate_states = None
-
-        # Pre-Ampere devices have no BF16 execution, so this model runs in FP16
-        # there. This checkpoint's SSD output exceeds what FP16 can represent
-        # (verified against a FP32 reference on real weights: |y| up to 1.1e5),
-        # so the scan and the gated norm are computed in FP32 and cast back
-        # before the output projection. The recurrent state is already FP32
-        # (see mamba2_state_dtype).
-        fp32_ssm = (
-            hidden_states.dtype == torch.float16
-            and torch.cuda.is_available()
-            and torch.cuda.get_device_capability()[0] < 8
-        )
-        ssm_dtype = torch.float32 if fp32_ssm else hidden_states.dtype
+        track_states = None
 
         query_start_loc = metadata.query_start_loc
 
-        capture_path = os.environ.get("G023_CAPTURE_PATH")
-        g023_capture = (
-            capture_path
-            if metadata.layer_id == 0 and forward_batch.rids and forward_batch.forward_mode.is_decode() and not torch.cuda.is_current_stream_capturing()
-            else None
-        )
-        if g023_capture is not None:
-            request_ids = list(forward_batch.rids or [])
-            seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
-            if forward_batch.forward_mode.is_decode():
-                for rid, seq_len in zip(request_ids, seq_lens):
-                    _G023_PROMPT_LENS.setdefault(rid, int(seq_len))
-            decode_steps = (
-                [int(length) - _G023_PROMPT_LENS[rid] + 1 for rid, length in zip(request_ids, seq_lens)]
-                if forward_batch.forward_mode.is_decode()
-                else None
-            )
-            if decode_steps is not None:
-                for rid, step in zip(request_ids, decode_steps):
-                    _G023_DECODE_STEPS[rid] = step
-            g023_identity = {
-                "request_id": request_ids,
-                "forward_mode": forward_batch.forward_mode.name,
-                "decode_step": decode_steps,
-                "execution": "eager",
-                "req_pool_indices": forward_batch.req_pool_indices.detach().cpu().tolist(),
-                "cache_indices": state_indices_tensor.detach().cpu().tolist(),
-            }
-            slot = int(state_indices_tensor[0].item())
-            row = {
-                **g023_identity,
-                "kind": "mamba_state_before",
-                "layer": 0,
-                "hidden_input": hashlib.sha256(hidden_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                "conv": hashlib.sha256(conv_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                "ssm": hashlib.sha256(ssm_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                "conv_shape": list(conv_state[slot].shape),
-                "ssm_shape": list(ssm_state[slot].shape),
-            }
-            with open(g023_capture, "a") as trace:
-                trace.write(json.dumps(row, sort_keys=True) + "\n")
+        padded_num_tokens = hidden_states.shape[0]
+
         # 1. Gated MLP's linear projection
         projected_states, _ = self.in_proj(hidden_states)
 
@@ -527,7 +517,12 @@ class MambaMixer2(torch.nn.Module):
         has_prefill = num_prefills > 0
         has_decode = num_decodes > 0
         num_actual_tokens = num_prefill_tokens + num_decode_tokens
-        assert num_actual_tokens == projected_states.shape[0]
+        assert num_actual_tokens <= projected_states.shape[0]
+        hidden_states_B_C = hidden_states_B_C[:num_actual_tokens]
+        dt = dt[:num_actual_tokens]
+
+        local_num_heads = self.num_heads // self.tp_size
+        local_num_groups = self.n_groups // self.tp_size
 
         # NOTE: V0 put prefill before decode
         # Separate prefill and decode by splitting varlen input
@@ -542,12 +537,10 @@ class MambaMixer2(torch.nn.Module):
             [num_prefill_tokens, num_decode_tokens],
             dim=0,
         )
-        # Split along batch dimension
-        state_indices_tensor_p, state_indices_tensor_d = torch.split(
-            state_indices_tensor,
-            [num_prefills, num_decodes],
-            dim=0,
-        )
+        state_indices_tensor_p = state_indices_tensor[:num_prefills]
+        state_indices_tensor_d = state_indices_tensor[
+            num_prefills : num_prefills + num_decodes
+        ]
         query_start_loc_p = query_start_loc[: num_prefills + 1] if has_prefill else None
 
         # Preallocate output tensor to avoid memcpy cost for merging prefill
@@ -558,11 +551,15 @@ class MambaMixer2(torch.nn.Module):
                 projected_states.shape[0],
                 (self.num_heads * self.head_dim) // self.tp_size,
             ],
-            dtype=ssm_dtype,
+            dtype=hidden_states.dtype,
             device=hidden_states.device,
         )
+        # Rows past the batch's tokens are DP padding; keep them finite.
+        if num_actual_tokens < preallocated_ssm_out.shape[0]:
+            preallocated_ssm_out[num_actual_tokens:].zero_()
+        preallocated_ssm_out_active = preallocated_ssm_out[:num_actual_tokens]
         preallocated_ssm_out_p, preallocated_ssm_out_d = torch.split(
-            preallocated_ssm_out,
+            preallocated_ssm_out_active,
             [num_prefill_tokens, num_decode_tokens],
             dim=0,
         )
@@ -580,14 +577,13 @@ class MambaMixer2(torch.nn.Module):
             x = hidden_states_B_C_p.transpose(
                 0, 1
             )  # this is the form that causal-conv see
+            # Runs once per mamba layer
             if (
-                forward_batch.mamba_track_mask is not None
-                and forward_batch.mamba_track_mask.any()
+                metadata.has_mamba_track_mask
                 and metadata.track_conv_indices is not None
             ):
                 x_to_track = x[:, metadata.track_conv_indices].transpose(0, 1)
-                mask_indices = forward_batch.mamba_track_mask.nonzero(as_tuple=True)[0]
-                conv_state[forward_batch.mamba_track_indices[mask_indices]] = x_to_track
+                conv_state[metadata.conv_states_mask_indices] = x_to_track
             ccfn = (
                 causal_conv1d_fn
                 if not use_triton_causal_conv
@@ -617,18 +613,14 @@ class MambaMixer2(torch.nn.Module):
                 )
 
             # NOTE: final output is an in-place update of out tensor
-            intermediate_states, varlen_state = mamba_chunk_scan_combined(
+            intermediate_states, varlen_state, track_states = mamba_chunk_scan_combined(
                 hidden_states_p.view(
-                    1, num_prefill_tokens, self.num_heads // self.tp_size, self.head_dim
-                ).to(ssm_dtype),
-                dt_p.unsqueeze(0).to(ssm_dtype),
+                    1, num_prefill_tokens, local_num_heads, self.head_dim
+                ),
+                dt_p.unsqueeze(0),
                 self.A,
-                B_p.view(1, num_prefill_tokens, self.n_groups // self.tp_size, -1).to(
-                    ssm_dtype
-                ),
-                C_p.view(1, num_prefill_tokens, self.n_groups // self.tp_size, -1).to(
-                    ssm_dtype
-                ),
+                B_p.view(1, num_prefill_tokens, local_num_groups, -1),
+                C_p.view(1, num_prefill_tokens, local_num_groups, -1),
                 chunk_size=mixed_metadata.chunk_size,
                 D=self.D,
                 z=None,
@@ -640,7 +632,9 @@ class MambaMixer2(torch.nn.Module):
                 initial_states=initial_states,
                 return_varlen_states=True,
                 return_final_states=False,
-                return_intermediate_states=True,
+                return_track_states=True,
+                track_seq_idx=metadata.track_ssm_seq_idx,
+                track_end_locs=metadata.track_ssm_end_locs,
                 dt_softplus=True,
                 dt_limit=(0.0, float("inf")),
                 out=preallocated_ssm_out_p.view(
@@ -651,32 +645,8 @@ class MambaMixer2(torch.nn.Module):
 
             # update ssm states
             # - varlen state is a (num_prefills, nheads, headdim, dstate) tensor
-            mixer_debug = (
-                os.environ.get("G023_MIXER_DEBUG") == "1"
-                and forward_batch.mamba_track_mask is not None
-                and forward_batch.mamba_track_mask.any()
-                and not torch.cuda.is_current_stream_capturing()
-            )
-            if mixer_debug:
-                torch.cuda.synchronize(ssm_state.device)
-                source = state_indices_tensor_p.detach().cpu().tolist()
-                logger.warning(
-                    "G023_MIXER_DEBUG_BEFORE layer=%s cache=%s final_hash=%s state_ptr=%s",
-                    self.prefix,
-                    source,
-                    hashlib.sha256(ssm_state[state_indices_tensor_p].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                    ssm_state.data_ptr(),
-                )
-            ssm_state[state_indices_tensor_p] = varlen_state
-            if mixer_debug:
-                torch.cuda.synchronize(ssm_state.device)
-                logger.warning(
-                    "G023_MIXER_DEBUG_AFTER layer=%s final_hash=%s varlen_hash=%s state_ptr=%s",
-                    self.prefix,
-                    hashlib.sha256(ssm_state[state_indices_tensor_p].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                    hashlib.sha256(varlen_state.detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                    ssm_state.data_ptr(),
-                )
+            if varlen_state is not None:
+                ssm_state[state_indices_tensor_p] = varlen_state
 
         # Process decode requests
         if has_decode:
@@ -684,12 +654,12 @@ class MambaMixer2(torch.nn.Module):
 
             # 2. Convolution sequence transformation
             if is_target_verify:
-                assert (
-                    use_triton_causal_conv
-                ), "Speculative decoding requires use_triton_causal_conv=True for intermediate state support"
-                assert isinstance(
-                    layer_cache, MambaPool.SpeculativeState
-                ), "layer_cache must be SpeculativeState for speculative decoding"
+                assert use_triton_causal_conv, (
+                    "Speculative decoding requires use_triton_causal_conv=True for intermediate state support"
+                )
+                assert isinstance(layer_cache, MambaPool.SpeculativeState), (
+                    "layer_cache must be SpeculativeState for speculative decoding"
+                )
                 draft_token_num = metadata.draft_token_num
                 self.intermediate_state_indices = torch.arange(
                     num_decodes, dtype=torch.int32, device=state_indices_tensor_d.device
@@ -734,22 +704,18 @@ class MambaMixer2(torch.nn.Module):
             hidden_states_d, B_d, C_d = split_hidden_states_B_C_fn(hidden_states_B_C_d)
 
             # 3. State Space Model sequence transformation
-            n_groups = self.n_groups // self.tp_size
+            n_groups = local_num_groups
             A_d = (
                 self.A[:, None, ...][:, :, None]
                 .expand(-1, self.head_dim, self.ssm_state_size)
                 .to(dtype=torch.float32)
             )
-            # Cast the per-head base before expansion so FP32 SSU preserves the
-            # tied-head zero-stride representation instead of materializing it.
-            dt_d = dt_d.to(ssm_dtype)[:, :, None].expand(-1, -1, self.head_dim)
+            dt_d = dt_d[:, :, None].expand(-1, -1, self.head_dim)
             dt_bias = self.dt_bias[:, None, ...].expand(-1, self.head_dim)
             D_d = self.D[:, None, ...].expand(-1, self.head_dim)
-            B_d = B_d.view(-1, n_groups, B_d.shape[1] // n_groups).to(ssm_dtype)
-            C_d = C_d.view(-1, n_groups, C_d.shape[1] // n_groups).to(ssm_dtype)
-            hidden_states_d = hidden_states_d.view(
-                -1, self.num_heads // self.tp_size, self.head_dim
-            ).to(ssm_dtype)
+            B_d = B_d.view(-1, n_groups, B_d.shape[1] // n_groups)
+            C_d = C_d.view(-1, n_groups, C_d.shape[1] // n_groups)
+            hidden_states_d = hidden_states_d.view(-1, local_num_heads, self.head_dim)
 
             if is_target_verify:
                 selective_state_update(
@@ -806,31 +772,13 @@ class MambaMixer2(torch.nn.Module):
         # GatedRMSNorm internally applying SiLU to the gate
         # SiLU is applied internally before normalization, unlike standard
         # norm usage
-        hidden_states = self.norm(preallocated_ssm_out, gate[:num_actual_tokens])
-        if fp32_ssm:
-            # The output projection follows the model dtype; FP32 above is only
-            # needed for range, and the normed value is well within FP16.
-            hidden_states = hidden_states.to(output.dtype)
+        hidden_states = self.norm(preallocated_ssm_out, gate)
 
-        # 5. Final linear projection
-        output[:num_actual_tokens], _ = self.out_proj(hidden_states)
+        mixer_out, _ = self.out_proj(hidden_states)
+        if output is not None:
+            output[:padded_num_tokens].copy_(mixer_out)
 
-        if g023_capture is not None and forward_batch.rids:
-            slot = int(state_indices_tensor[0].item())
-            row = {
-                **g023_identity,
-                "kind": "mamba_state_after",
-                "layer": 0,
-                "intermediate": hashlib.sha256(intermediate_states.detach().contiguous().cpu().numpy().tobytes()).hexdigest() if intermediate_states is not None else None,
-                "intermediate_values": intermediate_states.detach().float().cpu().flatten().tolist() if intermediate_states is not None else None,
-                "conv": hashlib.sha256(conv_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                "ssm": hashlib.sha256(ssm_state[slot].detach().contiguous().cpu().numpy().tobytes()).hexdigest(),
-                "conv_shape": list(conv_state[slot].shape),
-                "ssm_shape": list(ssm_state[slot].shape),
-            }
-            with open(g023_capture, "a") as trace:
-                trace.write(json.dumps(row, sort_keys=True) + "\n")
-        return intermediate_states
+        return mixer_out, intermediate_states, track_states
 
     @property
     def mamba_type(self) -> str:

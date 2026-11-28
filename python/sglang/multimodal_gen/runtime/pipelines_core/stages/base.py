@@ -9,16 +9,25 @@ composed to create complete diffusion pipelines.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from enum import Enum, auto
 
 import torch
+from tqdm.auto import tqdm
 
 from sglang.multimodal_gen.runtime.disaggregation.roles import RoleType
+from sglang.multimodal_gen.runtime.distributed.parallel_state import (
+    get_world_rank,
+    world_group_is_initialized,
+)
 from sglang.multimodal_gen.runtime.managers.memory_managers.component_manager import (
     ComponentUse,
+)
+from sglang.multimodal_gen.runtime.managers.progress_reporter import (
+    ReportingTqdm,
+    get_progress_reporter,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.dedup import StageDedupMixin
@@ -42,6 +51,9 @@ class StageParallelismType(Enum):
     CFG_PARALLEL = auto()
     # executed on main rank only and send result to other ranks
     MAIN_RANK_ONLY_AND_SEND_TO_OTHERS = auto()
+    # a stage without CFG runs on every CFG rank, sequence-sharded over them
+    # as one Ulysses group; its inputs must already match across CFG ranks
+    SEQUENCE_PARALLEL_OVER_CFG_RANKS = auto()
 
 
 class StageVerificationError(Exception):
@@ -62,6 +74,11 @@ class PipelineStage(StageDedupMixin, ABC):
     # Class-level default so subclasses that override __init__ without
     # calling super().__init__() still see a consistent explicit-range gate.
     _current_use_nvtx: bool = False
+    _current_batch_is_warmup: bool = False
+    _component_residency_manager = None
+    _registered_stage_name: str | None = None
+    _profile_stage_name: str | None = None
+    _progress_range: tuple[float, float] = (0.0, 1.0)
 
     def __init__(self):
         self.server_args = get_global_server_args()
@@ -71,7 +88,7 @@ class PipelineStage(StageDedupMixin, ABC):
 
     def log_info(self, msg, *args):
         """Logs an informational message with the stage name as a prefix."""
-        if self.server_args.comfyui_mode:
+        if self.server_args.comfyui_mode or self._current_batch_is_warmup:
             return
         logger.info(f"[{self.__class__.__name__}] {msg}", *args)
 
@@ -86,6 +103,40 @@ class PipelineStage(StageDedupMixin, ABC):
     def log_debug(self, msg, *args):
         """Logs a debug message with the stage name as a prefix."""
         logger.debug(f"[{self.__class__.__name__}] {msg}", *args)
+
+    def progress_bar(
+        self,
+        iterable: Iterable | None = None,
+        total: int | None = None,
+        *,
+        disable: bool = False,
+        batch: Req | None = None,
+        **kwargs,
+    ) -> tqdm:
+        is_main_rank = not world_group_is_initialized() or get_world_rank() == 0
+        disable = disable or (batch is not None and batch.is_warmup)
+        disable = disable or not is_main_rank
+        # report even when the bar is hidden: the first rank of replica N>0 is
+        # not world rank 0
+        reporter = get_progress_reporter()
+        if (
+            reporter is not None
+            and batch is not None
+            and batch.report_progress
+            and not batch.is_warmup
+        ):
+            request_ids = batch.client_request_ids()
+            if request_ids:
+                return ReportingTqdm(
+                    iterable=iterable,
+                    total=total,
+                    disable=disable,
+                    reporter=reporter,
+                    request_ids=request_ids,
+                    progress_range=self._progress_range,
+                    **kwargs,
+                )
+        return tqdm(iterable=iterable, total=total, disable=disable, **kwargs)
 
     def verify_input(self, batch: Req, server_args: ServerArgs) -> VerificationResult:
         """
@@ -105,20 +156,18 @@ class PipelineStage(StageDedupMixin, ABC):
         # Default implementation - no verification
         return VerificationResult()
 
-    def maybe_free_model_hooks(self):
-        pass
-
     def load_model(self):
         """
         Load the model for the stage.
         """
         pass
 
-    def offload_model(self):
-        """
-        Offload the model for the stage.
-        """
-        pass
+    def iter_sequential_requests(
+        self, batch: Req, server_args: ServerArgs
+    ) -> Iterator[Req]:
+        """Expand one post-stage request into sequential downstream requests."""
+        del server_args
+        return iter((batch,))
 
     def set_component_residency_manager(self, manager) -> None:
         self._component_residency_manager = manager
@@ -130,28 +179,21 @@ class PipelineStage(StageDedupMixin, ABC):
         self._profile_stage_name = stage_name
 
     def _component_stage_name(self, stage_name: str | None = None) -> str:
-        return (
-            stage_name
-            or getattr(self, "_registered_stage_name", None)
-            or self.__class__.__name__
-        )
+        return stage_name or self._registered_stage_name or self.__class__.__name__
 
     def _active_component_stage_name(self) -> str:
         """Stage name reported by the residency manager.
 
-        Only valid between ``before_stage`` and ``after_stage``; outside
-        that window the manager state still holds the previous stage's
-        name. Use :meth:`_component_stage_name` for the static identity.
+        During execution this comes from the manager; otherwise the registered
+        stage name provides the static identity.
         """
-        manager = getattr(self, "_component_residency_manager", None)
-        manager_state = getattr(manager, "state", None)
-        manager_stage_name = getattr(manager_state, "stage_name", None)
-        if manager_stage_name is not None:
-            return manager_stage_name
+        manager = self._component_residency_manager
+        if manager is not None and manager.state.stage_name is not None:
+            return manager.state.stage_name
         return self._component_stage_name()
 
     def _active_profile_stage_name(self) -> str:
-        return getattr(self, "_profile_stage_name", None) or self.__class__.__name__
+        return self._profile_stage_name or self.__class__.__name__
 
     def _finish_active_component_use(self) -> None:
         if self._component_residency_manager is not None:
@@ -188,8 +230,7 @@ class PipelineStage(StageDedupMixin, ABC):
                 return replace(use, target_dtype=target_dtype)
             return use
         raise ValueError(
-            f"{self.__class__.__name__} did not declare component use: "
-            f"{component_name}"
+            f"{self.__class__.__name__} did not declare component use: {component_name}"
         )
 
     @contextmanager
@@ -209,6 +250,30 @@ class PipelineStage(StageDedupMixin, ABC):
         )
         with self._use_component(use, module) as component:
             yield component
+
+    def begin_declared_component_use(
+        self,
+        *,
+        component_name: str,
+        module=None,
+        phase: str | None = None,
+        target_dtype: torch.dtype | None = None,
+    ) -> None:
+        """Keep a declared component active until the next use interval begins."""
+        if self._component_residency_manager is None:
+            return
+        use = self._declared_component_use(
+            component_name=component_name,
+            phase=phase,
+            target_dtype=target_dtype,
+        )
+        self._component_residency_manager.begin_use(use, module=module)
+
+    def finish_unused_declared_component(self, *, component_name: str, module=None):
+        if self._component_residency_manager is None:
+            return
+        use = self._declared_component_use(component_name=component_name)
+        self._component_residency_manager.finish_unused_component(use, module=module)
 
     def component_uses(
         self, server_args: ServerArgs, stage_name: str | None = None
@@ -247,6 +312,17 @@ class PipelineStage(StageDedupMixin, ABC):
         # if get_global_server_args().enable_cfg_parallel:
         #     return StageParallelismType.MAIN_RANK_ONLY
         return StageParallelismType.REPLICATED
+
+    def parallelism_type_for(self, batch: Req | list[Req]) -> StageParallelismType:
+        """The parallelism the executor runs ``batch`` with; every rank must
+        resolve the same type."""
+        return self.parallelism_type
+
+    def cfg_parallel_local_batch_fields(
+        self, batch: Req, server_args: ServerArgs
+    ) -> tuple[str, ...]:
+        """the name of fields which already have a local version on each GPU in CFG-Parallel, no need to broadcast"""
+        return ()
 
     def verify_output(self, batch: Req, server_args: ServerArgs) -> VerificationResult:
         """
@@ -295,15 +371,6 @@ class PipelineStage(StageDedupMixin, ABC):
             current_platform.device_type,
         )
 
-    def set_logging(self, enable: bool):
-        """
-        Enable or disable logging for this stage.
-
-        Args:
-            enable: Whether to enable logging.
-        """
-        self._enable_logging = enable
-
     def __call__(
         self,
         batch: Req,
@@ -332,6 +399,11 @@ class PipelineStage(StageDedupMixin, ABC):
         self._apply_nvtx_gate(batch.is_warmup)
 
         # Execute the actual stage logic with unified profiling.
+        previous_batch_is_warmup = self._current_batch_is_warmup
+        metrics = batch.metrics
+        if metrics is not None and self.role_affinity == RoleType.DENOISER:
+            metrics.denoising_stages.add(stage_name)
+        self._current_batch_is_warmup = batch.is_warmup
         try:
             with StageProfiler(
                 stage_name,
@@ -343,6 +415,7 @@ class PipelineStage(StageDedupMixin, ABC):
             ):
                 result = self.forward(batch, server_args)
         finally:
+            self._current_batch_is_warmup = previous_batch_is_warmup
             self._current_use_nvtx = False
 
         # Post-execution output verification

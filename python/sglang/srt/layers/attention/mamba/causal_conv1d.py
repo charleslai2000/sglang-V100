@@ -9,18 +9,29 @@ from typing import Optional
 
 import torch
 
-from .causal_conv1d_triton import PAD_SLOT_ID
-from .causal_conv1d_triton import causal_conv1d_fn as _causal_conv1d_fn_triton
-from .causal_conv1d_triton import causal_conv1d_update as _causal_conv1d_update_triton
+from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+    PAD_SLOT_ID,
+)
+from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+    causal_conv1d_fn as _causal_conv1d_fn_triton,
+)
+from sglang.kernels.ops.mamba.causal_conv1d_triton import (
+    causal_conv1d_update as _causal_conv1d_update_triton,
+)
+from sglang.srt.utils import is_cuda
 
-try:
-    from sgl_kernel import causal_conv1d_fwd
-    from sgl_kernel import causal_conv1d_update as causal_conv1d_update_kernel
+# The compiled causal conv1d is CUDA-only -- the sgl_kernel wheel never built it
+# for ROCm / MUSA either, so the old import probe always fell through to Triton
+# there. Select that fallback directly instead of via a failed import.
+_HAS_CONV1D_KERNEL = is_cuda()
 
-    torch.ops.sgl_kernel.causal_conv1d_update
-    _HAS_SGL_KERNEL = True
-except (ImportError, AttributeError):
-    _HAS_SGL_KERNEL = False
+if _HAS_CONV1D_KERNEL:
+    from sglang.kernels.ops.mamba import (
+        causal_conv1d_fwd,
+    )
+    from sglang.kernels.ops.mamba import (
+        causal_conv1d_update as causal_conv1d_update_kernel,
+    )
 
 
 def _get_seq_lens_cpu(query_start_loc, x):
@@ -70,19 +81,32 @@ def causal_conv1d_fn(
 
     out: (batch, dim, seqlen)
     """
-    # Use Triton when: (1) sgl_kernel not available, or (2) input is
-    # non-contiguous and seq_lens_cpu is already pre-computed by caller, or
-    # (3) the kernel width is beyond what sgl_kernel supports (width > 4, e.g.
-    # LFM3 short conv width 7) - sgl_kernel silently produces wrong values there.
+    # Use Triton when: (1) there is no compiled conv1d kernel for this device,
+    # or (2) input is non-contiguous and seq_lens_cpu is pre-computed by caller.
+    # The Triton kernel accepts arbitrary strides, avoiding a .contiguous()
+    # copy that can cost >0.6 ms/layer on large prefill batches.
+    # Widths above what the sgl_kernel build supports (> 4 channels per column,
+    # e.g. LFM3 short conv width 7) are computed incorrectly by that kernel, so
+    # they are routed to the Triton implementation instead.
     use_triton = (
-        not _HAS_SGL_KERNEL
+        not _HAS_CONV1D_KERNEL
         or weight.shape[1] > 4
         or (x.stride(-1) != 1 and "seq_lens_cpu" in kwargs)
     )
     if use_triton:
         if "seq_lens_cpu" not in kwargs:
             kwargs["seq_lens_cpu"] = _get_seq_lens_cpu(query_start_loc, x)
-        return _causal_conv1d_fn_triton(
+        triton_fn = _causal_conv1d_fn_triton
+        if weight.shape[1] > 4:
+            # The shared Triton kernel implements widths 2/3/4; the LFM short
+            # conv family uses wider kernels, served by the dedicated varlen
+            # kernel (verified bit-exact against a FP32 reference on SM70).
+            from sglang.kernels.ops.mamba.causal_conv1d_triton_w7 import (
+                causal_conv1d_fn as _w7_fn,
+            )
+
+            triton_fn = _w7_fn
+        return triton_fn(
             x,
             weight,
             bias,
@@ -100,6 +124,8 @@ def causal_conv1d_fn(
         x = x.contiguous()
     bias = bias.contiguous() if bias is not None else None
 
+    if cache_indices is not None and cache_indices.dtype != torch.int32:
+        cache_indices = cache_indices.to(torch.int32)
     causal_conv1d_fwd(
         x,
         weight,
@@ -146,9 +172,16 @@ def causal_conv1d_update(
             indices 0 and 3
     out: (batch, dim) or (batch, dim, seqlen)
     """
-    use_triton = not _HAS_SGL_KERNEL
+    use_triton = not _HAS_CONV1D_KERNEL or weight.shape[1] > 4
     if use_triton:
-        return _causal_conv1d_update_triton(
+        update_fn = _causal_conv1d_update_triton
+        if weight.shape[1] > 4:
+            from sglang.kernels.ops.mamba.causal_conv1d_triton_w7 import (
+                causal_conv1d_update as _w7_update,
+            )
+
+            update_fn = _w7_update
+        return update_fn(
             x,
             conv_state,
             weight,
@@ -166,6 +199,8 @@ def causal_conv1d_update(
     unsqueeze = x.dim() == 2
     if unsqueeze:
         x = x.unsqueeze(-1)
+    if conv_state_indices is not None and conv_state_indices.dtype != torch.int32:
+        conv_state_indices = conv_state_indices.to(torch.int32)
     causal_conv1d_update_kernel(
         x,
         conv_state,

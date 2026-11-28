@@ -7,9 +7,9 @@ Stages never branch on task names; skips must be explicit in the plan.
 
 Scope notes (adapt_shape_v1):
 - all target and material-derived ratios use the single adaptive spatial
-  resolver exported by this module. It starts from the requested supported
-  nominal short edge, applies the 768x1344 soft area cap, then rounds both axes
-  independently to the nearest 32px grid.
+  resolver exported by this module. It starts from a 768px nominal short edge,
+  applies the 768x1344 soft area cap, then rounds both axes independently to
+  the nearest 32px grid.
 - ``auto`` uses the task profile: t2va/ref2va resolve to the 16:9 policy
   default, while fl2va defers geometry until material probe facts are
   available. Consumers must fail fast if required evidence is missing.
@@ -27,7 +27,7 @@ import msgspec
 
 from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.constants import (
     MINIMAX_H3_SUPPORTED_FPS,
-    MINIMAX_H3_SUPPORTED_SHORT_EDGES,
+    warn_unverified_short_edge,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.model_specific_stages.minimax_h3.task_profiles import (
     MINIMAX_H3_FL2VA_KEYFRAME_SIGNATURES,
@@ -102,14 +102,12 @@ def _validate_base_short_edge(value: Any) -> int:
         short_edge = int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            f"target.short_edge must be one of {list(MINIMAX_H3_SUPPORTED_SHORT_EDGES)}"
+            f"target.short_edge must be an integer, got {value!r}"
         ) from exc
-    if short_edge not in MINIMAX_H3_SUPPORTED_SHORT_EDGES or value != short_edge:
-        raise ValueError(
-            "target.short_edge must be one of "
-            f"{list(MINIMAX_H3_SUPPORTED_SHORT_EDGES)} for MiniMax H3 shape "
-            f"policy v2, got {value!r}"
-        )
+    if short_edge != value or short_edge <= 0:
+        raise ValueError(f"target.short_edge must be a positive integer, got {value!r}")
+    if short_edge != MINIMAX_H3_BASE_SHORT_EDGE:
+        warn_unverified_short_edge(short_edge)
     return short_edge
 
 
@@ -278,8 +276,17 @@ def minimax_h3_resolve_plan(canonical: Mapping[str, Any]) -> MiniMaxH3ResolvedPl
         if key not in canonical:
             raise ValueError(f"canonical request missing {key!r}")
     profile = minimax_h3_task_profile(str(canonical["task"]))
-    if profile.task == "fl2va":
-        conditions = canonical["conditions"]
+    conditions = canonical["conditions"]
+    keyframe_conditions = (
+        [
+            condition
+            for condition in conditions
+            if isinstance(condition, Mapping) and condition.get("role") == "keyframe"
+        ]
+        if isinstance(conditions, (list, tuple))
+        else []
+    )
+    if profile.task == "fl2va" or keyframe_conditions:
         signatures = (
             [
                 (
@@ -287,10 +294,9 @@ def minimax_h3_resolve_plan(canonical: Mapping[str, Any]) -> MiniMaxH3ResolvedPl
                     condition.get("role"),
                     condition.get("frame_index"),
                 )
-                for condition in conditions
+                for condition in keyframe_conditions
             ]
-            if isinstance(conditions, (list, tuple))
-            and all(isinstance(condition, Mapping) for condition in conditions)
+            if all(isinstance(condition, Mapping) for condition in keyframe_conditions)
             else []
         )
         frame_signature = tuple(signature[2] for signature in signatures)
@@ -300,7 +306,8 @@ def minimax_h3_resolve_plan(canonical: Mapping[str, Any]) -> MiniMaxH3ResolvedPl
             or frame_signature not in MINIMAX_H3_FL2VA_KEYFRAME_SIGNATURES
         ):
             raise ValueError(
-                "fl2va ResolvedPlan requires one or two ordered image/keyframe "
+                f"{profile.task} ResolvedPlan requires one or two ordered "
+                "image/keyframe "
                 "conditions with frame_index [0], [-1], or [0, -1], got "
                 f"{signatures!r}"
             )
@@ -365,10 +372,15 @@ def minimax_h3_resolve_plan(canonical: Mapping[str, Any]) -> MiniMaxH3ResolvedPl
         if rule.audio_tokenizer_encode:
             audio_encode.append(index)
 
+    qwen_condition_indices = [
+        index
+        for index, condition in enumerate(canonical["conditions"])
+        if profile.task != "ref2va" or condition["role"] == "reference"
+    ]
     encoders = {
         "qwen": {
             "prompt": canonical["prompt"],
-            "ordered_condition_indices": list(range(len(canonical["conditions"]))),
+            "ordered_condition_indices": qwen_condition_indices,
         },
         "visual": visual_encode,
         "audio": audio_encode,

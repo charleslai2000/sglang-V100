@@ -6,11 +6,10 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Laguna model configuration."""
+"""Laguna (poolside/Laguna-XS.2) model configuration."""
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Literal, Optional
 
 from transformers.configuration_utils import PretrainedConfig
@@ -67,20 +66,18 @@ def _to_sglang_rope_scaling(rope_params: Dict[str, Any]) -> Optional[Dict[str, A
         if key in rope_params:
             out[key] = rope_params[key]
     if "attention_factor" in rope_params:
-        # HF's `attention_factor` is the final multiplier applied to cos/sin.
-        # SGLang's YaRN implementation already applies the default
-        # `1 + 0.1 * log(factor)` multiplier and treats `attn_factor` as an
-        # additional coefficient.  Passing the HF value through unchanged
-        # therefore squares the default scale (1.3466 -> 1.8133 for Laguna's
-        # factor=32), changing every full-attention layer's logits.
-        attention_factor = float(rope_params["attention_factor"])
-        if rope_type == "yarn":
-            factor = float(rope_params.get("factor", 1.0))
-            default_attention_factor = (
-                1.0 if factor <= 1.0 else 1.0 + 0.1 * math.log(factor)
-            )
-            attention_factor /= default_attention_factor
-        out["attn_factor"] = attention_factor
+        # attention_factor is the final YaRN mscale; SGLang multiplies attn_factor
+        # onto its own default, so divide that out to avoid squaring the scale.
+        # Drop mscale/mscale_all_dim so the embedding uses that simple default as
+        # its base (yarn.py picks the mscale/mscale_all_dim ratio when both are set).
+        from sglang.srt.layers.rotary_embedding.yarn import yarn_get_mscale_simple
+
+        out.pop("mscale", None)
+        out.pop("mscale_all_dim", None)
+        factor = float(rope_params.get("factor", 1.0) or 1.0)
+        out["attn_factor"] = rope_params["attention_factor"] / yarn_get_mscale_simple(
+            factor
+        )
     return out
 
 
@@ -117,6 +114,7 @@ class LagunaConfig(PretrainedConfig):
         moe_routed_scaling_factor: float = 1.0,
         moe_router_logit_softcapping: float = 0.0,
         moe_apply_router_weight_on_input: bool = False,
+        moe_router_score_func: str = "sigmoid",
         # Per-layer-type rope dict; nested under "full_attention" / "sliding_attention".
         rope_parameters: Optional[Dict[str, Any]] = None,
         partial_rotary_factor: Optional[float] = None,
@@ -158,16 +156,15 @@ class LagunaConfig(PretrainedConfig):
         self.moe_routed_scaling_factor = moe_routed_scaling_factor
         self.moe_router_logit_softcapping = moe_router_logit_softcapping
         self.moe_apply_router_weight_on_input = moe_apply_router_weight_on_input
+        # Router scoring nonlinearity: "sigmoid" (default) or "sqrtsoftplus".
+        self.moe_router_score_func = moe_router_score_func
 
         # Synthesise per-layer schedules when the caller omits them so the model
         # file can index by layer_id without per-call guards.
         self.layer_types = (
             list(layer_types)
             if layer_types
-            else [
-                "full_attention" if i % 4 == 0 else "sliding_attention"
-                for i in range(num_hidden_layers)
-            ]
+            else ["full_attention" for _ in range(num_hidden_layers)]
         )
         self.mlp_layer_types = (
             list(mlp_layer_types)
@@ -188,8 +185,9 @@ class LagunaConfig(PretrainedConfig):
 
         # SGLang's hybrid-SWA core reads `swa_*` KV/head_dim from hf_text_config.
         # Per-layer Q-head count is read directly from num_attention_heads_per_layer.
-        # Laguna DFlash drafts are pure SWA, so use layer 0 as their default
-        # geometry instead of requiring a nonexistent full-attention layer.
+        # DFlash draft configs can be all-SWA. In that case there is no full
+        # layer geometry to expose, so use layer 0 for the default attention
+        # fields and keep per-layer Q-head geometry explicit.
         full_idx = (
             self.layer_types.index("full_attention")
             if "full_attention" in self.layer_types

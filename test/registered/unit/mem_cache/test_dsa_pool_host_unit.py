@@ -1,18 +1,32 @@
+import inspect
 import unittest
 
 import torch
 
 from sglang.srt.mem_cache.memory_pool import DSATokenToKVPool
-from sglang.srt.mem_cache.memory_pool_host import (
+from sglang.srt.mem_cache.pool_host.common import (
     ALLOC_MEMORY_FUNCS,
-    DSAIndexerPoolHost,
-    MLATokenToKVPoolHost,
     alloc_with_pin_memory,
 )
+from sglang.srt.mem_cache.pool_host.dsa import (
+    DSAIndexerPoolHost,
+    make_dsa_indexer_pool_decl,
+)
+from sglang.srt.mem_cache.pool_host.mla import MLATokenToKVPoolHost
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import is_cuda, is_hip, is_npu, is_xpu
-from sglang.test.ci.ci_register import register_cuda_ci
+from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
 
-register_cuda_ci(est_time=9, stage="base-b", runner_config="1-gpu-small")
+register_cuda_ci(est_time=10, stage="base-b", runner_config="1-gpu-small")
+register_amd_ci(est_time=9, suite="stage-b-test-1-gpu-small-amd")
+
+
+class TestDSAOffloadSignatures(unittest.TestCase):
+    def test_cpu_copy_methods_accept_mamba_indices(self):
+        for method_name in ("get_cpu_copy", "load_cpu_copy"):
+            with self.subTest(method_name=method_name):
+                signature = inspect.signature(getattr(DSATokenToKVPool, method_name))
+                self.assertIn("mamba_indices", signature.parameters)
 
 
 class TestDSAHiCacheTransfer(unittest.TestCase):
@@ -23,6 +37,9 @@ class TestDSAHiCacheTransfer(unittest.TestCase):
             self.skipTest("DSA host transfer tests only support CUDA/ROCm.")
         if not (is_cuda() or is_hip()):
             self.skipTest("CUDA/ROCm not available.")
+        cm = get_parallel().override(attn_dcp_size=1)
+        cm.__enter__()
+        self.addCleanup(cm.__exit__, None, None, None)
 
     @staticmethod
     def _token_indices_for_pages(pages: torch.Tensor, page_size: int, device: str):
@@ -60,7 +77,7 @@ class TestDSAHiCacheTransfer(unittest.TestCase):
             ALLOC_MEMORY_FUNCS["cuda"] = alloc_with_pin_memory
         try:
             mla_host = MLATokenToKVPoolHost(
-                device_pool=device_pool,
+                buffer_info=device_pool.get_device_pool_infos()[0].buffer_info,
                 host_to_device_ratio=2.0,
                 host_size=0,
                 page_size=page_size,
@@ -69,11 +86,24 @@ class TestDSAHiCacheTransfer(unittest.TestCase):
                 device="cpu",
                 allocator_type="default",
                 override_kv_cache_dim=device_pool.kv_cache_dim,
+                device_capacity_tokens=(
+                    device_pool.size
+                    if device_pool.host_capacity_tokens is None
+                    else device_pool.host_capacity_tokens
+                ),
+                start_layer=device_pool.start_layer,
+                end_layer=device_pool.end_layer,
+                target_layer_num=(
+                    (device_pool.layer_num + device_pool.layer_shard_size - 1)
+                    // device_pool.layer_shard_size
+                    if device_pool.layer_shard_enabled
+                    else device_pool.layer_num
+                ),
+                layer_shard_enabled=device_pool.layer_shard_enabled,
             )
             indexer_host = DSAIndexerPoolHost(
-                device_pool=device_pool,
+                decl=make_dsa_indexer_pool_decl(device_pool),
                 anchor_host=mla_host,
-                layout="layer_first",
                 pin_memory=pin_memory,
                 device="cpu",
                 allocator_type="default",
@@ -134,9 +164,21 @@ class TestDSAHiCacheTransfer(unittest.TestCase):
                 ].cpu()
                 self.assertTrue(torch.equal(got_kv, expected_kv))
 
+    @unittest.skipIf(
+        is_hip(),
+        '`io_backend="kernel"` path in MLATokenToKVPoolHost.backup_from_device_all_layer '
+        "raises ValueError on AMD (only the `direct` IO backend is wired for ROCm). "
+        "The other 62 tests in this file pass on AMD.",
+    )
     def test_device_to_host_indexer_kernel(self):
         self._run_device_to_host_indexer_copy(io_backend="kernel")
 
+    @unittest.skipIf(
+        is_hip(),
+        "DSATokenToKVPool with page_size=1 (used on HIP) trips the ROCm 7.2.0 "
+        "HIP-preshuffle assert `page_size % 16 == 0` during pool construction "
+        "(seen on pr-test-amd-rocm720). The rest of this file passes on AMD.",
+    )
     def test_device_to_host_indexer_direct(self):
         self._run_device_to_host_indexer_copy(io_backend="direct")
 

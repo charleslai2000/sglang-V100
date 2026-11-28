@@ -106,15 +106,15 @@ class Lfm3Config(Lfm3ServingConfig):
         no SSM temporal state, so it reuses Mamba2StateShape with state_size=0 and
         a synthetic head layout to satisfy that type's divisibility checks.
         """
-        from sglang.srt.layers.dp_attention import get_attention_tp_size
+        from sglang.srt.runtime_context import get_parallel
 
         conv_layer_ids = self.linear_layer_ids
         if not conv_layer_ids:
             return None
 
         try:
-            tp_size = get_attention_tp_size()
-        except (AssertionError, RuntimeError):
+            tp_size = int(get_parallel().attn_tp_size)
+        except (AssertionError, RuntimeError, ValueError, TypeError):
             tp_size = 1
 
         shape = Mamba2StateShape.create(

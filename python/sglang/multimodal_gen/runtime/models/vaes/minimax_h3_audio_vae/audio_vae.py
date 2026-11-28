@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # DAC-lineage audio VAE: waveform encoder + BigVGAN decoder (inference-only bundle).
 import math
-from contextlib import nullcontext
 from typing import List
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.utils.parametrizations import weight_norm
+
+from sglang.multimodal_gen.runtime.layers.attention import USPAttention
+from sglang.multimodal_gen.runtime.platforms import (
+    AttentionBackendEnum,
+    current_platform,
+)
 
 from .bigvgan import AttrDict, BigVGAN
 
@@ -28,22 +32,6 @@ class GeGluMlp(nn.Module):
         x = self.act(self.w0(x)).mul_(self.w1(x))
         x = self.w2(x)
         return x
-
-
-class PointwiseConv1d(nn.Conv1d):
-    """Route 1x1 Conv1D through cuBLAS on Volta."""
-
-    def forward(self, x):
-        if (
-            self.kernel_size == (1,)
-            and self.stride == (1,)
-            and self.padding == (0,)
-            and self.dilation == (1,)
-            and self.groups == 1
-        ):
-            output = F.linear(x.transpose(1, 2), self.weight[:, :, 0], self.bias)
-            return output.transpose(1, 2).contiguous()
-        return super().forward(x)
 
 
 class CausalAttention(nn.Module):
@@ -69,6 +57,21 @@ class CausalAttention(nn.Module):
         self.num_heads = num_heads
         self.scale = self.head_dim**-0.5
         self.proj = nn.Linear(out_dim, out_dim)
+        self.attn = (
+            USPAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                causal=True,
+                supported_attention_backends={
+                    AttentionBackendEnum.FA,
+                    AttentionBackendEnum.TORCH_SDPA,
+                },
+                default_attention_backend=AttentionBackendEnum.TORCH_SDPA,
+                skip_sequence_parallel=True,
+            )
+            if current_platform.is_cuda()
+            else None
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, N, C = x.shape
@@ -79,20 +82,33 @@ class CausalAttention(nn.Module):
         )
         q, k, v = (
             qkv.reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4)
+            .permute(2, 0, 1, 3, 4)
             .unbind(0)
         )
 
-        x = scaled_dot_product_attention(
-            q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
-        )
+        if self.attn is None:
+            x = F.scaled_dot_product_attention(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=True,
+            ).transpose(1, 2)
+        else:
+            input_dtype = q.dtype
+            if self.attn.backend != AttentionBackendEnum.TORCH_SDPA:
+                # released audio VAE stays FP32; an explicit fused backend
+                # owns only the attention compute precision
+                q, k, v = (tensor.to(self.attn.dtype) for tensor in (q, k, v))
+            x = self.attn(q, k, v).to(input_dtype)
 
         if self.in_dim > self.out_dim:
-            x = torch.mean(x, dim=1)
+            x = torch.mean(x, dim=2)
             if self.in_dim // self.num_heads != self.out_dim:
                 x = nn.functional.adaptive_avg_pool1d(x, self.out_dim)
         else:
-            x = x.transpose(1, 2).reshape(B, N, -1)
+            x = x.reshape(B, N, -1)
         x = self.proj(x)
         return x
 
@@ -121,11 +137,11 @@ class AttnProjection(nn.Module):
 
 
 def WNConv1d(*args, **kwargs):
-    return weight_norm(PointwiseConv1d(*args, **kwargs))
+    return weight_norm(nn.Conv1d(*args, **kwargs))
 
 
-@torch.jit.script
 def snake(x, alpha):
+    # profiling JIT changes rounding after the first call when it fuses this graph
     shape = x.shape
     x = x.reshape(shape[0], shape[1], -1)
     x = x + (alpha + 1e-9).reciprocal() * torch.sin(alpha * x).pow(2)
@@ -206,7 +222,6 @@ class Encoder(nn.Module):
 
         # Wrap black into nn.Sequential
         self.block = nn.Sequential(*self.block)
-        self.enc_dim = d_model
 
     def forward(self, x):
         return self.block(x)
@@ -249,10 +264,10 @@ class DacAudioVAE(nn.Module):
             # smallest power of two >= vae_latent_channels
             self.attn_proj_dim = 2 ** int(np.ceil(np.log2(vae_latent_channels)))
 
-        self.mean_proj = PointwiseConv1d(self.attn_proj_dim, vae_latent_channels, 1)
-        self.logs_proj = PointwiseConv1d(self.attn_proj_dim, vae_latent_channels, 1)
+        self.mean_proj = nn.Conv1d(self.attn_proj_dim, vae_latent_channels, 1)
+        self.logs_proj = nn.Conv1d(self.attn_proj_dim, vae_latent_channels, 1)
 
-        self.dec_in_proj = PointwiseConv1d(vae_latent_channels, latent_dim, 1)
+        self.dec_in_proj = nn.Conv1d(vae_latent_channels, latent_dim, 1)
 
         if self.decoder_type == "bigvgan":
             if sample_rate == 16000:
@@ -320,14 +335,5 @@ class DacAudioVAE(nn.Module):
         Tensor[B x 1 x length]
             Decoded audio data.
         """
-        use_native_convolution = z.is_cuda and torch.cuda.get_device_capability(
-            z.device
-        ) == (7, 0)
-        conv_context = (
-            torch.backends.cudnn.flags(enabled=False)
-            if use_native_convolution
-            else nullcontext()
-        )
-        with conv_context:
-            z = self.dec_in_proj(z)
-            return self.decoder(z)
+        z = self.dec_in_proj(z)
+        return self.decoder(z)

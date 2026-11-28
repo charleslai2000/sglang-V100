@@ -6,22 +6,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy
 import torch
 
-from sglang.srt.layers.parameter import (
-    BasevLLMParameter,
-    ChannelQuantScaleParameter,
-    GroupQuantScaleParameter,
-    PackedvLLMParameter,
-)
-from sglang.srt.layers.quantization.base_config import (
-    LinearMethodBase,
-    QuantizationConfig,
-)
 from sglang.srt.layers.quantization.utils import (
     get_scalar_types,
     pack_cols,
@@ -34,21 +23,16 @@ if TYPE_CHECKING:
     from sglang.srt.layers.linear import LinearBase
     from sglang.srt.layers.moe.fused_moe_triton.layer import FusedMoE
 
-from sglang.srt.compilation.piecewise_context_manager import get_forward_context
-
-try:
-    from vllm import _custom_ops as ops
-except ImportError:
-    ops = None
-
+from sglang.srt.model_executor.runner_backend_utils.tc_piecewise_cuda_graph import (
+    get_tc_piecewise_forward_context,
+)
 
 _is_cuda = is_cuda()
 
 if _is_cuda:
-    from sglang.jit_kernel.gptq_marlin import gptq_marlin_gemm
+    from sglang.kernels.ops.gemm.gptq_marlin import gptq_marlin_gemm
 
 logger = logging.getLogger(__name__)
-
 
 ScalarType, scalar_types = get_scalar_types()
 
@@ -58,6 +42,8 @@ GPTQ_MARLIN_MIN_THREAD_K = 128
 GPTQ_MARLIN_MAX_PARALLEL = 16
 
 MARLIN_SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]
+# NVFP SUPPORT 16, while MXFP4 supports 32 and 16.
+FP4_MARLIN_SUPPORTED_GROUP_SIZES = [16, 32]
 
 # In case there is a performance issue with Marlin, the variable below can be
 # changed to False, which allows Marlin to perform global reductions in fp16
@@ -76,102 +62,6 @@ class MarlinLinearLayerConfig:
     has_g_idx: bool
 
 
-@lru_cache(maxsize=1)
-def _sm70_marlin_v100_available() -> bool:
-    """True iff the marlin_v100 SM70 MoE kernel is built and loadable.
-
-    The stock JIT Marlin MoE kernel is an empty stub on SM70 (writes nothing,
-    silently zeroing routed-expert output). marlin_v100 supplies real WMMA
-    kernels; when it is installed (scripts/setup_v100_marlin.sh) we re-enable
-    Marlin quant-type support and the gptq->gptq_marlin auto-promotion so that
-    AWQ/GPTQ MoE models work on V100.
-    """
-    try:
-        major, _ = get_device_capability()
-        if major != 7:
-            return False
-        dense_repack, dense_gemm, _ = _sm70_marlin_dense_ops()
-        if dense_repack is not None and dense_gemm is not None:
-            return True
-        from sglang.jit_kernel.moe_wna16_marlin import _load_marlin_v100_op
-
-        return _load_marlin_v100_op() is not None
-    except Exception:
-        return False
-
-
-@lru_cache(maxsize=1)
-def _sm70_marlin_dense_ops():
-    """Load and return the independently packaged SM70 dense Marlin ops."""
-    import glob
-    import os
-
-    major, _ = get_device_capability()
-    if major != 7:
-        return None, None, None
-
-    import torch
-
-    here = os.path.dirname(os.path.abspath(__file__))
-    jit_kernel_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(here))), "jit_kernel"
-    )
-    candidates = sorted(
-        glob.glob(os.path.join(jit_kernel_dir, "_sm70_marlin_v100_dense*.so"))
-    )
-    quant_dir_candidates = sorted(
-        glob.glob(os.path.join(here, "_sm70_marlin_v100_dense*.so"))
-    )
-    candidates.extend(quant_dir_candidates)
-    home = os.path.expanduser("~")
-    candidates.extend(sorted(glob.glob(os.path.join(home, "marlin_v100", "vllm", "_C*.so"))))
-    configured = os.environ.get("SGLANG_SM70_MARLIN_DENSE_LIBRARY")
-    if configured:
-        candidates.insert(0, configured)
-    for path in candidates:
-        try:
-            torch.ops.load_library(path)
-        except Exception as e:
-            logger.warning("Could not load SM70 Dense Marlin library %s: %s", path, e)
-            continue
-        namespace = getattr(torch.ops, "_C", None)
-        repack = getattr(namespace, "gptq_marlin_repack", None) if namespace else None
-        gemm = getattr(namespace, "marlin_gemm", None) if namespace else None
-        if repack is not None and gemm is not None:
-            return repack, gemm, path
-    return None, None, None
-
-
-@lru_cache(maxsize=1)
-def _sm70_marlin_v100_repack_ops():
-    """Load marlin_v100's dense _C extension on SM70 and return its repack ops.
-
-    sglang's JIT ``gptq_marlin_repack``/``awq_marlin_repack`` are
-    ``__CUDA_ARCH__ < 800`` stubs on SM70 (the kernel body is empty, so the
-    output stays zeroed) -- meaning MoE expert weights are repacked to zeros
-    during loading and the marlin GEMM then reads all-zero weights. marlin_v100
-    ships real SM70 repack kernels in its dense extension; load it here.
-
-    Returns the GPTQ repacker and ``None`` for unsupported AWQ on this Dense
-    INT4 symmetric-only path, or ``(None, None)`` when unavailable.
-    """
-    repack, _, _ = _sm70_marlin_dense_ops()
-    if repack is None:
-        return None, None
-    import torch
-
-    def _gptq(b_q_weight, perm, size_k, size_n, num_bits):
-        return repack(b_q_weight, perm, size_k, size_n, num_bits, False)
-
-    return _gptq, None
-
-
-@lru_cache(maxsize=1)
-def _sm70_marlin_v100_gemm_op():
-    """Return the independently loaded SM70 Dense Marlin GEMM op."""
-    return _sm70_marlin_dense_ops()[1]
-
-
 # For binary size and compile time, we don't support the same types for with and
 #  without runtime zero-point. We support common cases, i.e. AWQ and GPTQ.
 #  TODO: we may want to move this into the C++ so its closer to the actual impl
@@ -182,17 +72,11 @@ def query_marlin_supported_quant_types(
 ):
     if device_capability is None:
         major, minor = get_device_capability()
-        capability = major * 10 + minor
+        capability = major * 10 + minor if major is not None else None
         device_capability = -1 if capability is None else capability
 
     if device_capability < 80:
-        # Dense SM70 support is deliberately restricted to verified INT4
-        # symmetric group32; MoE retains its independent legacy gate.
-        if device_capability == 70:
-            if _sm70_marlin_dense_ops()[0] is None:
-                return []
-        else:
-            return []
+        return []
 
     # - has_zp is True: return quant_types that has zero points
     # - has_zp is False: return quant_types that has not zero points
@@ -205,9 +89,6 @@ def query_marlin_supported_quant_types(
             True, include_fp_type, device_capability
         )
         return types0 + types1
-
-    if device_capability == 70:
-        return [] if has_zp else [scalar_types.uint4b8]
 
     if has_zp:
         # AWQ style, unsigned + runtime zero-point
@@ -226,10 +107,9 @@ def _check_marlin_supported(
     has_zp: bool,
     device_capability: Optional[int] = None,
 ) -> tuple[bool, Optional[str]]:
-
     if device_capability is None:
         major, minor = get_device_capability()
-        capability = major * 10 + minor
+        capability = major * 10 + minor if major is not None else None
         device_capability = -1 if capability is None else capability
 
     supported_types = query_marlin_supported_quant_types(
@@ -244,11 +124,15 @@ def _check_marlin_supported(
             f"are supported (for group_size = {group_size}, "
             f"device_capability = {device_capability}, zp = {has_zp}).",
         )
-    if group_size is None or group_size not in MARLIN_SUPPORTED_GROUP_SIZES:
+    if quant_type == scalar_types.float4_e2m1f:
+        allowed_group_sizes = FP4_MARLIN_SUPPORTED_GROUP_SIZES
+    else:
+        allowed_group_sizes = MARLIN_SUPPORTED_GROUP_SIZES
+    if group_size is None or group_size not in allowed_group_sizes:
         return (
             False,
-            f"Marlin does not support group_size = {group_size}. "
-            f"Only group_sizes = {MARLIN_SUPPORTED_GROUP_SIZES} "
+            f"Marlin does not support group_size = {group_size} for "
+            f"quant_type = {quant_type}. Only group_sizes = {allowed_group_sizes} "
             "are supported.",
         )
 
@@ -280,7 +164,6 @@ def verify_marlin_supports_shape(
     input_size: int,
     group_size: int,
 ) -> None:
-
     # Validate output_size_per_partition
     if output_size_per_partition % GPTQ_MARLIN_MIN_THREAD_N != 0:
         raise ValueError(
@@ -341,21 +224,36 @@ def check_marlin_supports_layer(layer: LinearBase, group_size: int) -> bool:
     )[0]
 
 
-def check_moe_marlin_supports_layer(layer: FusedMoE, group_size: int) -> bool:
+def check_moe_marlin_supports_layer(
+    layer: FusedMoE, group_size: int, allow_tile_padding: bool = False
+) -> bool:
     hidden_size = layer.hidden_size
     intermediate_size_per_partition = layer.intermediate_size_per_partition
     # apply_router_weight_on_input is not supported for moe marlin
     supports_router_weight = not layer.moe_runner_config.apply_router_weight_on_input
-    # moe marlin requires the activation to be silu
-    supports_activation = layer.moe_runner_config.activation == "silu"
+    if layer.moe_runner_config.is_gated:
+        supports_activation = layer.moe_runner_config.activation in {"silu", "situ"}
+    else:
+        supports_activation = layer.moe_runner_config.activation in {
+            "silu",
+            "relu2",
+        }
 
-    # gate-up: (n, k) = (intermediate_size_per_partition * 2, hidden_size)
-    # down: (n, k) = (hidden_size, intermediate_size_per_partition)
-    # moe marlin requires n % 128 == 0 and k % 64 == 0
-    supports_shape = (
-        hidden_size % 128 == 0
-        and intermediate_size_per_partition % max(64, group_size) == 0
-    )
+    if allow_tile_padding:
+        # Thread-tile misalignment can be fixed by zero-padding the expert
+        # intermediate dimension before Marlin repack. The original K still
+        # needs to fit a Marlin tile family, and quant groups must stay whole.
+        supports_shape = (
+            hidden_size % 64 == 0 and intermediate_size_per_partition % group_size == 0
+        )
+    else:
+        # gate-up: (n, k) = (intermediate_size_per_partition * 2, hidden_size)
+        # down: (n, k) = (hidden_size, intermediate_size_per_partition)
+        # moe marlin requires n % 128 == 0 and k % 64 == 0
+        supports_shape = (
+            hidden_size % 128 == 0
+            and intermediate_size_per_partition % max(64, group_size) == 0
+        )
     supports_group_size = group_size in [-1, 32, 64, 128]
     return (
         supports_shape
@@ -395,12 +293,6 @@ def marlin_make_empty_g_idx(device: torch.device) -> torch.Tensor:
     )
 
 
-def marlin_make_empty_zp(device: torch.device) -> torch.Tensor:
-    return torch.nn.Parameter(
-        torch.empty(0, dtype=torch.int, device=device), requires_grad=False
-    )
-
-
 def marlin_sort_g_idx(g_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     g_idx_sort_indices = torch.argsort(g_idx).to(torch.int)
     return g_idx[g_idx_sort_indices], g_idx_sort_indices
@@ -419,7 +311,6 @@ def get_scale_perms():
 def marlin_permute_scales(
     s: torch.Tensor, size_k: int, size_n: int, group_size: int
 ) -> torch.Tensor:
-
     scale_perm, scale_perm_single = get_scale_perms()
     if group_size < size_k and group_size != -1:
         s = s.reshape((-1, len(scale_perm)))[:, scale_perm]
@@ -453,86 +344,6 @@ def marlin_moe_permute_scales(
     for e in range(num_experts):
         output[e] = marlin_permute_scales(s[e], size_k, size_n, group_size)
     return output
-
-
-def sm70_marlin_moe_logical_scales(
-    s: torch.Tensor, size_k: int, size_n: int, group_size: int
-) -> torch.Tensor:
-    """Keep SM70 MoE metadata in logical, N-contiguous order."""
-    del size_k, group_size
-    return s.reshape((s.shape[0], -1, size_n)).contiguous()
-
-
-def sm70_nvfp4_marlin_process_scales(
-    scales: torch.Tensor, activation_dtype: torch.dtype
-) -> tuple[torch.Tensor, float]:
-    """Encode logical E4M3 NVFP4 scales for the SM70 Marlin fast path.
-
-    The V100 iterator converts four metadata bytes to FP16/BF16 with integer
-    bit operations.  It therefore consumes the special non-negative S0E5M3
-    representation used by marlin_v100, not checkpoint-native S1E4M3 bytes.
-    ``scales`` must already be in logical ``[E, K/16, N]`` order.
-
-    Returns the encoded metadata and a power-of-two scale factor.  The caller
-    must divide the processed global scale by that factor.
-    """
-    if activation_dtype not in (torch.float16, torch.bfloat16):
-        raise ValueError(
-            "SM70 NVFP4 Marlin supports FP16/BF16 activations, got "
-            f"{activation_dtype}"
-        )
-    if scales.dtype != torch.float8_e4m3fn or scales.ndim != 3:
-        raise ValueError(
-            "SM70 NVFP4 Marlin expects [E,K/16,N] E4M3 scales, got "
-            f"shape={tuple(scales.shape)}, dtype={scales.dtype}"
-        )
-
-    logical = scales.to(torch.float16)
-    if bool((logical < 0).any()):
-        raise ValueError("NVFP4 block scales must be non-negative")
-
-    # FP16 has enough exponent range for ModelOpt's normalized E4M3 scales.
-    # BF16 may need a shared rescale so every non-zero S0E5M3 byte keeps its
-    # high bit set, which the integer dequantizer relies on.
-    scale_factor = 1.0
-    if activation_dtype == torch.bfloat16:
-        nonzero = logical[logical > 0]
-        if nonzero.numel() > 0:
-            min_scaled = nonzero.float().min() * (2**7)
-            if min_scaled < 2:
-                scale_factor = float(torch.ceil(torch.log2(2 / min_scaled)).exp2())
-                logical = (logical.float() * scale_factor).to(torch.float16)
-
-    num_experts, num_groups, size_n = logical.shape
-    if size_n % 4 != 0:
-        raise ValueError(
-            f"SM70 NVFP4 Marlin requires N divisible by 4, got N={size_n}"
-        )
-    flat = logical.reshape(-1, size_n)
-    # The iterator deliberately reverses each pair when expanding metadata.
-    flat = flat.view(-1, 4)[:, [0, 2, 1, 3]].reshape(-1, size_n)
-    encoded = (flat * (2**7)).view(torch.int16) << 1
-    encoded = encoded.view(torch.float8_e4m3fn).reshape(-1, size_n * 2)
-    encoded = encoded[:, 1::2].contiguous()
-    return encoded.reshape(num_experts, num_groups, size_n), scale_factor
-
-
-def sm70_nvfp4_marlin_process_global_scale(
-    global_scale: torch.Tensor, activation_dtype: torch.dtype
-) -> torch.Tensor:
-    """Compensate an NVFP4 global scale for SM70's integer dequantizer."""
-    if activation_dtype == torch.float16:
-        target_exponent = 5
-    elif activation_dtype == torch.bfloat16:
-        target_exponent = 8
-    else:
-        raise ValueError(
-            "SM70 NVFP4 Marlin supports FP16/BF16 activations, got "
-            f"{activation_dtype}"
-        )
-    fp4_exponent = 2
-    exponent_bias = 2 ** (target_exponent - 1) - 2 ** (fp4_exponent - 1)
-    return (global_scale.to(torch.float32) * (2.0 ** (exponent_bias - 7))).contiguous()
 
 
 def marlin_zero_points(
@@ -596,37 +407,6 @@ def moe_awq_to_marlin_zero_points(
     return output
 
 
-def moe_awq_to_sm70_marlin_zero_points_float(
-    q_zp_packed: torch.Tensor,
-    scales: torch.Tensor,
-    size_k: int,
-    size_n: int,
-    num_bits: int,
-) -> torch.Tensor:
-    """Expand AWQ zero-points to the FP16 metadata required by SM70 MoE.
-
-    marlin_v100 consumes logical ``zero_point * scale`` values rather than the
-    packed/permuted integer zero-points used by the SM80+ Marlin kernels.
-    """
-    q_zp = unpack_cols(
-        q_zp_packed.reshape(-1, q_zp_packed.shape[-1]),
-        num_bits,
-        size_k * q_zp_packed.shape[0],
-        size_n,
-    ).reshape(q_zp_packed.shape[0], size_k, size_n)
-
-    if num_bits == 4:
-        undo_interleave = numpy.argsort(numpy.array([0, 2, 4, 6, 1, 3, 5, 7]))
-    elif num_bits == 8:
-        undo_interleave = numpy.argsort(numpy.array([0, 2, 1, 3]))
-    else:
-        raise ValueError(f"num_bits must be 4 or 8, got {num_bits}")
-
-    q_zp = q_zp.reshape(-1, len(undo_interleave))[:, undo_interleave]
-    q_zp = q_zp.reshape(q_zp_packed.shape[0], size_k, size_n)
-    return (q_zp.float() * scales.contiguous().float()).to(scales.dtype).contiguous()
-
-
 def maybe_warn_marlin_atomic_add(device, dtype):
     if torch.compiler.is_dynamo_compiling():
         return
@@ -658,7 +438,6 @@ def maybe_warn_marlin_atomic_add_env():
 def should_use_atomic_add_reduce(
     m: int, n: int, k: int, device: torch.device, dtype: torch.dtype
 ) -> bool:
-
     # the performance of atomicAdd is better than global reduce
     # only when m*n is small and k is large
     if n >= 2048 or k < 2048 or device.type != "cuda":
@@ -678,51 +457,6 @@ def should_use_atomic_add_reduce(
         return False
 
     return True
-
-
-def _dispatch_gptq_marlin_call(
-    input, weight, weight_scale, global_scale, weight_zp, g_idx,
-    g_idx_sort_indices, workspace, wtype, *, size_m, size_n, size_k,
-    is_k_full=True, use_atomic_add=False, use_fp32_reduce=False, is_zp_float=False,
-):
-    major, _ = get_device_capability()
-    if major == 7 and wtype == scalar_types.uint4b8:
-        if input.dtype != torch.float16 or weight_zp.numel() != 0:
-            raise RuntimeError(
-                "SM70 Dense Marlin supports only symmetric INT4 with FP16 activations"
-            )
-        op = _sm70_marlin_v100_gemm_op()
-        if op is None:
-            raise RuntimeError(
-                "SM70 uint4b8 Marlin requested but real marlin_v100 dense op is unavailable"
-            )
-        return op(
-            input,
-            None,
-            weight,
-            None,
-            weight_scale,
-            None,
-            None,
-            weight_zp,
-            g_idx,
-            g_idx_sort_indices,
-            workspace,
-            wtype.id,
-            size_m,
-            size_n,
-            size_k,
-            is_k_full,
-            use_atomic_add,
-            use_fp32_reduce,
-            is_zp_float,
-        )
-    return gptq_marlin_gemm(
-        input, None, weight, weight_scale, global_scale, weight_zp, g_idx,
-        g_idx_sort_indices, workspace, wtype, size_m=size_m, size_n=size_n,
-        size_k=size_k, is_k_full=is_k_full, use_atomic_add=use_atomic_add,
-        use_fp32_reduce=use_fp32_reduce, is_zp_float=is_zp_float,
-    )
 
 
 def apply_gptq_marlin_linear(
@@ -751,14 +485,25 @@ def apply_gptq_marlin_linear(
         dtype=input.dtype,
     )
 
-    forward_context = get_forward_context()
+    forward_context = get_tc_piecewise_forward_context()
     if forward_context is None:
-        output = _dispatch_gptq_marlin_call(
-            reshaped_x, weight, weight_scale, None, weight_zp, g_idx,
-            g_idx_sort_indices, workspace, wtype,
-            size_m=reshaped_x.shape[0], size_n=output_size_per_partition,
-            size_k=input_size_per_partition, is_k_full=is_k_full,
-            use_atomic_add=use_atomic_add, use_fp32_reduce=use_fp32_reduce,
+        output = gptq_marlin_gemm(
+            reshaped_x,
+            None,
+            weight,
+            weight_scale,
+            None,
+            weight_zp,
+            g_idx,
+            g_idx_sort_indices,
+            workspace,
+            wtype,
+            size_m=reshaped_x.shape[0],
+            size_n=output_size_per_partition,
+            size_k=input_size_per_partition,
+            is_k_full=is_k_full,
+            use_atomic_add=use_atomic_add,
+            use_fp32_reduce=use_fp32_reduce,
             is_zp_float=False,
         )
     else:
@@ -810,14 +555,25 @@ def apply_awq_marlin_linear(
         dtype=input.dtype,
     )
 
-    forward_context = get_forward_context()
+    forward_context = get_tc_piecewise_forward_context()
     if forward_context is None:
-        output = _dispatch_gptq_marlin_call(
-            reshaped_x, weight, weight_scale, None, weight_zp, g_idx,
-            g_idx_sort_indices, workspace, quant_type,
-            size_m=reshaped_x.shape[0], size_n=output_size_per_partition,
-            size_k=input_size_per_partition, use_atomic_add=use_atomic_add,
-            use_fp32_reduce=use_fp32_reduce, is_zp_float=False,
+        output = gptq_marlin_gemm(
+            reshaped_x,
+            None,
+            weight,
+            weight_scale,
+            None,
+            weight_zp,
+            g_idx,
+            g_idx_sort_indices,
+            workspace,
+            quant_type,
+            size_m=reshaped_x.shape[0],
+            size_n=output_size_per_partition,
+            size_k=input_size_per_partition,
+            use_atomic_add=use_atomic_add,
+            use_fp32_reduce=use_fp32_reduce,
+            is_zp_float=False,
         )
     else:
         output = unified_apply_gptq_marlin_gemm(
@@ -839,267 +595,6 @@ def apply_awq_marlin_linear(
         output.add_(bias)  # In-place add
 
     return output.reshape(out_shape)
-
-
-class MarlinConfig(QuantizationConfig):
-    """Config class for Marlin.
-
-    Reference: https://github.com/IST-DASLab/marlin/tree/master
-    """
-
-    def __init__(
-        self,
-        group_size: int,
-        lm_head_quantized: bool,
-    ) -> None:
-        super().__init__()
-
-        # Group size for the quantization.
-        self.group_size = group_size
-        self.lm_head_quantized = lm_head_quantized
-        if self.group_size != 128 and self.group_size != -1:
-            raise ValueError(
-                "Currently, only group size 128 and -1 (channelwise) "
-                "is supported for Marlin, but got group_size of "
-                f"{self.group_size}"
-            )
-
-        # 4 Bits packed into 32 bit datatype.
-        self.pack_factor = 32 // 4
-
-        # Tile size used by marlin kernels.
-        self.tile_size = 16
-
-        # Min out_features dim
-        self.min_n_threads = 64
-
-        # Min in_features dim
-        self.min_k_threads = 128
-
-        # Max parallel problems to solve at once (improves large
-        # batch performance)
-        self.max_parallel = 16
-
-        # Permutation length used by the marlin kernels.
-        self.perm_len = 1024
-
-    def __repr__(self) -> str:
-        return (
-            f"MarlinConfig(group_size={self.group_size}, "
-            f"lm_head_quantized={self.lm_head_quantized})"
-        )
-
-    @classmethod
-    def get_name(cls) -> str:
-        return "marlin"
-
-    @classmethod
-    def get_supported_act_dtypes(cls) -> list[torch.dtype]:
-        return [torch.half]
-
-    @classmethod
-    # Need to figure it out
-    def get_min_capability(cls) -> int:
-        return 80
-
-    @classmethod
-    def get_config_filenames(cls) -> list[str]:
-        return ["quantize_config.json"]
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "MarlinConfig":
-        group_size = cls.get_from_keys(config, ["group_size"])
-        lm_head_quantized = cls.get_from_keys_or(config, ["lm_head"], default=False)
-        return cls(group_size, lm_head_quantized)
-
-    @classmethod
-    def override_quantization_method(cls, hf_quant_cfg, user_quant) -> Optional[str]:
-        # compat: autogptq >=0.8.0 use checkpoint_format: str
-        # compat: autogptq <=0.7.1 is_marlin_format: bool
-        is_marlin_format = hf_quant_cfg.get(
-            "checkpoint_format"
-        ) == "marlin" or hf_quant_cfg.get("is_marlin_format", False)
-
-        is_valid_user_quant = (
-            user_quant is None or user_quant == "gptq" or user_quant == "marlin"
-        )
-
-        if is_marlin_format and is_valid_user_quant:
-            msg = "The model is serialized in {} format. Using {} kernel.".format(
-                cls.get_name(), cls.get_name()
-            )
-            logger.info(msg)
-            return cls.get_name()
-
-        return None
-
-    def get_quant_method(
-        self, layer: torch.nn.Module, prefix: str
-    ) -> Optional[MarlinLinearMethod]:
-        from sglang.srt.layers.linear import LinearBase
-        from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
-
-        if isinstance(layer, LinearBase) or (
-            isinstance(layer, ParallelLMHead) and self.lm_head_quantized
-        ):
-            return MarlinLinearMethod(self)
-        return None
-
-
-class MarlinLinearMethod(LinearMethodBase):
-    """Linear method for Marlin.
-
-    Args:
-        quant_config: The Marlin quantization config.
-    """
-
-    def __init__(self, quant_config: MarlinConfig):
-        self.quant_config = quant_config
-
-    def create_weights(
-        self,
-        layer: torch.nn.Module,
-        input_size_per_partition: int,
-        output_partition_sizes: list[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-        **extra_weight_attrs,
-    ):
-        del output_size  # Unused.
-        weight_loader = extra_weight_attrs["weight_loader"]
-
-        if params_dtype != torch.float16:
-            raise ValueError(
-                f"The params dtype must be float16, but got {params_dtype}"
-            )
-
-        # Validate output_size_per_partition
-        output_size_per_partition = sum(output_partition_sizes)
-        if output_size_per_partition % self.quant_config.min_n_threads != 0:
-            raise ValueError(
-                f"Weight output_size_per_partition = "
-                f"{output_size_per_partition} is not divisible by "
-                f"min_n_threads = {self.quant_config.min_n_threads}."
-            )
-        if output_size_per_partition % self.quant_config.pack_factor != 0:
-            raise ValueError(
-                f"Weight output_size_per_partition = "
-                f"{output_size_per_partition} is not divisible by "
-                f"pack_factor = {self.quant_config.pack_factor}."
-            )
-
-        # Validate input_size_per_partition
-        if input_size_per_partition % self.quant_config.min_k_threads != 0:
-            raise ValueError(
-                f"Weight input_size_per_partition = "
-                f"{input_size_per_partition} is not divisible by "
-                f"min_k_threads = {self.quant_config.min_k_threads}."
-            )
-        if (
-            self.quant_config.group_size != -1
-            and input_size_per_partition % self.quant_config.group_size != 0
-        ):
-            raise ValueError(
-                f"Weight input_size_per_partition = "
-                f"{input_size_per_partition} is not divisible by "
-                f"group_size = {self.quant_config.group_size}."
-            )
-
-        # Check that we have at least 4 tiles horizontally in the shard
-        num_tiles_per_perm = self.quant_config.perm_len // (
-            self.quant_config.tile_size**2
-        )
-        if output_size_per_partition % num_tiles_per_perm != 0:
-            raise ValueError("Each permutation group must reside on the same gpu")
-
-        # Quantized 4Bit weights packed into Int32.
-        qweight = PackedvLLMParameter(
-            data=torch.empty(
-                input_size_per_partition // self.quant_config.tile_size,
-                output_size_per_partition
-                * self.quant_config.tile_size
-                // self.quant_config.pack_factor,
-                device="cuda",
-                dtype=torch.int32,
-            ),
-            input_dim=0,
-            output_dim=1,
-            packed_dim=1,
-            packed_factor=self.quant_config.pack_factor,
-            marlin_tile_size=self.quant_config.tile_size,
-            weight_loader=weight_loader,
-        )
-
-        # Determine if channelwise or not
-        input_groups = (
-            1
-            if self.quant_config.group_size == -1
-            else input_size_per_partition // self.quant_config.group_size
-        )
-
-        weight_scale_args = {
-            "data": torch.empty(
-                input_groups,
-                output_size_per_partition,
-                device="cuda",
-                dtype=params_dtype,
-            ),
-            "weight_loader": weight_loader,
-        }
-        if input_groups == 1:
-            scales = ChannelQuantScaleParameter(output_dim=1, **weight_scale_args)
-        else:
-            scales = GroupQuantScaleParameter(
-                output_dim=1, input_dim=0, **weight_scale_args
-            )
-
-        # Allocate workspace (Used for internal locking mechanism)
-        max_workspace_size = (
-            output_size_per_partition // self.quant_config.min_n_threads
-        ) * self.quant_config.max_parallel
-
-        workspace = BasevLLMParameter(
-            data=torch.zeros(max_workspace_size, device="cuda", dtype=torch.int),
-            weight_loader=weight_loader,
-        )
-
-        layer.register_parameter("B", qweight)
-        layer.register_parameter("s", scales)
-        layer.register_parameter("workspace", workspace)
-
-    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        # required by torch.compile
-        layer.B = torch.nn.Parameter(layer.B.data, requires_grad=False)
-        layer.s = torch.nn.Parameter(layer.s.data, requires_grad=False)
-        layer.workspace = torch.nn.Parameter(layer.workspace.data, requires_grad=False)
-
-    def apply(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        qweight = layer.B
-        scales = layer.s
-        workspace = layer.workspace
-
-        x_2d = x.view(-1, x.shape[-1])
-
-        size_m = x_2d.shape[0]
-        size_k = x_2d.shape[1]
-        size_n = scales.shape[1]
-
-        output_2d = ops.marlin_gemm(
-            x_2d, qweight, scales, workspace, size_m, size_n, size_k
-        )
-
-        output = output_2d.view(x.shape[:-1] + (output_2d.shape[1],))
-
-        if bias is not None:
-            output.add_(bias)  # In-place add
-
-        return output
 
 
 def fake_unified_apply_gptq_marlin_gemm(
@@ -1136,14 +631,25 @@ def unified_apply_gptq_marlin_gemm(
     use_fp32_reduce: bool,
     is_zp_float: bool,
 ) -> torch.Tensor:
-    quant_config = get_forward_context().quant_config
+    quant_config = get_tc_piecewise_forward_context().quant_config
     quant_type = quant_config.quant_type
-    return _dispatch_gptq_marlin_call(
-        input, weight, weight_scale, None, weight_zp, g_idx,
-        g_idx_sort_indices, workspace, quant_type,
-        size_m=input.shape[0], size_n=output_size_per_partition,
-        size_k=input_size_per_partition, use_atomic_add=use_atomic_add,
-        use_fp32_reduce=use_fp32_reduce, is_zp_float=is_zp_float,
+    return gptq_marlin_gemm(
+        input,
+        None,
+        weight,
+        weight_scale,
+        None,
+        weight_zp,
+        g_idx,
+        g_idx_sort_indices,
+        workspace,
+        quant_type,
+        size_m=input.shape[0],
+        size_n=output_size_per_partition,
+        size_k=input_size_per_partition,
+        use_atomic_add=use_atomic_add,
+        use_fp32_reduce=use_fp32_reduce,
+        is_zp_float=is_zp_float,
     )
 
 
@@ -1193,11 +699,22 @@ def unified_apply_gptq_marlin_gemm_with_wtype(
             if hasattr(st, "id") and st.id == wtype_id:
                 wtype = st
                 break
-    return _dispatch_gptq_marlin_call(
-        input, weight, weight_scale, None, weight_zp, g_idx,
-        g_idx_sort_indices, workspace, wtype,
-        size_m=input.shape[0], size_n=output_size_per_partition,
-        size_k=input_size_per_partition, is_k_full=is_k_full,
-        use_atomic_add=use_atomic_add, use_fp32_reduce=use_fp32_reduce,
+    return gptq_marlin_gemm(
+        input,
+        None,
+        weight,
+        weight_scale,
+        None,
+        weight_zp,
+        g_idx,
+        g_idx_sort_indices,
+        workspace,
+        wtype,
+        size_m=input.shape[0],
+        size_n=output_size_per_partition,
+        size_k=input_size_per_partition,
+        is_k_full=is_k_full,
+        use_atomic_add=use_atomic_add,
+        use_fp32_reduce=use_fp32_reduce,
         is_zp_float=is_zp_float,
     )

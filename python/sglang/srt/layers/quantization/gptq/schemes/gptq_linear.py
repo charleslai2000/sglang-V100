@@ -19,21 +19,20 @@ from .gptq_scheme import GPTQLinearSchemeBase
 if TYPE_CHECKING:
     from sglang.srt.layers.quantization.gptq.gptq import GPTQConfig
 
-__all__ = ["GPTQLinearScheme", "GPTQAscendLinearScheme"]
+__all__ = ["GPTQLinearScheme", "GPTQAscendLinearScheme", "GPTQXPULinearScheme"]
 
 
 class GPTQLinearScheme(GPTQLinearSchemeBase):
-    def __init__(self, quant_config: "GPTQConfig"):
+    def __init__(self, quant_config: GPTQConfig):
         self.quant_config = quant_config
         self.use_v2_format = quant_config.checkpoint_format == "gptq_v2"
         self.kernel = self._init_kernel(quant_config)
 
-    def _init_kernel(self, quant_config: "GPTQConfig"):
-        from sglang.srt.hardware_backend.gpu.quantization.gptq_kernels import (
-            GPTQLinearKernel,
+    def _init_kernel(self, quant_config: GPTQConfig):
+        raise RuntimeError(
+            "The non-Marlin GPTQ CUDA kernel has been removed. Use "
+            "quantization='gptq_marlin' (or a Marlin-compatible checkpoint) instead."
         )
-
-        return GPTQLinearKernel(quant_config)
 
     def create_weights(
         self,
@@ -64,14 +63,7 @@ class GPTQLinearScheme(GPTQLinearSchemeBase):
             if self.quant_config.group_size != -1
             else input_size
         )
-        # The SM70 shuffle GEMM accumulates each K-split partial in FP16.
-        # Activation-ordered Falcon-H1 can exceed that partial-sum range; use
-        # the existing g_idx-aware non-shuffle path, which accumulates safely.
-        self.kernel.use_shuffle = not (
-            self.quant_config.desc_act
-            and torch.cuda.is_available()
-            and torch.cuda.get_device_capability()[0] < 8
-        )
+        self.kernel.use_shuffle = True
         scale_and_zero_size = input_size // group_size
         scale_and_zero_input_dim = None
         if (
@@ -159,7 +151,7 @@ class GPTQLinearScheme(GPTQLinearSchemeBase):
 
 
 class GPTQAscendLinearScheme(GPTQLinearScheme):
-    def _init_kernel(self, quant_config: "GPTQConfig"):
+    def _init_kernel(self, quant_config: GPTQConfig):
         from sglang.srt.hardware_backend.npu.quantization.gptq_kernels import (
             GPTQLinearAscendKernel,
         )
@@ -167,12 +159,21 @@ class GPTQAscendLinearScheme(GPTQLinearScheme):
         return GPTQLinearAscendKernel(quant_config)
 
     def create_weights(self, layer: torch.nn.Module, **kwargs):
-        super().create_weights(layer=layer, **kwargs)
-        set_weight_attrs(layer.qzeros, {"pack_factor": self.quant_config.pack_factor})
-        set_weight_attrs(layer.qweight, {"pack_factor": self.quant_config.pack_factor})
-
         if self.quant_config.desc_act:
             raise ValueError(
                 "Currently, desc_act (True) is not supported by GPTQ "
                 "quantization on npu."
             )
+
+        super().create_weights(layer=layer, **kwargs)
+        set_weight_attrs(layer.qzeros, {"pack_factor": self.quant_config.pack_factor})
+        set_weight_attrs(layer.qweight, {"pack_factor": self.quant_config.pack_factor})
+
+
+class GPTQXPULinearScheme(GPTQLinearScheme):
+    def _init_kernel(self, quant_config: GPTQConfig):
+        from sglang.srt.hardware_backend.xpu.quantization.gptq_kernels import (
+            GPTQXPULinearKernel,
+        )
+
+        return GPTQXPULinearKernel(quant_config)

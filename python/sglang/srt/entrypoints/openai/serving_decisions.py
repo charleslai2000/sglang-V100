@@ -7,7 +7,6 @@ import math
 import string
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
-import jinja2
 import msgspec
 from fastapi import Request
 from fastapi.responses import ORJSONResponse
@@ -26,15 +25,10 @@ from sglang.srt.entrypoints.openai.protocol import (
     is_blank_decision_text,
 )
 from sglang.srt.entrypoints.openai.serving_base import OpenAIServingBase
-# Ported from v0.5.23: this tree keeps the chat-template client-error tuple inline
-# in serving_chat.py, so define the same tuple here instead of importing it.
-_CHAT_TEMPLATE_CLIENT_ERRORS: Tuple[type[BaseException], ...] = (
-    jinja2.TemplateError,
-    TypeError,
-)
-
+from sglang.srt.entrypoints.openai.serving_chat import _CHAT_TEMPLATE_CLIENT_ERRORS
 from sglang.srt.parser.jinja_template_utils import process_content_for_template_format
 from sglang.srt.parser.reasoning_parser import ReasoningParser
+from sglang.srt.runtime_context import get_exec
 from sglang.srt.utils import ImageData
 
 if TYPE_CHECKING:
@@ -45,8 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# (rendered prompt text, prompt token ids, label token ids, images)
-EncodedQuestion = Tuple[str, List[int], List[int], List[ImageData]]
+EncodedQuestion = Tuple[List[int], List[int], List[ImageData]]
 
 # Version of the server-owned prompt wording and answer labels.
 # Any change to a rendering /v1/decisions can produce needs a new version.
@@ -76,32 +69,6 @@ class QuestionView(msgspec.Struct, frozen=True):
     details: List[Any]
 
 
-def _probe_prompt_text_round_trip(tokenizer_manager) -> bool:
-    """Does rendering the chat template to text and re-encoding lose anything?"""
-    tokenizer = tokenizer_manager.tokenizer
-    if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
-        return True
-    probe = [{"role": "user", "content": "x"}]
-    try:
-        rendered = tokenizer.apply_chat_template(
-            probe, tokenize=False, add_generation_prompt=True, return_dict=False
-        )
-        encode_kwargs = (
-            {"add_special_tokens": False}
-            if getattr(tokenizer, "add_bos_token", False)
-            else {}
-        )
-        via_text = tokenizer.encode(rendered, **encode_kwargs)
-        via_ids = tokenizer.apply_chat_template(
-            probe, tokenize=True, add_generation_prompt=True, return_dict=False
-        )
-        return list(via_text) != list(via_ids)
-    except Exception:
-        # A template that needs kwargs this probe does not supply tells us
-        # nothing; keep the long-standing text path.
-        return False
-
-
 class OpenAIServingDecisions(OpenAIServingBase):
     """Handler for /v1/decisions requests, answered by candidate scoring without generation"""
 
@@ -112,26 +79,12 @@ class OpenAIServingDecisions(OpenAIServingBase):
         super().__init__(chat_serving.tokenizer_manager)
         # Render the way the chat route does, and refuse where it renders differently.
         self.template_manager = chat_serving.template_manager
-        # Ported from v0.5.23 onto this tree's serving architecture. The three
-        # chat-server accessors and the three decision-head configs belong to the
-        # newer runtime; absent here, fall back to the conservative behaviour:
-        # no server-wide template kwargs, no special prompt encoder, verify the
-        # full rendered prompt (no lossy-text shortcut), and no decision/joint/
-        # pointer heads (answers come from candidate scoring through /v1/score).
-        self.default_chat_template_kwargs = getattr(
-            chat_serving, "default_chat_template_kwargs", {}
-        )
-        self.chat_encoding_spec = getattr(chat_serving, "chat_encoding_spec", None)
-        # v0.5.23 keeps this probe in the chat server; compute the same flag
-        # here so the route still refuses tokenizers that cannot round-trip the
-        # rendered prompt text (e.g. mistral_common control tokens).
-        self.prompt_text_is_lossy = _probe_prompt_text_round_trip(
-            self.tokenizer_manager
-        )
-        model_config = self.tokenizer_manager.model_config
-        self.decision_config = getattr(model_config, "decision_config", None)
-        self.joint_head_config = getattr(model_config, "joint_head_config", None)
-        self.pointer_head = getattr(model_config, "pointer_head", None)
+        self.default_chat_template_kwargs = chat_serving.default_chat_template_kwargs
+        self.chat_encoding_spec = chat_serving.chat_encoding_spec
+        self.prompt_text_is_lossy = chat_serving._prompt_text_round_trip_is_lossy
+        self.decision_config = self.tokenizer_manager.model_config.decision_config
+        self.joint_head_config = self.tokenizer_manager.model_config.joint_head_config
+        self.pointer_head = self.tokenizer_manager.model_config.pointer_head
         tokenizer = self.tokenizer_manager.tokenizer
         # Other tokenizers skip the shortcut in _encode_labels and check the full prompt.
         self.added_tokens = (
@@ -153,10 +106,9 @@ class OpenAIServingDecisions(OpenAIServingBase):
         self.reasoning_toggle = config.toggle_param if config is not None else None
         if parser is not None:
             try:
-                # v0.5.23 passes the tokenizer so detectors can read special
-                # tokens; this tree's ReasoningParser takes only the model type,
-                # which is enough for the think-block markers used here.
-                detector = ReasoningParser(model_type=parser).detector
+                detector = ReasoningParser(
+                    model_type=parser, tokenizer=tokenizer
+                ).detector
             except ValueError as e:
                 logger.warning(
                     "No reasoning block check for %s with parser '%s': %s",
@@ -224,14 +176,9 @@ class OpenAIServingDecisions(OpenAIServingBase):
                 "this server uses the built-in chat template "
                 f"{self.template_manager.chat_template_name!r}"
             )
-        # Ported from v0.5.23: `get_exec()` is a newer runtime-context accessor
-        # that this tree does not have; the two guards read the same resolved
-        # flags from the serving object's server_args.
-        server_args = self.tokenizer_manager.server_args
-        if getattr(server_args, "enable_mis", False):
+        if get_exec().features.enable_mis:
             return f"{route} does not support --enable-mis"
-        dllm = getattr(server_args, "dllm_algorithm", None)
-        if dllm is not None:
+        if get_exec().dllm.dllm_algorithm is not None:
             return (
                 f"{route} does not support diffusion language models "
                 "served with --dllm-algorithm"
@@ -412,7 +359,7 @@ class OpenAIServingDecisions(OpenAIServingBase):
             labels=labels,
             added_tokens=self.added_tokens,
         )
-        return prompt, prompt_ids, label_ids, image_data
+        return prompt_ids, label_ids, image_data
 
     def _apply_chat_template(
         self,
@@ -454,27 +401,17 @@ class OpenAIServingDecisions(OpenAIServingBase):
         temperature: float = 1.0,
     ):
         """Encode every question, then score them all in one call."""
-        texts, prompts, label_token_ids, image_data = await _encode_all(adapted_request)
-        if any(image_data):
-            raise ValueError(f"{self.route} does not support images on this server")
-        # v0.5.23 asks the scoring API for `return_token_logprobs`; this tree's
-        # scoring API returns per-label probabilities (apply_softmax=False), so
-        # take their log here. That keeps upstream's semantics: temperature
-        # scales the option probabilities only, label_mass stays natural.
+        prompts, label_token_ids, image_data = await _encode_all(adapted_request)
         result = await self.tokenizer_manager.score_prompts(
-            prompts=texts,
+            prompts=prompts,
             label_token_ids=label_token_ids,
-            apply_softmax=False,
+            apply_softmax=True,
             request=raw_request,
+            temperature=temperature,
+            return_token_logprobs=True,
+            image_data=image_data if any(image_data) else None,
         )
-        probabilities_raw = result.scores
-        token_logprobs = [
-            [math.log(p) if p > 0.0 else float("-inf") for p in row]
-            for row in probabilities_raw
-        ]
-        probabilities = [_softmax_with_temperature(row, temperature)
-                         for row in token_logprobs]
-        return prompts, label_token_ids, probabilities, token_logprobs, result.prompt_tokens
+        return prompts, label_token_ids, result
 
     async def _handle_non_streaming_request(
         self,
@@ -482,13 +419,7 @@ class OpenAIServingDecisions(OpenAIServingBase):
         request: DecisionRequest,
         raw_request: Request,
     ) -> ORJSONResponse:
-        (
-            prompts,
-            label_token_ids,
-            probabilities,
-            token_logprobs,
-            prompt_tokens,
-        ) = await self._score(
+        prompts, label_token_ids, result = await self._score(
             adapted_request=adapted_request,
             raw_request=raw_request,
             temperature=request.temperature,
@@ -498,8 +429,8 @@ class OpenAIServingDecisions(OpenAIServingBase):
             answer = _build_answer(
                 question=question,
                 view=_decision_view(question),
-                probabilities=probabilities[i],
-                token_logprobs=token_logprobs[i],
+                probabilities=result.scores[i],
+                token_logprobs=result.token_logprobs[i],
             )
             if request.return_prompt_token_ids:
                 answer.prompt_token_ids = prompts[i]
@@ -510,8 +441,8 @@ class OpenAIServingDecisions(OpenAIServingBase):
             prompt_format_version=PROMPT_FORMAT_VERSION,
             answers=answers,
             usage=UsageInfo(
-                prompt_tokens=prompt_tokens,
-                total_tokens=prompt_tokens,
+                prompt_tokens=result.prompt_tokens,
+                total_tokens=result.prompt_tokens,
             ),
         )
         return ORJSONResponse(content=response.model_dump(exclude_none=True))
@@ -527,17 +458,16 @@ def render_text(value: Optional[DecisionText]) -> str:
 
 async def _encode_all(
     encoded: Iterator[EncodedQuestion],
-) -> Tuple[List[str], List[List[int]], List[List[int]], List[List[ImageData]]]:
-    """Collect prompt text and label ids, letting other requests run between questions."""
-    texts, prompts, label_token_ids, image_data = [], [], [], []
-    for text, prompt_ids, label_ids, images in encoded:
-        texts.append(text)
+) -> Tuple[List[List[int]], List[List[int]], List[List[ImageData]]]:
+    """Collect prompt and label ids, letting other requests run between questions."""
+    prompts, label_token_ids, image_data = [], [], []
+    for prompt_ids, label_ids, images in encoded:
         prompts.append(prompt_ids)
         label_token_ids.append(label_ids)
         image_data.append(images)
         # Each question renders and tokenizes the whole input on the event loop.
         await asyncio.sleep(0)
-    return texts, prompts, label_token_ids, image_data
+    return prompts, label_token_ids, image_data
 
 
 def _has_media_marker(
@@ -679,17 +609,6 @@ def _encode_labels(
 
 def label_mass(token_logprobs: List[float]) -> float:
     return math.fsum(math.exp(logprob) for logprob in token_logprobs)
-
-
-def _softmax_with_temperature(values: List[float], temperature: float) -> List[float]:
-    """Softmax over label logprobs with an optional temperature."""
-    scaled = [(-1e30 if math.isinf(v) and v < 0 else v) / temperature for v in values]
-    peak = max(scaled)
-    exps = [math.exp(v - peak) for v in scaled]
-    total = math.fsum(exps)
-    if total <= 0:
-        return [0.0 for _ in values]
-    return [e / total for e in exps]
 
 
 def _build_answer(

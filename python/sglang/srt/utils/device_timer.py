@@ -1,94 +1,94 @@
 from collections import deque
-import logging
-import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from typing import Callable, Deque, Dict, List, Optional
+from typing import Callable, Deque, Dict, List, Optional, Protocol
 
 import torch
 
 
-logger = logging.getLogger(__name__)
+def device_timer_ctx(timer: Optional["DeviceTimer"], category: str):
+    """Timing context for one forward segment; no-op when the timer is absent.
+
+    A segment that skips this stays out of the fwd_occupancy numerator while
+    still counting in its wall-clock denominator, i.e. reads as GPU idle.
+    """
+    if timer is None:
+        return nullcontext()
+    return timer.wrap(metadata={"category": category})
+
+
+class TimingObserver(Protocol):
+    """Optional consumer of existing intervals; no timing or publication policy."""
+
+    def on_interval_start(self, interval: "_TimingInterval") -> None: ...
+
+    def on_interval_ready(self, interval: "_TimingInterval") -> None: ...
 
 
 class DeviceTimer:
-    def __init__(self, reporter: Callable):
+    def __init__(self, reporter: Optional[Callable] = None):
         self._intervals: Deque[_TimingInterval] = deque()
-        self._reporters: List[Callable] = [reporter]
-        self._next_timer_key = 0
-        self._accepting = True
-        self._closed = False
-        self._owners = set()
-
-    def add_reporter(self, reporter: Callable):
-        if self._closed:
-            raise RuntimeError("Cannot attach reporter to a closed DeviceTimer")
-        if reporter not in self._reporters:
-            self._reporters.append(reporter)
-
-    def register_owner(self, owner: object) -> None:
-        if self._closed:
-            raise RuntimeError("Cannot register owner on a closed DeviceTimer")
-        self._owners.add(id(owner))
-
-    def release_owner(self, owner: object, timeout: float = 1.0) -> Optional[int]:
-        self._owners.discard(id(owner))
-        if self._owners:
-            return None
-        return self.shutdown(timeout=timeout)
+        self._reporters: List[Callable] = [] if reporter is None else [reporter]
+        self._in_wrap = False
+        self._observer: Optional[TimingObserver] = None
 
     @contextmanager
-    def wrap(self, metadata: Dict):
-        if not self._accepting:
-            yield
-            return
-        # Keep the CUDA event interval's host-clock brackets and a stable key so
-        # the asynchronous completion can be joined to its scheduled forward.
-        metadata = dict(metadata)
-        metadata.setdefault("timer_key", self._next_timer_key)
-        self._next_timer_key += 1
-        metadata.setdefault("timer_start_host_ns", time.monotonic_ns())
-        interval = _TimingInterval.create()
-        self._intervals.append(interval)
+    def capture(self, observer: TimingObserver):
+        """Observe intervals created in this scope, including later completion."""
+        assert self._observer is None, "DeviceTimer.capture is not re-entrant"
+        self._observer = observer
         try:
             yield
         finally:
-            metadata.setdefault("timer_end_host_ns", time.monotonic_ns())
+            self._observer = None
+
+    def add_reporter(self, reporter: Callable):
+        self._reporters.append(reporter)
+
+    def is_active(self) -> bool:
+        """Observe whether any timed interval has started but not completed.
+
+        This is a nonblocking snapshot, not a GPU completion timestamp or proof
+        of continuous kernel execution. Reuse the existing forward events.
+        """
+        for interval in self._intervals:
+            if interval.is_active():
+                return True
+        return False
+
+    @contextmanager
+    def wrap(self, metadata: Dict):
+        # Not re-entrant: a nested wrap would end the wrong interval and leave
+        # an un-ended one at the head of the queue for _report() to trip over.
+        assert not self._in_wrap, "DeviceTimer.wrap is not re-entrant"
+        interval = _TimingInterval.create(track_stream=self._observer is not None)
+        interval.observer = self._observer
+        if interval.observer is not None:
+            interval.observer.on_interval_start(interval)
+        self._intervals.append(interval)
+        self._in_wrap = True
+        try:
+            yield
+        finally:
+            self._in_wrap = False
             interval.end(metadata=metadata)
             self._report()
 
     def _report(self):
-        if self._closed:
-            return
         while len(self._intervals) > 0:
             interval = self._intervals[0]
-            if not interval.end_event.query():
+            if not interval.is_complete():
                 break
 
             self._intervals.popleft()
-            elapsed = interval.elapsed_time() / 1000.0
-            for reporter in self._reporters:
-                reporter(t=elapsed, **interval.metadata)
-
-    def shutdown(self, timeout: float = 1.0) -> int:
-        """Stop accepting intervals and nonblockingly drain completed events."""
-        self._accepting = False
-        deadline = time.monotonic() + max(0.0, timeout)
-        while self._intervals and time.monotonic() < deadline:
-            before = len(self._intervals)
-            self._report()
-            if len(self._intervals) == before:
-                time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
-        dropped = len(self._intervals)
-        if dropped:
-            logger.warning(
-                "DeviceTimer shutdown dropped %d incomplete CUDA event intervals",
-                dropped,
-            )
-            self._intervals.clear()
-        self._closed = True
-        self._owners.clear()
-        return dropped
+            if self._reporters:
+                elapsed = interval.elapsed_time() / 1000.0
+                for reporter in self._reporters:
+                    reporter(t=elapsed, **interval.metadata)
+            if interval.observer is not None:
+                # Observers can retain intervals; break the back-reference first.
+                observer, interval.observer = interval.observer, None
+                observer.on_interval_ready(interval)
 
 
 class GapTimer(DeviceTimer):
@@ -105,9 +105,6 @@ class GapTimer(DeviceTimer):
 
     @contextmanager
     def wrap(self, metadata: Dict):
-        if not self._accepting:
-            yield
-            return
         if self._pending is not None:
             self._pending.end(metadata=metadata)
             self._intervals.append(self._pending)
@@ -118,11 +115,6 @@ class GapTimer(DeviceTimer):
         finally:
             self._pending = _TimingInterval.create()
 
-    def shutdown(self, timeout: float = 1.0) -> int:
-        self._accepting = False
-        self._pending = None
-        return super().shutdown(timeout)
-
     def cancel(self):
         """Discard a pending gap (e.g. server went idle)."""
         self._pending = None
@@ -130,18 +122,39 @@ class GapTimer(DeviceTimer):
 
 @dataclass
 class _TimingInterval:
-    start_event: torch.cuda.Event
-    end_event: Optional[torch.cuda.Event] = None
+    start_event: torch.Event
+    end_event: Optional[torch.Event] = None
     metadata: Optional[Dict] = None
+    observer: Optional[TimingObserver] = None
+    stream: Optional[torch.Stream] = None
+    _started: bool = False
+    _completed: bool = False
+
+    def is_complete(self) -> bool:
+        # Once observed, the end event stays complete; avoid polling it again.
+        if not self._completed and self.end_event is not None:
+            self._completed = self.end_event.query()
+        return self._completed
+
+    def is_active(self) -> bool:
+        if self.is_complete():
+            return False
+        # Once observed, an event stays complete; avoid polling its start again.
+        if not self._started:
+            self._started = self.start_event.query()
+        return self._started
 
     @staticmethod
-    def create():
-        start_event = torch.cuda.Event(enable_timing=True)
+    def create(track_stream: bool = False):
+        device_module = torch.get_device_module()
+        stream = device_module.current_stream() if track_stream else None
+        start_event = device_module.Event(enable_timing=True)
         start_event.record()
-        return _TimingInterval(start_event=start_event)
+        return _TimingInterval(start_event=start_event, stream=stream)
 
     def end(self, metadata: Dict):
-        end_event = torch.cuda.Event(enable_timing=True)
+        device_module = torch.get_device_module()
+        end_event = device_module.Event(enable_timing=True)
         end_event.record()
 
         assert self.end_event is None

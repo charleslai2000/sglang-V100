@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import functools
+import inspect
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
     MoeRunnerConfig,
@@ -16,7 +20,9 @@ from sglang.srt.layers.moe.moe_runner.base import (
     register_pre_permute,
 )
 from sglang.srt.layers.moe.utils import MoeRunnerBackend
-from sglang.srt.utils import get_int_env_var
+from sglang.srt.utils import get_bool_env_var, is_gfx95_supported
+
+_SMALLM_MOE_ON = envs.SGLANG_ROCM_SMALLM_MOE.get()
 
 if TYPE_CHECKING:
     from sglang.srt.layers.moe.token_dispatcher.base import CombineInput
@@ -32,6 +38,11 @@ if TYPE_CHECKING:
         StandardCombineInput,
         StandardDispatchOutput,
     )
+
+
+logger = logging.getLogger(__name__)
+
+_MOE_SORTING_DISPATCH_POLICY = envs.SGLANG_AITER_MOE_SORTING_DISPATCH_POLICY.get()
 
 
 class AiterQuantType(str, Enum):
@@ -57,6 +68,9 @@ class AiterMoeQuantInfo(MoeQuantInfo):
     hidden_pad: int = 0
     intermediate_pad: int = 0
     swiglu_limit: float = 0.0
+    # Quantize the activations of MXFP4 experts to MXFP8 at any token count
+    fp8_activations: bool = False
+    fused_moe_kwargs: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -73,6 +87,8 @@ class AiterRunnerInput(RunnerInput):
     # Mori-only fused_moe kwargs.
     num_local_tokens: Optional[torch.Tensor] = None
     output_dtype: Optional[torch.dtype] = None
+    # Optional MORI EPv2 combine staging view for fused_moe output.
+    output: Optional[torch.Tensor] = None
 
     @property
     def runner_backend(self) -> MoeRunnerBackend:
@@ -88,13 +104,39 @@ class AiterRunnerOutput(RunnerOutput):
         return MoeRunnerBackend.AITER
 
 
-_AITER_ACTIVATIONS = {"silu": "Silu", "swiglu": "Swiglu"}
+_AITER_ACTIVATIONS = {
+    "silu": "Silu",
+    "swiglu": "Swiglu",
+    "situ": "Situv2",
+}
 
 
-def _aiter_activation(activation: str):
+# aiter's ActivationType.Swiglu is SwiGLU-OAI with alpha and the (up + beta) bias baked in
+_AITER_SWIGLU_OAI_ALPHA = 1.702
+_AITER_SWIGLU_OAI_BETA = 1.0
+
+
+def aiter_swiglu_oai_limit(config: MoeRunnerConfig) -> Optional[float]:
+    """Return the clamp limit for matching SwiGLU-OAI configs on gfx95."""
+    if not is_gfx95_supported():
+        return None
+    if config.activation != "silu" or not config.is_gated:
+        return None
+    if config.gemm1_alpha != _AITER_SWIGLU_OAI_ALPHA:
+        return None
+    if config.gemm1_beta not in (None, _AITER_SWIGLU_OAI_BETA):
+        return None
+    if config.gemm1_clamp_limit is None:
+        return None
+    return float(config.gemm1_clamp_limit)
+
+
+def _aiter_activation(config: MoeRunnerConfig):
     from aiter import ActivationType
 
-    return getattr(ActivationType, _AITER_ACTIVATIONS.get(activation, "Gelu"))
+    if aiter_swiglu_oai_limit(config) is not None:
+        return ActivationType.Swiglu
+    return getattr(ActivationType, _AITER_ACTIVATIONS.get(config.activation, "Gelu"))
 
 
 def _aiter_quant_type(quant_type: AiterQuantType):
@@ -103,7 +145,35 @@ def _aiter_quant_type(quant_type: AiterQuantType):
     return getattr(QuantType, quant_type.value)
 
 
+@functools.cache
+def _aiter_fused_moe_supports_no_combine() -> bool:
+    """Probe whether the installed aiter.fused_moe accepts a `no_combine` kwarg.
+
+    Older wheels don't expose it, so feature-detect once and forward
+    conditionally, matching the existing `**extra` conditional-kwarg pattern
+    used for `num_local_tokens` / `dtype`.
+    """
+    from aiter.fused_moe import fused_moe
+
+    return "no_combine" in inspect.signature(fused_moe).parameters
+
+
+@functools.cache
+def _aiter_fused_moe_supports_output() -> bool:
+    from aiter.fused_moe import fused_moe
+
+    return "output" in inspect.signature(fused_moe).parameters
+
+
 class AiterRunnerCore(MoeRunnerCore):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from sglang.kernels.ops.moe.moe_sorting_small import (
+            apply_aiter_small_moe_sort_patch,
+        )
+
+        apply_aiter_small_moe_sort_patch()
+
     def run(
         self,
         runner_input: AiterRunnerInput,
@@ -111,13 +181,25 @@ class AiterRunnerCore(MoeRunnerCore):
         running_state: dict,
         hooks: Optional[Any] = None,
     ) -> AiterRunnerOutput:
-        assert not self.config.no_combine, "no_combine=True is not supported by AITER"
+        if self.config.no_combine and not _aiter_fused_moe_supports_no_combine():
+            raise NotImplementedError(
+                "no_combine=True requested but the installed aiter.fused_moe does "
+                "not accept a `no_combine` kwarg. Install an aiter build that "
+                "supports fused_moe no_combine output."
+            )
 
         if runner_input.hidden_states.shape[0] == 0:
+            if self.config.no_combine:
+                topk = runner_input.topk_ids.shape[-1]
+                hidden_size = runner_input.hidden_states.shape[-1]
+                return AiterRunnerOutput(
+                    hidden_states=runner_input.hidden_states.new_empty(
+                        (0, topk, hidden_size)
+                    )
+                )
             return AiterRunnerOutput(hidden_states=runner_input.hidden_states)
 
         from aiter.fused_moe import fused_moe
-        from aiter.ops.flydsl.moe_common import GateMode
 
         a1_scale = (
             runner_input.a1_scale
@@ -125,14 +207,111 @@ class AiterRunnerCore(MoeRunnerCore):
             else quant_info.a13_scale
         )
 
+        is_gfx95 = is_gfx95_supported()
         extra: dict = {}
+        if quant_info.fused_moe_kwargs:
+            extra.update(quant_info.fused_moe_kwargs)
         if runner_input.num_local_tokens is not None:
             extra["num_local_tokens"] = runner_input.num_local_tokens
         if runner_input.output_dtype is not None:
             extra["dtype"] = runner_input.output_dtype
-        if quant_info.swiglu_limit > 0:
-            extra["gate_mode"] = GateMode.INTERLEAVE.value
+        if self.config.activation == "situ":
+            from aiter.ops.flydsl.moe_common import GateMode
+
+            extra["gate_mode"] = GateMode.SEPARATED.value
+            if self.config.gemm1_alpha is not None:
+                extra["beta"] = float(self.config.gemm1_alpha)
+            if self.config.gemm1_clamp_limit is not None:
+                extra["linear_beta"] = float(self.config.gemm1_clamp_limit)
+        elif is_gfx95 and quant_info.swiglu_limit > 0 and "gate_mode" in extra:
             extra["swiglu_limit"] = quant_info.swiglu_limit
+        elif quant_info.swiglu_limit > 0:
+            # GateMode is only needed for the gpt-oss MXFP4 swiglu_limit path.
+            # Import lazily so models that don't use it (e.g. DeepSeek-V3 fp8,
+            # swiglu_limit==0) still run on aiter builds where this module
+            # lives elsewhere / is absent.
+            from aiter.ops.flydsl.moe_common import GateMode
+
+            # a gate_mode from fused_moe_kwargs wins; else gfx95 honors the weight layout,
+            # and SGLANG_USE_AITER_MOE_GU_ITLV=0 selects SEPARATED (gpt-oss MXFP4 layout)
+            extra.setdefault(
+                "gate_mode",
+                (
+                    GateMode.INTERLEAVE.value
+                    if (not is_gfx95 or self.config.gate_up_interleaved)
+                    and envs.SGLANG_USE_AITER_MOE_GU_ITLV.get()
+                    else GateMode.SEPARATED.value
+                ),
+            )
+            extra["swiglu_limit"] = quant_info.swiglu_limit
+        if self.config.no_combine:
+            extra["no_combine"] = True
+        elif (
+            runner_input.output is not None
+            and "output" not in extra
+            and extra.get("stage2_scatter") is None
+            and _aiter_fused_moe_supports_output()
+        ):
+            # MORI EPv2 skips staging when this exact arena view is returned. Older
+            # AITER versions, no_combine and stage2_scatter keep their old path.
+            extra["output"] = runner_input.output
+        extra["moe_sorting_dispatch_policy"] = _MOE_SORTING_DISPATCH_POLICY
+
+        # gfx950 small-M MXFP4 kernel (on by default, SGLANG_ROCM_SMALLM_MOE=0 disables): same layouts as aiter, bf16 activations.
+        if (
+            _SMALLM_MOE_ON
+            and quant_info.w13_weight.element_size() == 1
+            and not quant_info.fp8_activations
+        ):
+            from sglang.kernels.ops.moe import smallm_moe_gfx950 as _smallm
+
+            try:
+                if (
+                    _smallm.smallm_moe_supported(
+                        runner_input.hidden_states,
+                        quant_info.w13_weight,
+                        quant_info.w2_weight,
+                        runner_input.topk_ids,
+                        quant_info.expert_mask,
+                        quant_info.doweight_stage1,
+                        self.config.activation == "silu",
+                        quant_info.b13 is not None or quant_info.b2 is not None,
+                        a1_scale,
+                        quant_info.w13_scale,
+                        quant_info.w2_scale,
+                    )
+                    and not extra.get("no_combine")
+                    and runner_input.num_local_tokens is None
+                ):
+                    out = _smallm.smallm_moe_fwd(
+                        runner_input.hidden_states,
+                        quant_info.w13_weight,
+                        quant_info.w2_weight,
+                        runner_input.topk_weights,
+                        runner_input.topk_ids,
+                        quant_info.w13_scale,
+                        quant_info.w2_scale,
+                    )
+                    if out is not None:
+                        return AiterRunnerOutput(hidden_states=out)
+            except _smallm.SmallMMoeUnavailable:
+                pass
+
+        if (
+            quant_info.fp8_activations
+            and is_gfx95
+            and runner_input.hidden_states.dtype == torch.bfloat16
+        ):
+            from aiter import dtypes
+            from aiter.ops.flydsl.moe_common import GateMode
+
+            # aiter's A8W4 kernels take interleaved gate/up rows only
+            if extra.get("gate_mode") == GateMode.INTERLEAVE.value:
+                extra.setdefault("quant_dtype_a", dtypes.fp8)
+
+        activation = extra.pop("activation", None) if is_gfx95 else None
+        if activation is None:
+            activation = _aiter_activation(self.config)
 
         output = fused_moe(
             hidden_states=runner_input.hidden_states,
@@ -141,7 +320,7 @@ class AiterRunnerCore(MoeRunnerCore):
             topk_weight=runner_input.topk_weights,
             topk_ids=runner_input.topk_ids,
             quant_type=_aiter_quant_type(runner_input.quant_type),
-            activation=_aiter_activation(self.config.activation),
+            activation=activation,
             w1_scale=quant_info.w13_scale,
             w2_scale=quant_info.w2_scale,
             a1_scale=a1_scale,
@@ -179,9 +358,9 @@ def pre_permute_standard_to_aiter(
 
     if runner_config.apply_router_weight_on_input and not quant_info.doweight_stage1:
         # Pre-scale at the Python level for kernels that don't honor doweight_stage1.
-        assert (
-            topk_weights.dim() == 2 and topk_weights.shape[-1] == 1
-        ), "apply_router_weight_on_input requires topk=1"
+        assert topk_weights.dim() == 2 and topk_weights.shape[-1] == 1, (
+            "apply_router_weight_on_input requires topk=1"
+        )
         hidden_states = hidden_states * topk_weights.to(hidden_states.dtype)
         topk_weights = torch.ones_like(topk_weights)
 
@@ -194,8 +373,8 @@ def pre_permute_standard_to_aiter(
 
 
 def _is_mori_dispatch_output(dispatch_output: Any) -> bool:
-    # MoriEP{Normal,LL}DispatchOutput carry the post-mori-permute origin_topk_*
-    # tensors that the standard DeepEP outputs lack.
+    # MORI EP dispatch outputs carry the origin_topk_* tensors for combine,
+    # which the standard DeepEP outputs lack.
     return hasattr(dispatch_output, "origin_topk_ids")
 
 
@@ -248,25 +427,30 @@ def _pre_permute_deepep_to_aiter(
     a1_scale: Optional[torch.Tensor] = None
     num_local_tokens: Optional[torch.Tensor] = None
     output_dtype: Optional[torch.dtype] = None
+    output: Optional[torch.Tensor] = None
     quant_type = quant_info.quant_type
 
     if is_mori:
-        from sglang.srt.layers.moe.rocm_moe_utils import upscale, upscale_mxfp4
+        from sglang.kernels.ops.quantization.rocm_upscale import upscale, upscale_mxfp4
 
         a1_scale = dispatch_output.hidden_states_scale
         num_local_tokens = dispatch_output.num_recv_tokens_per_expert
         output_dtype = dispatch_output.out_dtype
+        output = getattr(dispatch_output, "expert_output", None)
+        mori_max = dispatch_output.recv_cap
 
-        # Truncate dispatch tensors to the configured cap; mori combine only
+        # Truncate dispatch tensors to the configured cap; MORI EP combine only
         # reads [0, totalRecvTokenNum), so the truncated result needs no
-        # padding back.
-        mori_max = get_int_env_var("SGLANG_MORI_MOE_MAX_INPUT_TOKENS", 0)
-        if mori_max > 0:
+        # padding back. Slice the optional EPv2 output to the same row count,
+        # retaining the physical arena and routing stride.
+        if 0 < mori_max < hidden_states.shape[0]:
             hidden_states = hidden_states[:mori_max]
             if a1_scale is not None:
                 a1_scale = a1_scale[:mori_max]
             topk_ids = topk_ids[:mori_max]
             topk_weights = topk_weights[:mori_max]
+            if output is not None:
+                output = output[:mori_max]
 
         # Upscale dispatched activations when there is no AITER kernel for the
         # weight/activation dtype pair.
@@ -278,10 +462,39 @@ def _pre_permute_deepep_to_aiter(
         is_w4a4 = weight_quant == AiterQuantType.PER_1X32
         is_fp4_dispatch = hidden_states.dtype == torch.float4_e2m1fn_x2
 
-        if is_w4a4 and a1_scale is not None and not is_fp4_dispatch:
+        # AITER fused_moe Clamped-SwiGLU is dispatched with
+        # gate_mode=INTERLEAVE, for which AITER picks a bf16/fp8 `q_dtype_a`
+        # Refer to https://github.com/ROCm/aiter/blob/a2617c366dc7271a1662ecda2023d19f6ccefcec/aiter/fused_moe.py#L406-L412
+        swiglu_interleave = quant_info.swiglu_limit > 0 and get_bool_env_var(
+            "SGLANG_USE_AITER_MOE_GU_ITLV", "true"
+        )
+
+        # MXFP8 dispatch already carries fp8 data with group-32 e8m0 scales,
+        # which is what per_1x32 wants, so hand it straight to fused_moe. Only
+        # fp8 dispatch's group-128/fp32 scales need the dequant round trip; it is
+        # distinguishable by scale dtype (fp32 there, e8m0 here).
+        is_mx_fp8_dispatch = (
+            a1_scale is not None
+            and a1_scale.dtype == torch.float8_e8m0fnu
+            and not is_fp4_dispatch
+        )
+        if (
+            is_w4a4
+            and a1_scale is not None
+            and not is_fp4_dispatch
+            and not is_mx_fp8_dispatch
+        ):
             # W4A4 weights with FP8 dispatch: dequant FP8->BF16 first; the
             # FP4 per_1x32 path needs BF16 input.
             hidden_states = upscale(
+                hidden_states, a1_scale, num_local_tokens, output_dtype
+            )
+            a1_scale = None
+        elif is_w4a4 and is_fp4_dispatch and a1_scale is not None and swiglu_interleave:
+            # W4A4 weights + FP4 dispatch on the clamped-SwiGLU/INTERLEAVE
+            # path: AITER expects a bf16/fp8 activation here, not fp4x2.
+            # Dequant FP4->BF16 and let fused_moe re-quantize internally.
+            hidden_states = upscale_mxfp4(
                 hidden_states, a1_scale, num_local_tokens, output_dtype
             )
             a1_scale = None
@@ -324,6 +537,7 @@ def _pre_permute_deepep_to_aiter(
         a1_scale=a1_scale,
         num_local_tokens=num_local_tokens,
         output_dtype=output_dtype,
+        output=output,
     )
 
 

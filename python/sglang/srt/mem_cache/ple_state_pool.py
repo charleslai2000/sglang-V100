@@ -1,11 +1,6 @@
-"""Per-request side states that live alongside a MambaPool slot.
-
-Qwen4-Exp's PLE keeps two states per request — a short-conv window and an
-N-gram token context — addressed by the request's mamba slot index. They are
-registered on the owning ``MambaPool`` via ``register_slot_state`` so every
-slot lifecycle event (deferred clear, radix COW, host offload round-trip)
-carries them along and a slot never changes owner with a stale sibling row.
-"""
+"""Per-request PLE side states (short-conv window, N-gram context),
+addressed by the request's MambaPool slot and registered on that pool,
+so every slot lifecycle event carries them along."""
 
 from __future__ import annotations
 
@@ -13,21 +8,21 @@ from contextlib import nullcontext
 from typing import Any, List, Optional, Protocol, Tuple
 
 import torch
+
 from sglang.srt.constants import GPU_MEMORY_TYPE_KV_CACHE
 from sglang.srt.mem_cache.utils import maybe_init_custom_mem_pool
 from sglang.srt.utils.torch_memory_saver_adapter import TorchMemorySaverAdapter
 
+# State layer IDs are serialized as uint32 by the disaggregation protocols.
+# Reserve the largest value for PLE's request-wide N-gram state, which is not
+# owned by any model layer.
+PLE_NGRAM_STATE_LAYER_ID = (1 << 32) - 1
+
 
 class SlotIndexedState(Protocol):
-    """Per-request state owned by a MambaPool slot but not layer-major.
-
-    Qwen4-Exp's PLE side states are addressed by the *mamba slot index*
-    (`get_ngram_indices` / `get_short_conv_indices` both forward to
-    `get_mamba_indices`), so anything that hands out, duplicates or persists a
-    slot must carry them too. Implementers own their own shapes, and every
-    method must be a no-op when the backing tensor is None so a disabled pool
-    can register safely.
-    """
+    """Per-request state addressed by MambaPool slot index,
+    carried through every slot handoff;
+    every method must be a no-op when the backing tensor is None (a disabled pool)."""
 
     def reset_slots(self, indices: torch.Tensor) -> None: ...
 
@@ -36,6 +31,8 @@ class SlotIndexedState(Protocol):
     def get_cpu_slots(self, indices: torch.Tensor) -> Any: ...
 
     def load_cpu_slots(self, data: Any, indices: torch.Tensor) -> None: ...
+
+    def iter_transfer_state_entries(self): ...
 
 
 class ShortConvPool:
@@ -56,16 +53,15 @@ class ShortConvPool:
         self.layer_map = {layer_id: i for i, layer_id in enumerate(layer_ids)}
         self.conv_state = None
         self.intermediate_conv_state = None
+        if not layer_ids or state_shape is None:
+            return
+
         self.memory_saver_adapter = TorchMemorySaverAdapter.create(
             enable=enable_memory_saver
         )
         self.enable_custom_mem_pool, self.custom_mem_pool, _ = (
             maybe_init_custom_mem_pool(device=self.device)
         )
-
-        if not layer_ids or state_shape is None:
-            return
-
         with (
             self.memory_saver_adapter.region(GPU_MEMORY_TYPE_KV_CACHE),
             (
@@ -130,6 +126,18 @@ class ShortConvPool:
             return
         self.conv_state[:, indices] = data.to(self.conv_state.device, non_blocking=True)
 
+    def iter_transfer_state_entries(self):
+        """Yield replicated per-layer state for PD transfer."""
+        if self.conv_state is None:
+            return
+        for layer_id, layer_index in self.layer_map.items():
+            yield (
+                "ple_short_conv",
+                self.conv_state[layer_index],
+                None,
+                layer_id,
+            )
+
 
 class NGramPool:
     def __init__(
@@ -149,15 +157,15 @@ class NGramPool:
         self.device = device
         self.context = None
         self.intermediate_context = None
+        if context_len <= 0:
+            return
+
         self.memory_saver_adapter = TorchMemorySaverAdapter.create(
             enable=enable_memory_saver
         )
         self.enable_custom_mem_pool, self.custom_mem_pool, _ = (
             maybe_init_custom_mem_pool(device=self.device)
         )
-        if context_len <= 0:
-            return
-
         with (
             self.memory_saver_adapter.region(GPU_MEMORY_TYPE_KV_CACHE),
             (
@@ -194,11 +202,20 @@ class NGramPool:
                 device=self.context.device, dtype=self.context.dtype
             )
 
-    def set_intermediate_context(self, context: torch.Tensor):
+    def set_intermediate_context(
+        self, context: torch.Tensor, indices: Optional[torch.Tensor] = None
+    ):
         if self.intermediate_context is not None and context.numel() > 0:
-            self.intermediate_context[: context.shape[0], : context.shape[1]].copy_(
-                context.to(device=self.context.device, dtype=self.context.dtype)
-            )
+            context = context.to(device=self.context.device, dtype=self.context.dtype)
+            if indices is None:
+                self.intermediate_context[: context.shape[0], : context.shape[1]].copy_(
+                    context
+                )
+            else:
+                self.intermediate_context[
+                    indices.to(device=self.context.device, dtype=torch.long),
+                    : context.shape[1],
+                ] = context
 
     def clear(self):
         if self.context is not None:
@@ -227,3 +244,8 @@ class NGramPool:
         self.context[indices.to(dtype=torch.long)] = data.to(
             self.context.device, non_blocking=True
         )
+
+    def iter_transfer_state_entries(self):
+        """Yield replicated request-wide N-gram history for PD transfer."""
+        if self.context is not None:
+            yield "ple_ngram", self.context, None, PLE_NGRAM_STATE_LAYER_ID

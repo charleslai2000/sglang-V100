@@ -24,9 +24,15 @@ import logging
 import queue
 import threading
 import time
+from functools import wraps
 from itertools import count
+from typing import TYPE_CHECKING, Callable, Optional
 
 import msgspec
+from msgspec.structs import replace
+
+if TYPE_CHECKING:
+    from sglang.srt.utils.device_timer import DeviceTimer
 
 # Schema version. Must match the consumer (Dynamo's ForwardPassMetrics).
 # Bump when the schema changes incompatibly.
@@ -102,10 +108,9 @@ class ForwardPassMetrics(
     """Per-iteration metrics emitted by the scheduler.
 
     One message per scheduler iteration (one per forward pass).
-    ``wall_time`` is the scheduler iteration duration in seconds, using the
-    existing v1 contract. GPU event duration is not substituted into this field.
-    An idle heartbeat (all zeros, wall_time=0) is emitted when the engine
-    transitions from active to idle.
+    ``wall_time`` is the iteration duration in seconds.
+    An idle heartbeat (all zeros, wall_time=0) is emitted when the
+    engine transitions from active to idle.
 
     Field order must match Dynamo's ``ForwardPassMetrics`` in
     ``dynamo.common.forward_pass_metrics`` — msgspec uses positional
@@ -133,10 +138,93 @@ def decode(data: bytes) -> ForwardPassMetrics:
     return _decoder.decode(data)
 
 
+class FpmTiming:
+    """First-start to last-end GPU span on one stream, including segment gaps."""
+
+    def __init__(self):
+        self.num_intervals = 0
+        self._pending = 0
+        self._sealed = False
+        self._callback = None
+        self._first_interval = None
+        self._last_interval = None
+        self._same_stream = True
+
+    def on_interval_start(self, interval):
+        self.num_intervals += 1
+        self._pending += 1
+        if self._first_interval is None:
+            self._first_interval = interval
+        elif interval.stream != self._first_interval.stream:
+            self._same_stream = False
+        self._last_interval = interval
+
+    def on_interval_ready(self, interval):
+        self._pending -= 1
+        self._notify()
+
+    def seal(self):
+        self._sealed = True
+        self._notify()
+
+    def when_ready(self, callback: Callable[[Optional[float]], None]):
+        self._callback = callback
+        self._notify()
+
+    def _notify(self):
+        if not self._sealed or self._pending or self._callback is None:
+            return
+        callback, self._callback = self._callback, None
+        if self._first_interval is None:
+            callback(0.0)
+        elif not self._same_stream:
+            callback(None)
+        else:
+            callback(
+                self._first_interval.start_event.elapsed_time(
+                    self._last_interval.end_event
+                )
+                / 1000.0
+            )
+
+    def publish_when_ready(self, metrics, publisher):
+        # Hold only immutable scalar statistics, never a live batch/request.
+        def publish(elapsed):
+            if elapsed is None:
+                logger.warning(
+                    "FPM timing spans multiple CUDA streams; skipping ambiguous span"
+                )
+                return
+            publisher.publish(replace(metrics, wall_time=elapsed))
+
+        self.when_ready(publish)
+
+
+def wrap_forward_with_fpm(forward: Callable, timer: DeviceTimer) -> Callable:
+    """Installed on the scheduler instance only when that rank enables FPM."""
+
+    @wraps(forward)
+    def timed_forward(batch, *args, **kwargs):
+        # PREBUILT can recursively dispatch an inner idle forward for DP MLP
+        # synchronization. Let that real forward own the capture and result.
+        if batch.forward_mode.is_prebuilt():
+            return forward(batch, *args, **kwargs)
+        timing = FpmTiming()
+        try:
+            with timer.capture(timing):
+                result = forward(batch, *args, **kwargs)
+        finally:
+            timing.seal()
+        result.fpm_timing = timing
+        return result
+
+    return timed_forward
+
+
 class _FpmPublisherThread:
     """Background thread that serializes and sends ForwardPassMetrics over ZMQ.
 
-    Also emits periodic heartbeats when idle.
+    Heartbeats require an explicit idle state from the scheduler.
     """
 
     SHUTDOWN_TIMEOUT: float = 1.0
@@ -155,16 +243,9 @@ class _FpmPublisherThread:
             maxsize=max_queue_size
         )
         self._seq = count()
-        self._stats_lock = threading.Lock()
-        self._stats = {
-            "published_enqueued": 0,
-            "queue_dropped": 0,
-            "sent": 0,
-            "send_dropped": 0,
-            "send_failed": 0,
-        }
         self._worker_id = worker_id
         self._dp_rank = dp_rank
+        self._idle = False
 
         self._ctx = zmq.Context()
         self._pub = self._ctx.socket(zmq.PUB)
@@ -177,24 +258,17 @@ class _FpmPublisherThread:
         )
         self._thread.start()
 
-    def publish(self, metrics: ForwardPassMetrics) -> bool:
+    def set_idle(self, idle: bool) -> None:
+        """Set whether the scheduler permits idle heartbeats."""
+        self._idle = idle
+
+    def publish(self, metrics: ForwardPassMetrics) -> None:
         if not self._running:
-            with self._stats_lock:
-                self._stats["queue_dropped"] += 1
-            return False
+            return
         try:
             self._queue.put_nowait(metrics)
         except queue.Full:
-            with self._stats_lock:
-                self._stats["queue_dropped"] += 1
-            return False
-        with self._stats_lock:
-            self._stats["published_enqueued"] += 1
-        return True
-
-    def stats_snapshot(self) -> dict[str, int]:
-        with self._stats_lock:
-            return dict(self._stats)
+            pass
 
     def shutdown(self) -> None:
         self._running = False
@@ -203,14 +277,6 @@ class _FpmPublisherThread:
         except queue.Full:
             pass
         self._thread.join(timeout=self.SHUTDOWN_TIMEOUT)
-        if self._thread.is_alive():
-            with self._stats_lock:
-                self._stats["queue_dropped"] += self._queue.qsize()
-            logger.error("FPM publisher thread did not stop before timeout")
-            return
-        with self._stats_lock:
-            logger.info("FPM publisher shutdown stats: %s", self._stats)
-            logger.info("FPM publisher shutdown queue_depth=%d", self._queue.qsize())
         try:
             self._pub.close(linger=0)
             self._ctx.term()
@@ -228,7 +294,10 @@ class _FpmPublisherThread:
                 if metrics is None:
                     break
             except queue.Empty:
-                if time.monotonic() - last_publish >= self.HEARTBEAT_INTERVAL:
+                if (
+                    self._idle
+                    and time.monotonic() - last_publish >= self.HEARTBEAT_INTERVAL
+                ):
                     metrics = ForwardPassMetrics(
                         worker_id=self._worker_id,
                         dp_rank=self._dp_rank,
@@ -243,12 +312,7 @@ class _FpmPublisherThread:
                 seq_bytes = seq.to_bytes(8, "big")
                 self._pub.send_multipart((topic, seq_bytes, payload), flags=zmq.NOBLOCK)
                 last_publish = time.monotonic()
-                with self._stats_lock:
-                    self._stats["sent"] += 1
             except zmq.Again:
-                with self._stats_lock:
-                    self._stats["send_dropped"] += 1
+                pass
             except Exception:
-                with self._stats_lock:
-                    self._stats["send_failed"] += 1
                 logger.warning("FPM publisher send failed", exc_info=True)

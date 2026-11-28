@@ -85,26 +85,6 @@ class MusaPlatformBase(Platform):
         raise NotImplementedError
 
     @classmethod
-    def get_device_name(cls, device_id: int = 0) -> str:
-        raise NotImplementedError
-
-    @classmethod
-    @lru_cache(maxsize=1)
-    def get_device_total_memory(cls, device_id: int = 0) -> int:
-        raise NotImplementedError
-
-    @classmethod
-    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
-        if enforce_eager:
-            logger.warning(
-                "To see benefits of async output processing, enable MUSA "
-                "graph. Since, enforce-eager is enabled, async output "
-                "processor cannot be used"
-            )
-            return False
-        return True
-
-    @classmethod
     def is_full_mtlink(cls, device_ids: list[int]) -> bool:
         raise NotImplementedError
 
@@ -122,7 +102,7 @@ class MusaPlatformBase(Platform):
     @classmethod
     def get_available_gpu_memory(
         cls,
-        device_id: int = 0,
+        device_id: int | None = None,
         distributed: bool = False,
         empty_cache: bool = True,
         cpu_group: Any = None,
@@ -130,8 +110,8 @@ class MusaPlatformBase(Platform):
         if empty_cache:
             torch.cuda.empty_cache()
 
-        if torch.distributed.is_initialized():
-            device_id = torch.distributed.get_rank()
+        if device_id is None:
+            device_id = torch.cuda.current_device()
 
         device_props = torch.cuda.get_device_properties(device_id)
         if device_props.is_integrated:
@@ -384,10 +364,3 @@ try:
         MusaPlatform.log_warnings()
 except ModuleNotFoundError:
     MusaPlatform.log_warnings()
-
-if __name__ == "__main__":
-    print(MusaPlatform.__name__)
-    print(MusaPlatform.get_device_name())
-    print(MusaPlatform.get_device_capability())
-    print(MusaPlatform.get_device_total_memory())
-    print(MusaPlatform.is_full_mtlink([0, 1, 2, 3, 4, 5, 6, 7]))

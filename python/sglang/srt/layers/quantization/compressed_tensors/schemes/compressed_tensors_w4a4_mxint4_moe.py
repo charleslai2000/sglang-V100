@@ -6,17 +6,21 @@ from typing import TYPE_CHECKING
 import torch
 from compressed_tensors import CompressionFormat
 
-from sglang.srt.distributed import get_moe_expert_parallel_rank, get_tp_group
 from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
 )
 from sglang.srt.layers.dp_attention import is_allocation_symmetric
 from sglang.srt.layers.moe import MoeRunnerConfig
-from sglang.srt.layers.moe.utils import RoutingMethodType, get_moe_runner_backend
+from sglang.srt.layers.moe.utils import (
+    MoeRunnerBackend,
+    RoutingMethodType,
+    get_moe_runner_backend,
+)
 from sglang.srt.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsMoEScheme,
 )
 from sglang.srt.layers.quantization.utils import replace_parameter
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import is_flashinfer_available, next_power_of_2, set_weight_attrs
 
 logger = logging.getLogger(__name__)
@@ -34,55 +38,31 @@ if TYPE_CHECKING:
         CompressedTensorsConfig,
     )
 
-def _load_mxint4_flashinfer_ops():
-    """Load SM100-only FlashInfer symbols when MXINT4 backend is selected."""
-    if not is_flashinfer_available():
-        raise RuntimeError(
-            "MXINT4 MoE requires FlashInfer with the SM100 MXINT4 API; "
-            "FlashInfer is unavailable."
-        )
+if is_flashinfer_available():
+    from flashinfer.fp4_quantization import block_scale_interleave
+    from flashinfer.fused_moe import convert_to_block_layout
+    from flashinfer.fused_moe.core import _maybe_get_cached_w3_w1_permute_indices
+
+    # The V100/SM70 runtime builds of flashinfer ship the fp4/fp8 block-scale
+    # MoE entry points but not the mxint4 ones. Keep this module importable and
+    # fail only when the scheme is actually selected.
     try:
-        from flashinfer.fp4_quantization import block_scale_interleave
-        from flashinfer.fused_moe import (
-            convert_to_block_layout,
-            trtllm_mxint4_block_scale_moe,
-        )
-        from flashinfer.fused_moe.core import (
-            _maybe_get_cached_w3_w1_permute_indices,
-            get_w2_permute_indices_with_cache,
-        )
-    except ImportError as exc:
-        raise RuntimeError(
-            "MXINT4 MoE requires the SM100 MXINT4 FlashInfer symbols "
-            "trtllm_mxint4_block_scale_moe, get_w2_permute_indices_with_cache, "
-            "and the MXINT4 block-layout helpers; install a compatible build "
-            "or select a supported MoE backend."
-        ) from exc
-    return (
-        block_scale_interleave,
-        convert_to_block_layout,
-        trtllm_mxint4_block_scale_moe,
-        _maybe_get_cached_w3_w1_permute_indices,
-        get_w2_permute_indices_with_cache,
-    )
+        from flashinfer.fused_moe import trtllm_mxint4_block_scale_moe
+    except ImportError:
+        trtllm_mxint4_block_scale_moe = None
+    try:
+        from flashinfer.fused_moe.core import get_w2_permute_indices_with_cache
+    except ImportError:
+        get_w2_permute_indices_with_cache = None
 
 
 class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
     def __init__(
-        self,
-        quant_config: CompressedTensorsConfig,
-        weight_quant: QuantizationArgs,
+        self, quant_config: CompressedTensorsConfig, weight_quant: QuantizationArgs
     ):
-        (
-            self.block_scale_interleave,
-            self.convert_to_block_layout,
-            self.trtllm_mxint4_block_scale_moe,
-            self._maybe_get_cached_w3_w1_permute_indices,
-            self.get_w2_permute_indices_with_cache,
-        ) = _load_mxint4_flashinfer_ops()
         self.quant_config = quant_config
-        # get_moe_scheme already resolved the matching per-layer scheme. Mixed
-        # precision checkpoints need not define a literal "Linear" target.
+        # Per-layer scheme already resolved by get_moe_scheme(); reuse it directly
+        # (mixed-precision MoE has no "Linear" config group to fall back on).
         config = weight_quant
         self.num_bits = config.num_bits
         self.packed_factor = 32 // config.num_bits
@@ -95,13 +75,12 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             and config.num_bits == 4
         ), "MxInt4 only supports group strategy with group size 32"
         assert config.symmetric, "Only symmetric quantization is supported for MoE"
-        assert (
-            get_moe_runner_backend().is_flashinfer_trtllm()
-        ), "MxInt4 only supports flashinfer_trtllm backend"
-        assert (
-            not config.actorder
-        ), "Actorder is not supported by flashinfer_trtllm backend"
-        self.moe_ep_rank = get_moe_expert_parallel_rank()
+        assert get_moe_runner_backend().is_flashinfer_trtllm(), (
+            "MxInt4 only supports flashinfer_trtllm backend"
+        )
+        assert not config.actorder, (
+            "Actorder is not supported by flashinfer_trtllm backend"
+        )
 
         if self.quant_config.quant_format != CompressionFormat.pack_quantized.value:
             raise ValueError(
@@ -124,9 +103,9 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        assert (
-            params_dtype == torch.bfloat16
-        ), f"Params dtype should be torch.bfloat16, but got: {params_dtype}"
+        assert params_dtype == torch.bfloat16, (
+            f"Params dtype should be torch.bfloat16, but got: {params_dtype}"
+        )
 
         extra_weight_attrs.update({"quant_method": self.strategy})
         w13_weight = torch.nn.Parameter(
@@ -230,7 +209,7 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             # 1. Reorder rows of W1 and scales for fused gated activation
             # 2. Shuffle weights and scaling factors for transposed mma output
             # for both w3_w1 and w2 weights and scale factors
-            permute_indices = self._maybe_get_cached_w3_w1_permute_indices(
+            permute_indices = _maybe_get_cached_w3_w1_permute_indices(
                 self._cache_permute_indices,
                 cur_expert_gemm1_weight,
                 epilogue_tile_m,
@@ -238,21 +217,21 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             gemm1_weights_shuffled = cur_expert_gemm1_weight[
                 permute_indices.to(gemm1_weights.device)
             ].contiguous()
-            permute_sf_indices = self._maybe_get_cached_w3_w1_permute_indices(
+            permute_sf_indices = _maybe_get_cached_w3_w1_permute_indices(
                 self._cache_permute_indices,
                 gemm1_scales[i].to(torch.bfloat16),
                 epilogue_tile_m,
                 num_elts_per_sf=32,
             )
             gemm1_scales_shuffled.append(
-                self.block_scale_interleave(
+                block_scale_interleave(
                     gemm1_scales[i]
                     .to(torch.bfloat16)[permute_sf_indices.to(gemm1_scales.device)]
                     .contiguous()
                 )
             )
 
-            permute_indices = self.get_w2_permute_indices_with_cache(
+            permute_indices = get_w2_permute_indices_with_cache(
                 self._cache_permute_indices,
                 cur_expert_gemm2_weight,
                 epilogue_tile_m,
@@ -261,14 +240,14 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
                 permute_indices.to(gemm2_weights.device)
             ].contiguous()
 
-            permute_sf_indices = self.get_w2_permute_indices_with_cache(
+            permute_sf_indices = get_w2_permute_indices_with_cache(
                 self._cache_permute_indices,
                 gemm2_scales[i].to(torch.bfloat16),
                 epilogue_tile_m,
                 num_elts_per_sf=16,
             )
             gemm2_scales_shuffled.append(
-                self.block_scale_interleave(
+                block_scale_interleave(
                     gemm2_scales[i]
                     .to(torch.bfloat16)[permute_sf_indices.to(gemm2_scales.device)]
                     .contiguous()
@@ -276,10 +255,10 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             )
 
             block_k = 128
-            gemm1_weights_shuffled = self.convert_to_block_layout(
+            gemm1_weights_shuffled = convert_to_block_layout(
                 gemm1_weights_shuffled.view(torch.uint8), block_k
             )
-            gemm2_weights_shuffled = self.convert_to_block_layout(
+            gemm2_weights_shuffled = convert_to_block_layout(
                 gemm2_weights_shuffled.view(torch.uint8), block_k
             )
 
@@ -323,6 +302,9 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
     ):
         self.moe_runner_config = moe_runner_config
 
+    def get_moe_runner_backend(self, layer):
+        return MoeRunnerBackend.FLASHINFER_TRTLLM
+
     def apply_weights(
         self,
         layer: torch.nn.Module,
@@ -330,20 +312,16 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
     ) -> CombineInput:
         from sglang.srt.layers.moe.token_dispatcher import StandardCombineInput
 
-        assert (
-            self.moe_runner_config.is_gated
-        ), "Only gated MoEs are supported for flashinfer mxint4"
+        assert self.moe_runner_config.is_gated, (
+            "Only gated MoEs are supported for flashinfer mxint4"
+        )
 
         x = dispatch_output.hidden_states
         topk_output = dispatch_output.topk_output
 
         router_logits = topk_output.router_logits
         topk_config = topk_output.topk_config
-        correction_bias = (
-            None
-            if topk_config.correction_bias is None
-            else topk_config.correction_bias.to(x.dtype)
-        )
+        correction_bias = topk_config.correction_bias
 
         local_num_experts = self.moe_runner_config.num_local_experts
         routing_method_type = layer.routing_method_type
@@ -358,7 +336,7 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
         )
 
         with use_symmetric_memory(
-            get_tp_group(), disabled=not is_allocation_symmetric()
+            get_parallel().tp_group, disabled=not is_allocation_symmetric()
         ):
             num_tokens = x.shape[0]
             hidden_size = x.shape[-1]
@@ -366,7 +344,12 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
                 num_tokens, hidden_size, dtype=torch.bfloat16, device=x.device
             )
 
-        self.trtllm_mxint4_block_scale_moe(
+        if trtllm_mxint4_block_scale_moe is None:
+            raise RuntimeError(
+                "mxint4 block-scale MoE requires a flashinfer build that provides "
+                "trtllm_mxint4_block_scale_moe; the installed SM70 build does not."
+            )
+        trtllm_mxint4_block_scale_moe(
             routing_logits=router_logits,  # float
             routing_bias=correction_bias,
             hidden_states=x,
@@ -382,7 +365,7 @@ class CompressedTensorsMxInt4MoE(CompressedTensorsMoEScheme):
             n_group=topk_config.num_expert_group,
             topk_group=topk_config.topk_group,
             intermediate_size=self.moe_runner_config.intermediate_size_per_partition,
-            local_expert_offset=self.moe_ep_rank * local_num_experts,
+            local_expert_offset=self.moe_runner_config.moe_ep_rank * local_num_experts,
             local_num_experts=local_num_experts,
             routed_scaling_factor=routed_scaling_factor,
             routing_method_type=routing_method_type,

@@ -6,62 +6,22 @@ from contextlib import ExitStack
 from typing import Optional
 
 import torch
-from sglang.srt.distributed import (
-    get_pp_group,
-    get_tensor_model_parallel_world_size,
-)
-from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_recorder
-from sglang.srt.layers.dp_attention import is_dp_attention_enabled
-from sglang.srt.layers.layernorm import GemmaRMSNorm
-from sglang.srt.layers.logits_processor import LogitsProcessor
-from sglang.srt.layers.quantization.base_config import QuantizationConfig
-from sglang.srt.layers.quantization.utils import get_dynamic_override
-from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
-from sglang.srt.model_executor.forward_batch_info import ForwardBatch
-from sglang.srt.models.qwen3_5_mtp import Qwen3_5ForCausalLMMTP
-from sglang.srt.models.qwen4_exp import Qwen4ExpModel
-from sglang.srt.server_args import get_global_server_args
-from sglang.srt.utils import add_prefix, is_npu
 from torch import nn
 from transformers import PretrainedConfig
 
+from sglang.srt.environ import envs
+from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_recorder
+from sglang.srt.layers.layernorm import GemmaRMSNorm
+from sglang.srt.layers.logits_processor import LogitsProcessor
+from sglang.srt.layers.quantization.base_config import QuantizationConfig
+from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
+from sglang.srt.model_executor.forward_batch_info import ForwardBatch
+from sglang.srt.models.qwen3_5_mtp import Qwen3_5ForCausalLMMTP, _mtp_quant_config
+from sglang.srt.models.qwen4_exp import Qwen4ExpModel
+from sglang.srt.runtime_context import get_model, get_parallel
+from sglang.srt.utils import add_prefix, is_npu
+
 logger = logging.getLogger(__name__)
-
-
-def _is_mtp_dynamically_unquantized(quant_config, prefix: str) -> bool:
-    dynamic = getattr(quant_config, "dynamic", None)
-    return bool(dynamic) and get_dynamic_override(quant_config, prefix) is False
-
-
-def _mtp_quant_config(quant_config):
-    """The quantization the MTP module itself is built with.
-
-    RadixArk's ModelOpt FP4 checkpoint excludes the complete MTP module and
-    stores it in BF16. Inferact's variant excludes the dense MTP projections
-    but provides the MTP experts in NVFP4. Preserve ModelOpt quantization for
-    the latter so the per-layer exclusion rules can select the right methods.
-    """
-    if quant_config and quant_config.get_name() == "modelopt_fp4":
-        if quant_config.is_layer_excluded("mtp.layers.0.mlp.experts"):
-            return None
-        return quant_config
-    if (
-        is_npu()
-        and get_global_server_args().speculative_draft_model_quantization is None
-    ):
-        return None
-    if quant_config and quant_config.get_name() == "quark":
-        exclude_layers = getattr(quant_config, "exclude_layers", [])
-        if any(
-            isinstance(layer, str) and layer.startswith("mtp.")
-            for layer in exclude_layers
-        ):
-            return None
-    if quant_config and _is_mtp_dynamically_unquantized(
-        quant_config, add_prefix("mtp", "")
-    ):
-        return None
-    return quant_config
 
 
 class Qwen4ExpForCausalLMMTP(Qwen3_5ForCausalLMMTP):
@@ -87,11 +47,13 @@ class Qwen4ExpForCausalLMMTP(Qwen3_5ForCausalLMMTP):
         quant_config = _mtp_quant_config(quant_config)
 
         self.config = config
-        self.tp_size = get_tensor_model_parallel_world_size()
         self.quant_config = quant_config
-        self.pp_group = get_pp_group()
+        self.pp_group = get_parallel().pp_group
         self.hidden_size = config.hidden_size
         self.hc_count = config.hc_count
+        # The draft passes the fused HC stream in the inputs_embeds position.
+        # Register the replay slot at HC width, not the token embedding width.
+        self.input_embeds_hidden_size = self.hidden_size * self.hc_count
         self._mtp_input_fusion = self._init_mtp_input_fusion(config)
 
         self.model = Qwen4ExpModel(
@@ -105,7 +67,7 @@ class Qwen4ExpForCausalLMMTP(Qwen3_5ForCausalLMMTP):
             config.hidden_size,
             quant_config=quant_config,
             prefix=add_prefix("model.shared_head.head", prefix),
-            use_attn_tp_group=is_dp_attention_enabled(),
+            use_attn_tp_group=get_parallel().enable_dp_lm_head,
         )
         self.logits_processor = LogitsProcessor(config)
 
@@ -161,8 +123,17 @@ class Qwen4ExpForCausalLMMTP(Qwen3_5ForCausalLMMTP):
         return self.fc(torch.cat((input_embeds, hidden_states), dim=-1))
 
     def _npu_quant_context(self):
-        # NPU-only quant context; the V100 fork has no NPU backend.
-        return ExitStack()
+        exit_stack = ExitStack()
+        if (
+            is_npu()
+            and self.quant_config is None
+            and get_model().quantization is not None
+        ):
+            exit_stack.enter_context(envs.SGLANG_DEEPEP_BF16_DISPATCH.override(True))
+            exit_stack.enter_context(
+                envs.DEEP_NORMAL_MODE_USE_INT8_QUANT.override(False)
+            )
+        return exit_stack
 
     def _prepare_input_embeds(
         self,
@@ -197,12 +168,16 @@ class Qwen4ExpForCausalLMMTP(Qwen3_5ForCausalLMMTP):
         if hc_hidden_states is None:
             return
 
-        # EAGLE v2 stores one hidden state per request in the future map.
-        # When draft extend emits a token-shaped HC tensor, keep only the
-        # last token per request so the overlap cache sees [bs, hidden].
-        if (
-            not forward_batch.forward_mode.is_draft_extend_v2()
-            and forward_batch.extend_seq_lens is not None
+        # The EAGLE v2 future map holds one hidden state per request;
+        # reduce a token-shaped draft-extend HC tensor to its last token per request.
+        if forward_batch.forward_mode.is_draft_extend_v2():
+            # Mirror LogitsProcessor: the graph path selects rows via
+            # spec_info.select_index and the worker no longer re-indexes them.
+            select_index = forward_batch.spec_info.select_index
+            if select_index is not None:
+                hc_hidden_states = hc_hidden_states[select_index]
+        elif (
+            forward_batch.extend_seq_lens is not None
             and hc_hidden_states.shape[0] != forward_batch.extend_seq_lens.shape[0]
         ):
             last_index = (

@@ -17,6 +17,12 @@ from sglang.multimodal_gen.configs.models.encoders.flux_2 import (
 )
 from sglang.multimodal_gen.configs.models.encoders.gemma2 import Gemma2Config
 from sglang.multimodal_gen.configs.models.encoders.gemma_3 import Gemma3Config
+from sglang.multimodal_gen.configs.models.encoders.gemma_4_unified import (
+    Gemma4UnifiedConfig,
+)
+from sglang.multimodal_gen.configs.models.encoders.ideogram import (
+    Ideogram4TextEncoderConfig,
+)
 from sglang.multimodal_gen.configs.models.encoders.llama import LlamaConfig
 from sglang.multimodal_gen.configs.models.encoders.minimax_h3_qwen3vl import (
     MiniMaxH3Qwen3VLArchConfig,
@@ -44,4 +50,6 @@ __all__ = [
     "T5Config",
     "Gemma2Config",
     "Gemma3Config",
+    "Gemma4UnifiedConfig",
+    "Ideogram4TextEncoderConfig",
 ]
