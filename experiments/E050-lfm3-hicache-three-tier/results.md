@@ -105,9 +105,13 @@ TPOT 三档不受级别影响：7.0–7.1 / 7.7 / 8.6 ms。
   （`IndexError`），已修并与 C++ 的 `logical_len > 0` 守卫对齐；修复后该文件全通过。
 - 修复后复验：以修复后的代码重启 page=256 服务，8192 前缀仍 `storage=8192, device=0, host=0`，
   greedy ids 与无缓存基准一致、logprob 偏差 1.0e-3（`e050_postfix_l3.json`）。
-- 整个 `test/registered/unit/mem_cache/` 套件在本环境仍不可作门禁：收集期若干文件缺 `nixl`/rust 扩展，
-  运行到 44% 处 core dump（与 E049 记录一致）。逐文件排查正在进行，已确认的非通过项均不 import 改动模块
-  （唯一消费者是 `mem_cache/utils.py`）。
+- 整套 `test/registered/unit/mem_cache/` 逐文件跑完（**155 个文件全覆盖**，避免整目录 core dump 的干扰）：
+  151 个文件全通过；非通过项 3 个，均与本改动无关且属环境限制——
+  `test_hicache_nixl_storage.py`（缺 `nixl`）、`test_minimax_m31_cache_transfer.py`
+  （sglang-kernel 0.4.3 缺 `kvcacheio.transfer_embedding_ranges_direct`）、
+  `test_dense_fused_draft_geometry.py::test_an_fp8_region_holds_fp8`
+  （`index_cpu` 不支持 `Float8_e4m3fn`，SM70 无 FP8）。
+  另一项 `test_mem_cache_utils.py` 的失败是回退实现的真实缺陷，已修复（见上一条）。
 
 ## 8. 已知限制
 
