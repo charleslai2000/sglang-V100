@@ -1,0 +1,35 @@
+{
+ "1024": {
+  "cached": 1024,
+  "details": {
+   "device": 0,
+   "host": 0,
+   "storage": 1024,
+   "storage_backend": "ExtentFileBackend"
+  },
+  "ttft_s": 0.382,
+  "ids_match": true
+ },
+ "4096": {
+  "cached": 4096,
+  "details": {
+   "device": 1024,
+   "host": 0,
+   "storage": 3072,
+   "storage_backend": "ExtentFileBackend"
+  },
+  "ttft_s": 0.231,
+  "ids_match": true
+ },
+ "8192": {
+  "cached": 8192,
+  "details": {
+   "device": 4096,
+   "host": 0,
+   "storage": 4096,
+   "storage_backend": "ExtentFileBackend"
+  },
+  "ttft_s": 0.356,
+  "ids_match": true
+ }
+}

@@ -1,0 +1,111 @@
+{
+ "label": "extent_native",
+ "port": 30192,
+ "pids": [
+  8882,
+  8886,
+  8903,
+  8904
+ ],
+ "lengths": [
+  {
+   "length": 1024,
+   "ttft_ms_median": 99.7,
+   "tpot_ms_median": 7.09,
+   "storage_tokens": [
+    1024,
+    1024,
+    1024
+   ],
+   "host_tokens": [
+    0,
+    0,
+    0
+   ],
+   "device_tokens": [
+    0,
+    0,
+    0
+   ],
+   "ids_match": true,
+   "io": {
+    "rchar": 15530998,
+    "read_bytes": 0,
+    "syscr": 137,
+    "wchar": 24471,
+    "write_bytes": 0,
+    "syscw": 169,
+    "cpu_ms": 360.0,
+    "disk_sectors_read": 0,
+    "disk_mib_read": 0.0
+   },
+   "read_amp": 15530998.0
+  },
+  {
+   "length": 4096,
+   "ttft_ms_median": 207.5,
+   "tpot_ms_median": 7.73,
+   "storage_tokens": [
+    4096,
+    4096,
+    4096
+   ],
+   "host_tokens": [
+    0,
+    0,
+    0
+   ],
+   "device_tokens": [
+    0,
+    0,
+    0
+   ],
+   "ids_match": true,
+   "io": {
+    "rchar": 53297157,
+    "read_bytes": 0,
+    "syscr": 141,
+    "wchar": 24201,
+    "write_bytes": 0,
+    "syscw": 169,
+    "cpu_ms": 500.0,
+    "disk_sectors_read": 0,
+    "disk_mib_read": 0.0
+   },
+   "read_amp": 53297157.0
+  },
+  {
+   "length": 8192,
+   "ttft_ms_median": 353.8,
+   "tpot_ms_median": 8.58,
+   "storage_tokens": [
+    8192,
+    8192,
+    8192
+   ],
+   "host_tokens": [
+    0,
+    0,
+    0
+   ],
+   "device_tokens": [
+    0,
+    0,
+    0
+   ],
+   "ids_match": true,
+   "io": {
+    "rchar": 103654363,
+    "read_bytes": 0,
+    "syscr": 145,
+    "wchar": 24651,
+    "write_bytes": 0,
+    "syscw": 169,
+    "cpu_ms": 710.0,
+    "disk_sectors_read": 0,
+    "disk_mib_read": 0.0
+   },
+   "read_amp": 103654363.0
+  }
+ ]
+}

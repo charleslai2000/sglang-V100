@@ -1,0 +1,47 @@
+{
+ "1024": {
+  "cached": 1024,
+  "details": {
+   "device": 1024,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "ExtentFileBackend"
+  },
+  "ids": [
+   7,
+   7,
+   7,
+   7
+  ]
+ },
+ "4096": {
+  "cached": 4096,
+  "details": {
+   "device": 4096,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "ExtentFileBackend"
+  },
+  "ids": [
+   7,
+   7,
+   7,
+   7
+  ]
+ },
+ "8192": {
+  "cached": 8192,
+  "details": {
+   "device": 8192,
+   "host": 0,
+   "storage": 0,
+   "storage_backend": "ExtentFileBackend"
+  },
+  "ids": [
+   7,
+   7,
+   7,
+   7
+  ]
+ }
+}

@@ -834,6 +834,13 @@ class Envs:
     SGLANG_HICACHE_FILE_BACKEND_ENABLE_METADATA_CACHE = EnvBool(False)
     # Positive cache TTL for filesystem metadata lookups (-1 disables positive expiration)
     SGLANG_HICACHE_FILE_BACKEND_METADATA_TTL = EnvFloat(5.0)
+    # Extent L3 backend: one preallocated sparse file + RAM index, aggregated IO.
+    SGLANG_HICACHE_EXTENT_BACKEND_STORAGE_DIR = EnvStr(None)
+    SGLANG_HICACHE_EXTENT_BACKEND_MAX_SIZE = EnvStr(None)
+    SGLANG_HICACHE_EXTENT_BACKEND_MIN_FREE_SPACE = EnvStr("0")
+    SGLANG_HICACHE_EXTENT_BACKEND_EXTENT_SIZE = EnvStr(None)
+    SGLANG_HICACHE_EXTENT_BACKEND_FILE_SIZE = EnvStr(None)
+    SGLANG_HICACHE_EXTENT_BACKEND_WAL_CHECKPOINT_BYTES = EnvStr(None)
     # Buffer mode: staged prefetches pin their device anchor from IO commit
     # to consumption so eviction cannot waste the fetch. Cap = fraction of
     # the pool the pins may hold; 0 disables pinning.

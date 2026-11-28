@@ -1,0 +1,58 @@
+{
+ "label": "extent_native",
+ "rounds": [
+  {
+   "wall_ms": 5823.0,
+   "ttft_ms": 5798.4,
+   "cached": 4096,
+   "storage": 4096,
+   "io": {
+    "rchar": 53322585,
+    "read_bytes": 0,
+    "syscr": 38,
+    "wchar": 61465351,
+    "write_bytes": 61636608,
+    "syscw": 84,
+    "cpu_ms": 5970.0
+   },
+   "ids": []
+  },
+  {
+   "wall_ms": 5831.1,
+   "ttft_ms": 5807.4,
+   "cached": 4096,
+   "storage": 4096,
+   "io": {
+    "rchar": 53322859,
+    "read_bytes": 0,
+    "syscr": 39,
+    "wchar": 61465240,
+    "write_bytes": 61665280,
+    "syscw": 82,
+    "cpu_ms": 6010.0
+   },
+   "ids": []
+  },
+  {
+   "wall_ms": 5818.3,
+   "ttft_ms": 5794.8,
+   "cached": 4096,
+   "storage": 4096,
+   "io": {
+    "rchar": 53322585,
+    "read_bytes": 0,
+    "syscr": 38,
+    "wchar": 27588656,
+    "write_bytes": 28340224,
+    "syscw": 56,
+    "cpu_ms": 5960.0
+   },
+   "ids": []
+  }
+ ],
+ "wchar_median_mib": 58.6,
+ "cpu_ms_median": 5970.0,
+ "syscw_median": 82,
+ "wall_ms_median": 5823.0,
+ "ids_stable": true
+}

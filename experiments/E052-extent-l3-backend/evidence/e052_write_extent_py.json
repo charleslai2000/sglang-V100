@@ -1,0 +1,58 @@
+{
+ "label": "extent_py",
+ "rounds": [
+  {
+   "wall_ms": 8401.2,
+   "ttft_ms": 8375.9,
+   "cached": 0,
+   "storage": 0,
+   "io": {
+    "rchar": 5798806,
+    "read_bytes": 0,
+    "syscr": 632,
+    "wchar": 92197803,
+    "write_bytes": 102612992,
+    "syscw": 122,
+    "cpu_ms": 8580.0
+   },
+   "ids": []
+  },
+  {
+   "wall_ms": 5816.4,
+   "ttft_ms": 5790.6,
+   "cached": 4096,
+   "storage": 4096,
+   "io": {
+    "rchar": 53322891,
+    "read_bytes": 0,
+    "syscr": 38,
+    "wchar": 30734698,
+    "write_bytes": 31567872,
+    "syscw": 60,
+    "cpu_ms": 5960.0
+   },
+   "ids": []
+  },
+  {
+   "wall_ms": 5812.0,
+   "ttft_ms": 5790.8,
+   "cached": 4096,
+   "storage": 4096,
+   "io": {
+    "rchar": 53322585,
+    "read_bytes": 0,
+    "syscr": 36,
+    "wchar": 27268840,
+    "write_bytes": 27418624,
+    "syscw": 52,
+    "cpu_ms": 5970.0
+   },
+   "ids": []
+  }
+ ],
+ "wchar_median_mib": 29.3,
+ "cpu_ms_median": 5970.0,
+ "syscw_median": 60,
+ "wall_ms_median": 5816.4,
+ "ids_stable": true
+}

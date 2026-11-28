@@ -2127,6 +2127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "l3-native-wal"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "pyo3",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

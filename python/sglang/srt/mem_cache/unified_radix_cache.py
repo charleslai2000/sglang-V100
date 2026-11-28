@@ -352,6 +352,7 @@ class UnifiedRadixCache(BasePrefixCache):
             "declined_unservable_prefix": 0,
             "staging_cropped": 0,
             "staging_deferred": 0,
+            "storage_reclaim_invalidated": 0,
             "wait_complete_stalled": 0,
             "revoked_insufficient": 0,
             "revoked_full_miss": 0,
@@ -3014,6 +3015,43 @@ class UnifiedRadixCache(BasePrefixCache):
                 return policy
         return default_belief_policy(hit_policy)
 
+    def _drain_reclaimed_storage_keys(self) -> None:
+        """Fold a backend-side reclaim into the existence beliefs.
+
+        The extent tier reclaims slots (watermark / circular GC) without
+        telling the tree. A belief that those pages are still stored would
+        suppress the write-back that repairs the hole, so the positive belief
+        is dropped: the cost is one redundant, idempotent write.
+        """
+        cc = self.cache_controller
+        backend = getattr(cc, "storage_backend", None) if cc is not None else None
+        drain = getattr(backend, "drain_evicted_storage_keys", None)
+        if drain is None:
+            return
+        try:
+            keys = drain()
+        except Exception:  # pragma: no cover - best-effort bookkeeping
+            logger.warning("storage reclaim drain failed", exc_info=True)
+            return
+        if not keys:
+            return
+        suffix = getattr(backend, "config_suffix", "") or ""
+        bases = []
+        for key in keys:
+            base = key[: -len(suffix)] if suffix and key.endswith(suffix) else key
+            bases.append(base)
+            # Sidecar keys are "<page hash>.<pool>"; the belief is on the hash.
+            head, sep, _tail = base.rpartition(".")
+            if sep:
+                bases.append(head)
+        dropped = self.storage_existence_cache.discard(bases)
+        self._prefetch_outcome_stats["storage_reclaim_invalidated"] += dropped
+        logger.info(
+            "HiCache extent reclaim: %d keys, %d existence beliefs invalidated",
+            len(keys),
+            dropped,
+        )
+
     def _invalidate_absent_from_hit_query(self, operation) -> None:
         """Heal each pool's beliefs beyond its rank-agreed boundary (a
         chain-page pool also learns presence up to it); a pool without a
@@ -3906,6 +3944,7 @@ class UnifiedRadixCache(BasePrefixCache):
                 log_metrics=True,
             )
         if self.buffer_pipeline is not None:
+            self._drain_reclaimed_storage_keys()
             self.buffer_pipeline.flush_pending_writes()
         if self.enable_storage_metrics and self.storage_metrics_collector is not None:
             storage_metrics = self.cache_controller.storage_backend.get_stats()

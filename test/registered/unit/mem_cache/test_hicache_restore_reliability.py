@@ -350,6 +350,66 @@ class TestStaleAnchorDiscard(unittest.TestCase):
         )
 
 
+# ---- extent reclaim -> existence beliefs ---------------------------------
+
+
+class TestExtentReclaimInvalidation(unittest.TestCase):
+    """A backend-side reclaim must clear the beliefs that would skip a rewrite."""
+
+    drain = UnifiedRadixCache._drain_reclaimed_storage_keys
+
+    def _cache(self, backend, stats=None):
+        from sglang.srt.mem_cache.buffer_mode.storage_existence_cache import (
+            StorageExistenceCache,
+        )
+
+        cache = UnifiedRadixCache.__new__(UnifiedRadixCache)
+        cache.cache_controller = types.SimpleNamespace(storage_backend=backend)
+        cache.storage_existence_cache = StorageExistenceCache()
+        cache._prefetch_outcome_stats = stats if stats is not None else {
+            "storage_reclaim_invalidated": 0
+        }
+        cache.drain = types.MethodType(
+            UnifiedRadixCache._drain_reclaimed_storage_keys, cache
+        )
+        return cache
+
+    def test_reclaimed_keys_drop_beliefs_in_every_pool(self):
+        beliefs_cache = self._cache(None)
+        beliefs_cache.storage_existence_cache.pool("kv").add(["h1", "h2"])
+        beliefs_cache.storage_existence_cache.pool("swa").add(["h2"])
+
+        backend = types.SimpleNamespace(
+            config_suffix="_m",
+            drain_evicted_storage_keys=lambda: ["h1_m", "h2.swa_m"],
+        )
+        cache = self._cache(
+            backend, {"storage_reclaim_invalidated": 0}
+        )
+        cache.storage_existence_cache = beliefs_cache.storage_existence_cache
+        cache.drain()
+
+        # h1 was KV-only, h2 was KV+SWA: both beliefs are gone everywhere.
+        self.assertFalse(cache.storage_existence_cache.pool("kv").contains("h1"))
+        self.assertFalse(cache.storage_existence_cache.pool("kv").contains("h2"))
+        self.assertFalse(cache.storage_existence_cache.pool("swa").contains("h2"))
+        self.assertEqual(cache._prefetch_outcome_stats["storage_reclaim_invalidated"], 3)
+
+    def test_backend_without_the_hook_is_a_noop(self):
+        cache = self._cache(types.SimpleNamespace())
+        cache.drain()
+        self.assertEqual(cache._prefetch_outcome_stats["storage_reclaim_invalidated"], 0)
+
+    def test_empty_drain_does_nothing(self):
+        backend = types.SimpleNamespace(
+            config_suffix="", drain_evicted_storage_keys=lambda: []
+        )
+        cache = self._cache(backend)
+        cache.storage_existence_cache.pool("kv").add(["h1"])
+        cache.drain()
+        self.assertTrue(cache.storage_existence_cache.pool("kv").contains("h1"))
+
+
 # ---- wait_complete liveness ------------------------------------------------
 
 

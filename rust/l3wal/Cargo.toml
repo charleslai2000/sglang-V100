@@ -1,0 +1,21 @@
+[package]
+name = "l3-native-wal"
+description = "GIL-free native L3 write-back seam (pwritev + WAL frame append + page lease) for the Extent L3 backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Same registration mechanism as the frozen v1.1 crates: srt/rust_extensions/
+# loader.py discovers the crate by this metadata instead of a hardcoded table.
+[package.metadata.sglang]
+python-module = "sglang.srt.rust_extensions._l3wal"
+
+[lib]
+# Artifact libl3_native_wal.so; loader.py renames it to _l3wal<EXT_SUFFIX>.
+# PyInit symbol comes from the #[pymodule] fn _l3wal below.
+name = "l3_native_wal"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true }
+libc = { workspace = true }

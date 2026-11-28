@@ -111,6 +111,26 @@ class PoolExistenceBeliefs:
             else:
                 refs[h] = n
 
+    def discard(self, hashes: Iterable[str]) -> int:
+        """Drop specific beliefs (backend reclaimed those pages). Returns the
+        number of entries actually dropped.
+
+        Clearing a positive belief is always safe: the next insert re-writes
+        the pool, which is idempotent because storage keys are content
+        addressed. Keeping it would let one stale positive suppress the
+        write-back that repairs the hole.
+        """
+        entries = self._entries
+        pop = entries.pop
+        dropped = 0
+        for h in hashes:
+            # Values are always None, so membership, not the pop result, says
+            # whether a belief was actually dropped.
+            if h in entries:
+                pop(h)
+                dropped += 1
+        return dropped
+
     def invalidate_beyond(self, hashes: Sequence[str], keep_pages: int) -> None:
         """Discard the beliefs beyond the leading ``keep_pages`` of ``hashes``;
         the next insert re-writes that span."""
@@ -138,6 +158,19 @@ class StorageExistenceCache:
         if beliefs is None:
             beliefs = self._pools[name] = PoolExistenceBeliefs(self.max_entries)
         return beliefs
+
+    def discard(self, hashes: Iterable[str]) -> int:
+        """Drop these page hashes from every pool's beliefs.
+
+        A backend-side reclaim is a *negative* authority over all pools: the
+        pool a hash belonged to is not recoverable from the storage key alone
+        (sidecar keys carry a ``.<pool>`` suffix), so every pool drops it. A
+        pool that still holds the page simply rewrites it, which is idempotent.
+        """
+        dropped = 0
+        for beliefs in self._pools.values():
+            dropped += beliefs.discard(hashes)
+        return dropped
 
     def clear(self) -> None:
         for beliefs in self._pools.values():

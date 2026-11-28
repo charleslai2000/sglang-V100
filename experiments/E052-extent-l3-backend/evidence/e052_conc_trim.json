@@ -1,0 +1,37 @@
+{
+ "label": "extent",
+ "levels": {
+  "8": [
+   {
+    "round": 0,
+    "wall_s": 1.65,
+    "decode_tok_s": 310.1,
+    "ttft_p50_ms": 1030.0,
+    "storage_hits": 0
+   },
+   {
+    "round": 1,
+    "wall_s": 1.72,
+    "decode_tok_s": 297.0,
+    "ttft_p50_ms": 788.0,
+    "storage_hits": 0
+   }
+  ],
+  "32": [
+   {
+    "round": 0,
+    "wall_s": 10.78,
+    "decode_tok_s": 189.9,
+    "ttft_p50_ms": 3134.3,
+    "storage_hits": 0
+   },
+   {
+    "round": 1,
+    "wall_s": 6.07,
+    "decode_tok_s": 337.3,
+    "ttft_p50_ms": 2484.0,
+    "storage_hits": 0
+   }
+  ]
+ }
+}

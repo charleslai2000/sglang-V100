@@ -663,6 +663,9 @@ class HiCacheController:
                     "mori",
                     "tensorcast",
                     "seaweedfs",
+                    # Extent serves v1 by reading straight into the host pool
+                    # pages get_page_buffer_meta describes (merged exact ranges).
+                    "extent",
                 ]
             ) or (
                 self.storage_backend_type == "dynamic"
