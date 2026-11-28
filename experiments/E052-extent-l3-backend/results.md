@@ -109,6 +109,10 @@ file; native ≈ Python (reads identical, as expected).
 | 4096 | extent | **964.7** | 171 | 53.3 MB | 1360 |
 | 8192 | file | 7625.7 | 8593 | 103.6 MB | 9340 |
 | 8192 | extent | **1810.9** | **207** | 103.6 MB | **2190** |
+| 8192 | extent native | 1837.5 | 211 | 103.6 MB | 2230 |
+
+(native page-1 arm: 372.1 / 988.7 / 1837.5 ms at 1K/4K/8K, i.e. within noise of
+the Python reference — the read path and its syscall count are shared.)
 
 → page 1: **4.21×** faster 8K restore, **41.5×** fewer read syscalls, **4.26×**
 less host CPU, same bytes read (`rchar` identical ⇒ read amplification ≡ 1.00
